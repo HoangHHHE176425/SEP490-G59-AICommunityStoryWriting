@@ -3,7 +3,6 @@ import { Brain } from 'lucide-react';
 import {
     addAdminBannedWord,
     createAdminAuthorAiTokenAutoGrantRule,
-    deleteAdminAuthorAiTokenAutoGrantRule,
     getAdminAuthorAiTokenAutoGrantRules,
     deleteAdminBannedWord,
     getAdminAiGenerationsDaily,
@@ -13,7 +12,6 @@ import {
     runNowAdminAuthorAiTokenAutoGrantRule,
     updateAdminAuthorAiTokenAutoGrantRule,
 } from '../../../api/admin/aiConfigApi';
-import { getUsers } from '../../../api/admin/userManagementApi';
 
 const toUtcInputString = (d) => {
     if (!(d instanceof Date)) return '';
@@ -23,6 +21,7 @@ const toUtcInputString = (d) => {
 
 const defaultToUtc = toUtcInputString(new Date());
 const defaultFromUtc = toUtcInputString(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+const defaultAutoGrantAmount = 100000;
 
 
 const formatDateTimeVi = (value) => {
@@ -112,6 +111,7 @@ const normalizeAutoGrantRule = (x) => {
         grantAmount: Number(x?.grantAmount ?? x?.GrantAmount ?? 0) || 0,
         applyToAllAuthors: !!(x?.applyToAllAuthors ?? x?.ApplyToAllAuthors),
         selectedUserIds: Array.isArray(sel) ? sel : [],
+        createdAtUtc: x?.createdAtUtc ?? x?.CreatedAtUtc ?? x?.createdAt ?? x?.CreatedAt ?? null,
         lastRunAtUtc: x?.lastRunAtUtc ?? x?.LastRunAtUtc ?? null,
     };
 };
@@ -119,20 +119,17 @@ const normalizeAutoGrantRule = (x) => {
 export function AiConfig() {
     const [bannedWordInput, setBannedWordInput] = useState('');
     const [bannedWords, setBannedWords] = useState([]);
-    const [authorAccounts, setAuthorAccounts] = useState([]);
     const [autoGrantRules, setAutoGrantRules] = useState([]);
     const [autoGrantLoading, setAutoGrantLoading] = useState(false);
     const [savingAutoGrant, setSavingAutoGrant] = useState(false);
-    const [autoGrantBusyRuleId, setAutoGrantBusyRuleId] = useState(null);
-    const [autoGrantEditingRuleId, setAutoGrantEditingRuleId] = useState('');
-    const [autoGrantAuthorFilter, setAutoGrantAuthorFilter] = useState('');
+    const [runningAutoGrantNow, setRunningAutoGrantNow] = useState(false);
+    const [applyNowConfirmOpen, setApplyNowConfirmOpen] = useState(false);
+    const [updateAmountConfirmOpen, setUpdateAmountConfirmOpen] = useState(false);
+    const [toggleConfirmOpen, setToggleConfirmOpen] = useState(false);
+    const [toggleConfirmNextEnabled, setToggleConfirmNextEnabled] = useState(true);
     const [autoGrantForm, setAutoGrantForm] = useState({
-        displayName: '',
-        periodKind: 'monthly_utc',
         grantAmount: '100000',
-        isEnabled: true,
-        applyToAllAuthors: false,
-        selectedUserIds: [],
+        nextRunAtLocal: '',
     });
 
     const [genFilter, setGenFilter] = useState({
@@ -226,24 +223,33 @@ export function AiConfig() {
     useEffect(() => {
         setSelectedUserLogPage(1);
     }, [selectedLogUserEmail]);
-    const autoGrantFilteredAuthors = useMemo(() => {
-        const q = String(autoGrantAuthorFilter || '').trim().toLowerCase();
-        if (!q) return authorAccounts || [];
-        return (authorAccounts || []).filter((u) => {
-            const hay = `${u?.id || ''} ${u?.email || ''} ${u?.nickname || ''}`.toLowerCase();
-            return hay.includes(q);
-        });
-    }, [authorAccounts, autoGrantAuthorFilter]);
     const autoGrantFormError = useMemo(() => {
-        const amount = Number(autoGrantForm.grantAmount);
+        const raw = String(autoGrantForm.grantAmount ?? '').trim();
+        // Cho phép để trống: sẽ fallback ở bước submit/update.
+        if (!raw) return '';
+        const amount = Number(raw);
         if (!Number.isInteger(amount) || amount <= 0) {
             return 'Số token cộng phải là số nguyên > 0.';
         }
-        if (!autoGrantForm.applyToAllAuthors && (!autoGrantForm.selectedUserIds || autoGrantForm.selectedUserIds.length === 0)) {
-            return 'Cần chọn ít nhất một tác giả hoặc bật "Tất cả tác giả".';
-        }
         return '';
     }, [autoGrantForm]);
+    const managedAutoGrantRule = useMemo(() => {
+        const list = Array.isArray(autoGrantRules) ? autoGrantRules : [];
+        return list[0] || null;
+    }, [autoGrantRules]);
+    const hasManagedAutoGrantRule = !!managedAutoGrantRule?.id;
+    const applyNowFormError = useMemo(() => {
+        if (hasManagedAutoGrantRule) return '';
+        const amountRaw = String(autoGrantForm.grantAmount ?? '').trim();
+        if (!amountRaw) return 'Vui lòng nhập số token cộng trước khi áp dụng ngay.';
+        const amount = Number(amountRaw);
+        if (!Number.isInteger(amount) || amount <= 0) return 'Số token cộng phải là số nguyên > 0.';
+        const nextRunRaw = String(autoGrantForm.nextRunAtLocal ?? '').trim();
+        if (!nextRunRaw) return 'Vui lòng chọn ngày chạy kế tiếp trước khi áp dụng ngay.';
+        const dt = new Date(nextRunRaw);
+        if (Number.isNaN(dt.getTime())) return 'Ngày chạy kế tiếp không hợp lệ.';
+        return '';
+    }, [hasManagedAutoGrantRule, autoGrantForm.grantAmount, autoGrantForm.nextRunAtLocal]);
 
     useEffect(() => {
         let mounted = true;
@@ -253,9 +259,8 @@ export function AiConfig() {
                 setSuccess('');
                 setLoadingConfig(true);
 
-                const [wordsResult, authorsResult] = await Promise.allSettled([
+                const [wordsResult] = await Promise.allSettled([
                     getAdminBannedWords('BannedWord'),
-                    getUsers({ page: 1, pageSize: 200, role: 'AUTHOR' }),
                 ]);
 
                 if (!mounted) return;
@@ -266,10 +271,6 @@ export function AiConfig() {
                     setBannedWords([]);
                 }
 
-                const authors = authorsResult.status === 'fulfilled' && Array.isArray(authorsResult.value?.items)
-                    ? authorsResult.value.items
-                    : [];
-                setAuthorAccounts(authors);
             } catch (e) {
                 if (!mounted) return;
                 const msg =
@@ -288,16 +289,17 @@ export function AiConfig() {
     }, []);
 
     const resetAutoGrantForm = () => {
-        setAutoGrantEditingRuleId('');
-        setAutoGrantAuthorFilter('');
         setAutoGrantForm({
-            displayName: '',
-            periodKind: 'monthly_utc',
-            grantAmount: '100000',
-            isEnabled: true,
-            applyToAllAuthors: false,
-            selectedUserIds: [],
+            grantAmount: String(defaultAutoGrantAmount),
+            nextRunAtLocal: '',
         });
+    };
+
+    const resolveGrantAmount = () => {
+        const raw = String(autoGrantForm.grantAmount ?? '').trim();
+        if (raw) return Number(raw);
+        const fallback = Number(managedAutoGrantRule?.grantAmount ?? defaultAutoGrantAmount);
+        return Number.isFinite(fallback) && fallback > 0 ? Math.trunc(fallback) : defaultAutoGrantAmount;
     };
 
     const loadAutoGrantRules = async () => {
@@ -305,7 +307,18 @@ export function AiConfig() {
             setAutoGrantLoading(true);
             const data = await getAdminAuthorAiTokenAutoGrantRules();
             const rows = pickArrayLike(data, data?.items, data?.Items, data?.data?.items, data?.Data?.Items);
-            setAutoGrantRules((rows || []).map(normalizeAutoGrantRule).filter((x) => x.id));
+            const normalized = (rows || []).map(normalizeAutoGrantRule).filter((x) => x.id);
+            setAutoGrantRules(normalized);
+            const rule = normalized[0];
+            if (rule) {
+                setAutoGrantForm({
+                    grantAmount: String(rule.grantAmount ?? 0),
+                    // Theo UX: không tự đổ ngày vào input, để admin chủ động nhập khi cần.
+                    nextRunAtLocal: '',
+                });
+            } else {
+                resetAutoGrantForm();
+            }
         } catch (e) {
             setAutoGrantRules([]);
             setError(e?.response?.data?.message || e?.message || 'Không tải được danh sách quy tắc tự gia hạn token.');
@@ -314,43 +327,55 @@ export function AiConfig() {
         }
     };
 
-    const onToggleAutoGrantAuthor = (id, checked) => {
-        const normalizedId = String(id || '').trim();
-        if (!normalizedId) return;
-        setAutoGrantForm((prev) => {
-            const cur = Array.isArray(prev.selectedUserIds) ? prev.selectedUserIds : [];
-            const nextSet = new Set(cur.map((x) => String(x)));
-            if (checked) nextSet.add(normalizedId);
-            else nextSet.delete(normalizedId);
-            return {
-                ...prev,
-                // Chọn tác giả cụ thể => tắt chế độ "Tất cả tác giả" để tránh xung đột.
-                applyToAllAuthors: false,
-                selectedUserIds: Array.from(nextSet),
-            };
-        });
-    };
-
-    const onToggleApplyAllAuthors = (checked) => {
-        if (checked) {
-            const allIds = (authorAccounts || [])
-                .map((u) => String(u?.id || '').trim())
-                .filter((id) => !!id);
-            setAutoGrantForm((p) => ({
-                ...p,
-                applyToAllAuthors: true,
-                selectedUserIds: Array.from(new Set(allIds)),
-            }));
+    const onSubmitAutoGrantRule = async (forceEnabled = null) => {
+        if (autoGrantFormError) {
+            setError(autoGrantFormError);
+            setSuccess('');
             return;
         }
-        setAutoGrantForm((p) => ({
-            ...p,
-            applyToAllAuthors: false,
-            selectedUserIds: [],
-        }));
+        try {
+            setSavingAutoGrant(true);
+            setError('');
+            setSuccess('');
+            const nextEnabled = forceEnabled != null ? !!forceEnabled : !!(managedAutoGrantRule?.isEnabled ?? true);
+            const resolvedGrantAmount = resolveGrantAmount();
+            const nextGrantAmount = forceEnabled != null
+                ? Number(managedAutoGrantRule?.grantAmount ?? resolvedGrantAmount)
+                : resolvedGrantAmount;
+            const payload = {
+                isEnabled: nextEnabled,
+                displayName: managedAutoGrantRule?.displayName || 'DEFAULT_ON_BECOME_AUTHOR',
+                periodKind: 'monthly_utc',
+                grantLimitField: 'per_month',
+                grantAmount: nextGrantAmount,
+                applyToAllAuthors: true,
+                selectedUserIds: [],
+            };
+            if (autoGrantForm.nextRunAtLocal) {
+                const dt = new Date(autoGrantForm.nextRunAtLocal);
+                if (!Number.isNaN(dt.getTime())) payload.lastRunAtUtc = dt.toISOString();
+            }
+            if (managedAutoGrantRule?.id) {
+                await updateAdminAuthorAiTokenAutoGrantRule(managedAutoGrantRule.id, payload);
+                setSuccess('Đã cập nhật quy tắc gia hạn token.');
+            } else {
+                await createAdminAuthorAiTokenAutoGrantRule(payload);
+                setSuccess('Đã tạo quy tắc gia hạn token.');
+            }
+            await loadAutoGrantRules();
+        } catch (e) {
+            setError(e?.response?.data?.message || e?.message || 'Không lưu được quy tắc gia hạn token.');
+        } finally {
+            setSavingAutoGrant(false);
+        }
     };
 
-    const onSubmitAutoGrantRule = async () => {
+    const onUpdateAutoGrantAmount = async () => {
+        if (!managedAutoGrantRule?.id) {
+            setError('Chưa có quy tắc để cập nhật. Hãy dùng "Áp dụng ngay" lần đầu.');
+            setSuccess('');
+            return;
+        }
         if (autoGrantFormError) {
             setError(autoGrantFormError);
             setSuccess('');
@@ -361,82 +386,87 @@ export function AiConfig() {
             setError('');
             setSuccess('');
             const payload = {
-                isEnabled: !!autoGrantForm.isEnabled,
-                displayName: autoGrantForm.displayName?.trim() ? autoGrantForm.displayName.trim() : null,
-                periodKind: String(autoGrantForm.periodKind || 'monthly_utc').toLowerCase(),
-                grantLimitField: autoGrantLimitFieldFromPeriodKind(autoGrantForm.periodKind),
-                grantAmount: Number(autoGrantForm.grantAmount),
-                applyToAllAuthors: !!autoGrantForm.applyToAllAuthors,
-                selectedUserIds: autoGrantForm.applyToAllAuthors ? [] : (autoGrantForm.selectedUserIds || []),
+                isEnabled: !!managedAutoGrantRule.isEnabled,
+                displayName: managedAutoGrantRule.displayName || 'DEFAULT_ON_BECOME_AUTHOR',
+                periodKind: 'monthly_utc',
+                grantLimitField: 'per_month',
+                grantAmount: resolveGrantAmount(),
+                applyToAllAuthors: true,
+                selectedUserIds: [],
             };
-
-            if (autoGrantEditingRuleId) {
-                await updateAdminAuthorAiTokenAutoGrantRule(autoGrantEditingRuleId, payload);
-                setSuccess('Đã cập nhật quy tắc tự gia hạn token.');
-            } else {
-                await createAdminAuthorAiTokenAutoGrantRule(payload);
-                setSuccess('Đã tạo quy tắc tự gia hạn token.');
-            }
-            resetAutoGrantForm();
+            await updateAdminAuthorAiTokenAutoGrantRule(managedAutoGrantRule.id, payload);
+            setSuccess('Đã cập nhật số token cộng cho các kỳ chạy tiếp theo.');
             await loadAutoGrantRules();
         } catch (e) {
-            setError(e?.response?.data?.message || e?.message || 'Không lưu được quy tắc tự gia hạn token.');
+            setError(e?.response?.data?.message || e?.message || 'Không cập nhật được số token cộng.');
         } finally {
             setSavingAutoGrant(false);
         }
     };
 
-    const onEditAutoGrantRule = (rule) => {
-        const allAuthorIds = (authorAccounts || [])
-            .map((u) => String(u?.id || '').trim())
-            .filter((id) => !!id);
-        const selectedIdsFromRule = Array.isArray(rule.selectedUserIds) ? rule.selectedUserIds : [];
-        setAutoGrantEditingRuleId(rule.id);
-        setAutoGrantForm({
-            displayName: rule.displayName || '',
-            periodKind: String(rule.periodKind || 'monthly_utc').toLowerCase(),
-            grantAmount: String(rule.grantAmount ?? 0),
-            isEnabled: !!rule.isEnabled,
-            applyToAllAuthors: !!rule.applyToAllAuthors,
-            // Khi applyToAllAuthors = true, BE có thể trả selectedUserIds rỗng.
-            // Fill đủ danh sách để UI tick hết ở panel bên dưới.
-            selectedUserIds: rule.applyToAllAuthors ? Array.from(new Set(allAuthorIds)) : selectedIdsFromRule,
-        });
-    };
-
-    const onDeleteAutoGrantRule = async (ruleId) => {
-        if (!ruleId) return;
-        if (typeof window !== 'undefined' && !window.confirm('Xóa quy tắc này?')) return;
-        try {
-            setAutoGrantBusyRuleId(ruleId);
-            setError('');
+    const onApplyAutoGrantNow = async () => {
+        if (applyNowFormError) {
+            setError(applyNowFormError);
             setSuccess('');
-            await deleteAdminAuthorAiTokenAutoGrantRule(ruleId);
-            setSuccess('Đã xóa quy tắc tự gia hạn token.');
-            if (autoGrantEditingRuleId === ruleId) resetAutoGrantForm();
-            await loadAutoGrantRules();
-        } catch (e) {
-            setError(e?.response?.data?.message || e?.message || 'Không xóa được quy tắc tự gia hạn token.');
-        } finally {
-            setAutoGrantBusyRuleId(null);
+            return;
         }
-    };
-
-    const onRunNowAutoGrantRule = async (ruleId) => {
-        if (!ruleId) return;
+        if (managedAutoGrantRule?.id) {
+            setError('Quy tắc đã tồn tại. "Áp dụng ngay" chỉ dùng cho lần tạo đầu tiên.');
+            setSuccess('');
+            return;
+        }
         try {
-            setAutoGrantBusyRuleId(ruleId);
+            setRunningAutoGrantNow(true);
             setError('');
             setSuccess('');
+            const payload = {
+                isEnabled: true,
+                displayName: managedAutoGrantRule?.displayName || 'DEFAULT_ON_BECOME_AUTHOR',
+                periodKind: 'monthly_utc',
+                grantLimitField: 'per_month',
+                grantAmount: resolveGrantAmount(),
+                applyToAllAuthors: true,
+                selectedUserIds: [],
+            };
+            if (autoGrantForm.nextRunAtLocal) {
+                const dt = new Date(autoGrantForm.nextRunAtLocal);
+                if (!Number.isNaN(dt.getTime())) payload.lastRunAtUtc = dt.toISOString();
+            }
+
+            let ruleId = managedAutoGrantRule?.id || '';
+            if (ruleId) {
+                await updateAdminAuthorAiTokenAutoGrantRule(ruleId, payload);
+            } else {
+                const created = await createAdminAuthorAiTokenAutoGrantRule(payload);
+                ruleId = created?.id ?? created?.Id ?? '';
+            }
+            if (!ruleId) {
+                const latest = await getAdminAuthorAiTokenAutoGrantRules();
+                const rows = pickArrayLike(latest, latest?.items, latest?.Items, latest?.data?.items, latest?.Data?.Items);
+                const first = (rows || [])[0];
+                ruleId = first?.id ?? first?.Id ?? '';
+            }
+            if (!ruleId) throw new Error('Không xác định được quy tắc để áp dụng ngay.');
+
             const res = await runNowAdminAuthorAiTokenAutoGrantRule(ruleId);
             const usersUpdated = res?.usersUpdated ?? res?.UsersUpdated ?? 0;
-            setSuccess(`Đã chạy quy tắc. Số tài khoản đã cập nhật: ${usersUpdated}.`);
+            setSuccess(`Đã bật và áp dụng ngay. Số tài khoản đã cập nhật: ${usersUpdated}.`);
             await loadAutoGrantRules();
         } catch (e) {
-            setError(e?.response?.data?.message || e?.message || 'Không chạy được quy tắc tự gia hạn token.');
+            setError(e?.response?.data?.message || e?.message || 'Không áp dụng ngay được.');
         } finally {
-            setAutoGrantBusyRuleId(null);
+            setRunningAutoGrantNow(false);
         }
+    };
+
+    const onRequestToggleAutoGrant = (nextEnabled) => {
+        setToggleConfirmNextEnabled(!!nextEnabled);
+        setToggleConfirmOpen(true);
+    };
+
+    const onConfirmToggleAutoGrant = async () => {
+        setToggleConfirmOpen(false);
+        await onSubmitAutoGrantRule(!!toggleConfirmNextEnabled);
     };
 
     const loadGenerationLogs = async (nextFilter = genFilter) => {
@@ -564,26 +594,22 @@ export function AiConfig() {
                             </div>
 
                             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
-                                <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                                     <input
                                         type="text"
-                                        value={autoGrantForm.displayName}
-                                        onChange={(e) => setAutoGrantForm((p) => ({ ...p, displayName: e.target.value }))}
-                                        placeholder="Tên quy tắc (tuỳ chọn)"
-                                        className="md:col-span-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900"
+                                        value="Tháng (UTC)"
+                                        readOnly
+                                        className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700"
                                     />
-                                    <select
-                                        value={autoGrantForm.periodKind}
-                                        onChange={(e) => setAutoGrantForm((p) => ({ ...p, periodKind: e.target.value }))}
-                                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900"
-                                    >
-                                        <option value="daily_utc">Ngày (UTC)</option>
-                                        <option value="weekly_utc">Tuần (UTC)</option>
-                                        <option value="monthly_utc">Tháng (UTC)</option>
-                                    </select>
                                     <input
                                         type="text"
-                                        value={autoGrantLimitFieldLabelVi(autoGrantLimitFieldFromPeriodKind(autoGrantForm.periodKind))}
+                                        value="Tất cả tác giả"
+                                        readOnly
+                                        className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700"
+                                    />
+                                    <input
+                                        type="text"
+                                        value="Theo tháng"
                                         readOnly
                                         className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700"
                                     />
@@ -597,77 +623,56 @@ export function AiConfig() {
                                         className={`rounded-lg border bg-white px-3 py-2 text-xs text-slate-900 ${autoGrantFormError ? 'border-red-400' : 'border-slate-300'}`}
                                     />
                                 </div>
-                                <div className="flex flex-wrap items-center gap-4">
-                                    <label className="inline-flex items-center gap-2 text-xs text-slate-700">
-                                        <input
-                                            type="checkbox"
-                                            checked={autoGrantForm.isEnabled}
-                                            onChange={(e) => setAutoGrantForm((p) => ({ ...p, isEnabled: e.target.checked }))}
-                                        />
-                                        Bật quy tắc
-                                    </label>
-                                    <label className="inline-flex items-center gap-2 text-xs text-slate-700">
-                                        <input
-                                            type="checkbox"
-                                            checked={autoGrantForm.applyToAllAuthors}
-                                            onChange={(e) => onToggleApplyAllAuthors(e.target.checked)}
-                                        />
-                                        Tất cả tác giả
-                                    </label>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                     <input
-                                        type="search"
-                                        value={autoGrantAuthorFilter}
-                                        onChange={(e) => setAutoGrantAuthorFilter(e.target.value)}
-                                        placeholder="Lọc tác giả (email / biệt danh / GUID)"
-                                        className="w-full md:w-80 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900"
+                                        type="datetime-local"
+                                        value={autoGrantForm.nextRunAtLocal}
+                                        onChange={(e) => setAutoGrantForm((p) => ({ ...p, nextRunAtLocal: e.target.value }))}
+                                        disabled={hasManagedAutoGrantRule}
+                                        className={`rounded-lg border px-3 py-2 text-xs ${hasManagedAutoGrantRule ? 'border-slate-300 bg-slate-100 text-slate-500' : 'border-slate-300 bg-white text-slate-900'}`}
+                                    />
+                                    <input
+                                        type="text"
+                                        value={managedAutoGrantRule?.isEnabled ? 'Đang bật tự chạy' : 'Đang tắt tự chạy'}
+                                        readOnly
+                                        className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700"
                                     />
                                 </div>
 
-                                <div className={`max-h-44 overflow-y-auto rounded-lg border p-2 ${autoGrantForm.applyToAllAuthors ? 'border-slate-100 bg-slate-50' : 'border-slate-200 bg-white'}`}>
-                                    {autoGrantFilteredAuthors.length === 0 ? (
-                                        <p className="text-[11px] text-slate-500">Không có tác giả khớp bộ lọc.</p>
-                                    ) : autoGrantFilteredAuthors.map((u) => {
-                                        const id = String(u?.id || '');
-                                        const selected = (autoGrantForm.selectedUserIds || []).some((x) => String(x) === id);
-                                        return (
-                                            <label key={id} className={`flex items-start gap-2 py-1 text-xs ${autoGrantForm.applyToAllAuthors ? 'text-slate-400' : 'text-slate-700'}`}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selected}
-                                                    onChange={(e) => onToggleAutoGrantAuthor(id, e.target.checked)}
-                                                />
-                                                <span className="break-all">
-                                                    {(u?.nickname || '').trim() ? `${u.nickname} · ${u?.email || '—'}` : (u?.email || id)}
-                                                    <span className="block text-[10px] text-slate-400">{id}</span>
-                                                </span>
-                                            </label>
-                                        );
-                                    })}
-                                </div>
-                                {autoGrantForm.applyToAllAuthors && (
-                                    <p className="text-[11px] text-slate-500">Đang bật "Tất cả tác giả" nên danh sách chỉ hiển thị để tham chiếu, không cần chọn.</p>
-                                )}
                                 {autoGrantFormError && (
                                     <p className="text-[11px] text-red-600">{autoGrantFormError}</p>
                                 )}
+                                {hasManagedAutoGrantRule && (
+                                    <p className="text-[11px] text-slate-500">
+                                        Quy tắc đã được tạo. Hệ thống sẽ tự cấp token ở ngày chạy kế tiếp; không áp dụng ngay lại.
+                                    </p>
+                                )}
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={onSubmitAutoGrantRule}
-                                        disabled={savingAutoGrant || !!autoGrantFormError}
-                                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                                    >
-                                        {savingAutoGrant ? 'Đang lưu…' : (autoGrantEditingRuleId ? 'Cập nhật quy tắc' : 'Tạo quy tắc')}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={resetAutoGrantForm}
-                                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                                    >
-                                        Đặt lại biểu mẫu
-                                    </button>
-                                    {autoGrantEditingRuleId && (
-                                        <span className="text-[11px] text-slate-500">Đang sửa quy tắc: `{autoGrantEditingRuleId}`</span>
+                                    {!hasManagedAutoGrantRule ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (applyNowFormError) {
+                                                    setError(applyNowFormError);
+                                                    setSuccess('');
+                                                    return;
+                                                }
+                                                setApplyNowConfirmOpen(true);
+                                            }}
+                                            disabled={runningAutoGrantNow || !!applyNowFormError}
+                                            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
+                                        >
+                                            {runningAutoGrantNow ? 'Đang áp dụng…' : 'Áp dụng ngay'}
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => setUpdateAmountConfirmOpen(true)}
+                                            disabled={savingAutoGrant || !!autoGrantFormError}
+                                            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+                                        >
+                                            {savingAutoGrant ? 'Đang cập nhật…' : 'Cập nhật số token cộng'}
+                                        </button>
                                     )}
                                 </div>
                             </div>
@@ -677,66 +682,153 @@ export function AiConfig() {
                                     <thead className="bg-slate-50 text-slate-600">
                                         <tr>
                                             <th className="px-2 py-2 text-left">Tên</th>
-                                            <th className="px-2 py-2 text-left">Bật</th>
+                                            <th className="px-2 py-2 text-left">Trạng thái</th>
                                             <th className="px-2 py-2 text-left">Chu kỳ</th>
-                                            <th className="px-2 py-2 text-left">Cột</th>
                                             <th className="px-2 py-2 text-right">+ Token</th>
                                             <th className="px-2 py-2 text-left">Phạm vi</th>
-                                            <th className="px-2 py-2 text-left">Đã chạy</th>
-                                            <th className="px-2 py-2 text-right">Hành động</th>
+                                            <th className="px-2 py-2 text-left">Ngày chạy kế tiếp</th>
+                                            <th className="px-2 py-2 text-center">Thao tác</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {autoGrantLoading ? (
-                                            <tr><td colSpan={8} className="px-2 py-4 text-center text-slate-500">Đang tải...</td></tr>
+                                            <tr><td colSpan={7} className="px-2 py-4 text-center text-slate-500">Đang tải...</td></tr>
                                         ) : autoGrantRules.length === 0 ? (
-                                            <tr><td colSpan={8} className="px-2 py-4 text-center text-slate-500">Chưa có rule nào.</td></tr>
-                                        ) : autoGrantRules.map((r) => (
+                                            <tr><td colSpan={7} className="px-2 py-4 text-center text-slate-500">Chưa có quy tắc nào.</td></tr>
+                                        ) : autoGrantRules.slice(0, 1).map((r) => (
                                             <tr key={r.id} className="border-t border-slate-100">
                                                 <td className="px-2 py-2 text-slate-900">
                                                     {r.displayName || '—'}
                                                     <div className="text-[10px] text-slate-400 break-all">{r.id}</div>
                                                 </td>
-                                                <td className="px-2 py-2">{r.isEnabled ? 'Bật' : 'Tắt'}</td>
-                                                <td className="px-2 py-2"><code>{autoGrantPeriodKindLabelVi(r.periodKind)}</code></td>
-                                                <td className="px-2 py-2"><code>{autoGrantLimitFieldLabelVi(r.grantLimitField || autoGrantLimitFieldFromPeriodKind(r.periodKind))}</code></td>
-                                                <td className="px-2 py-2 text-right font-semibold">{fmtIntOrDash(r.grantAmount)}</td>
                                                 <td className="px-2 py-2">
-                                                    {r.applyToAllAuthors ? 'Tất cả tác giả' : `${(r.selectedUserIds || []).length} tác giả`}
+                                                    <span
+                                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${r.isEnabled
+                                                            ? 'bg-emerald-100 text-emerald-700'
+                                                            : 'bg-slate-100 text-slate-600'
+                                                            }`}
+                                                    >
+                                                        {r.isEnabled ? 'Đang bật' : 'Đang tắt'}
+                                                    </span>
                                                 </td>
+                                                <td className="px-2 py-2"><code>{autoGrantPeriodKindLabelVi(r.periodKind)}</code></td>
+                                                <td className="px-2 py-2 text-right font-semibold">{fmtIntOrDash(r.grantAmount)}</td>
+                                                <td className="px-2 py-2">Tất cả tác giả</td>
                                                 <td className="px-2 py-2">{r.lastRunAtUtc ? formatDateTimeVi(r.lastRunAtUtc) : '—'}</td>
-                                                <td className="px-2 py-2 text-right">
-                                                    <div className="inline-flex items-center gap-1">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => onEditAutoGrantRule(r)}
-                                                            className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 hover:bg-blue-100"
-                                                        >
-                                                            Sửa
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => onRunNowAutoGrantRule(r.id)}
-                                                            disabled={autoGrantBusyRuleId === r.id}
-                                                            className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700 hover:bg-amber-100 disabled:opacity-60"
-                                                        >
-                                                            Chạy ngay
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => onDeleteAutoGrantRule(r.id)}
-                                                            disabled={autoGrantBusyRuleId === r.id}
-                                                            className="rounded border border-red-300 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-700 hover:bg-red-100 disabled:opacity-60"
-                                                        >
-                                                            Xóa
-                                                        </button>
-                                                    </div>
+                                                <td className="px-2 py-2 text-center">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => onRequestToggleAutoGrant(!r.isEnabled)}
+                                                        disabled={savingAutoGrant}
+                                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${r.isEnabled ? 'bg-emerald-500' : 'bg-slate-300'} disabled:opacity-60`}
+                                                        title={r.isEnabled ? 'Tắt tự chạy' : 'Bật tự chạy'}
+                                                    >
+                                                        <span
+                                                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${r.isEnabled ? 'translate-x-6' : 'translate-x-1'}`}
+                                                        />
+                                                    </button>
                                                 </td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
                             </div>
+                            {applyNowConfirmOpen ? (
+                                <div className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center p-4">
+                                    <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white shadow-2xl">
+                                        <div className="px-4 py-3 border-b border-slate-200">
+                                            <p className="text-sm font-semibold text-slate-900">Xác nhận áp dụng ngay</p>
+                                        </div>
+                                        <div className="px-4 py-3 space-y-3">
+                                            <p className="text-xs text-slate-700">
+                                                Hành động này chỉ nên dùng 1 lần khi tạo quy tắc lần đầu (vừa tạo rule vừa cấp token ngay). Bạn có chắc muốn tiếp tục?
+                                            </p>
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                                                    onClick={() => setApplyNowConfirmOpen(false)}
+                                                >
+                                                    Hủy
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
+                                                    onClick={async () => {
+                                                        setApplyNowConfirmOpen(false);
+                                                        await onApplyAutoGrantNow();
+                                                    }}
+                                                >
+                                                    Xác nhận
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
+                            {updateAmountConfirmOpen ? (
+                                <div className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center p-4">
+                                    <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white shadow-2xl">
+                                        <div className="px-4 py-3 border-b border-slate-200">
+                                            <p className="text-sm font-semibold text-slate-900">Xác nhận cập nhật token cộng</p>
+                                        </div>
+                                        <div className="px-4 py-3 space-y-3">
+                                            <p className="text-xs text-slate-700">
+                                                Bạn có chắc muốn cập nhật số token cộng? Thay đổi này sẽ được áp dụng cho các kỳ chạy tự động tiếp theo.
+                                            </p>
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                                                    onClick={() => setUpdateAmountConfirmOpen(false)}
+                                                >
+                                                    Hủy
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
+                                                    onClick={async () => {
+                                                        setUpdateAmountConfirmOpen(false);
+                                                        await onUpdateAutoGrantAmount();
+                                                    }}
+                                                >
+                                                    Xác nhận
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
+                            {toggleConfirmOpen ? (
+                                <div className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center p-4">
+                                    <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white shadow-2xl">
+                                        <div className="px-4 py-3 border-b border-slate-200">
+                                            <p className="text-sm font-semibold text-slate-900">Xác nhận thay đổi trạng thái</p>
+                                        </div>
+                                        <div className="px-4 py-3 space-y-3">
+                                            <p className="text-xs text-slate-700">
+                                                Bạn có chắc muốn {toggleConfirmNextEnabled ? 'bật' : 'tắt'} tự động gia hạn token?
+                                            </p>
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                                                    onClick={() => setToggleConfirmOpen(false)}
+                                                >
+                                                    Hủy
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="rounded bg-primary px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-primary/90"
+                                                    onClick={onConfirmToggleAutoGrant}
+                                                >
+                                                    Xác nhận
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
                         </div>
 
                         {/* Generations logs from DB */}

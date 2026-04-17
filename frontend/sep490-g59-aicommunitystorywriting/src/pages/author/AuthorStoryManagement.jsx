@@ -599,7 +599,7 @@ export function AuthorStoryManagement({ onBack }) {
                         if (!res?.success) setAuthorActivityError(res?.message ?? 'Không tải được lịch sử.');
                     }
                 }
-            } catch (e) {
+            } catch {
                 if (!cancelled && !silent) {
                     setAuthorActivityItems([]);
                     setAuthorActivityError('Không tải được lịch sử donate và rút tiền.');
@@ -795,18 +795,11 @@ export function AuthorStoryManagement({ onBack }) {
         followers: profileFollowersCount,
     };
     const authorAiUnlimited = !!(authorAiBudget?.unlimitedLifetime);
-    const authorAiRemainingText = authorAiBudgetLoading
+    const authorAiLimitText = authorAiBudgetLoading
         ? '...'
         : (authorAiUnlimited
             ? 'Không giới hạn'
-            : Number(authorAiBudget?.tokensRemainingLifetime ?? 0).toLocaleString('vi-VN'));
-    const authorAiUsed = Number(authorAiBudget?.tokensUsed ?? 0);
-    const authorAiLimit = authorAiBudget?.tokenLimit;
-    const authorAiLimitNumber = Number(authorAiLimit);
-    const hasFiniteAuthorAiLimit = Number.isFinite(authorAiLimitNumber) && authorAiLimitNumber > 0;
-    const authorAiUsedPercent = hasFiniteAuthorAiLimit
-        ? Math.max(0, Math.min(100, Math.round((authorAiUsed / authorAiLimitNumber) * 100)))
-        : null;
+            : Number(authorAiBudget?.tokenLimit ?? 0).toLocaleString('vi-VN'));
 
     const handleCreateStory = () => {
         if (isAuthorWritingSuspended) {
@@ -1965,10 +1958,12 @@ export function AuthorStoryManagement({ onBack }) {
                                         { icon: List, color: '#7c3aed', bg: '#f5f3ff', label: 'Chương đã đăng', value: userStats.totalChapters },
                                         { icon: Eye, color: '#0ea5e9', bg: '#f0f9ff', label: 'Lượt xem (tổng)', value: userStats.totalViews.toLocaleString('vi-VN') },
                                         { icon: Heart, color: '#e11d48', bg: '#fff1f2', label: 'Người theo dõi', value: userStats.followers },
-                                        { icon: Coins, color: '#b45309', bg: '#fffbeb', label: 'Token AI còn lại', value: authorAiRemainingText, hint: authorAiUnlimited ? `Đã dùng: ${authorAiUsed.toLocaleString('vi-VN')}` : `Đã dùng: ${authorAiUsed.toLocaleString('vi-VN')} / Hạn mức: ${(hasFiniteAuthorAiLimit ? authorAiLimitNumber.toLocaleString('vi-VN') : 'Không giới hạn')}`, isTokenCard: true },
-                                    ].map(({ icon: Icon, color, bg, label, value, hint, isTokenCard }) => (
+                                        { icon: Coins, color: '#b45309', bg: '#fffbeb', label: 'Hạn mức token AI', value: authorAiLimitText },
+                                    ].map((item) => {
+                                        const IconComp = item.icon;
+                                        return (
                                         <div
-                                            key={label}
+                                            key={item.label}
                                             style={{
                                                 borderRadius: '14px',
                                                 border: '1px solid #e2e8f0',
@@ -1980,44 +1975,28 @@ export function AuthorStoryManagement({ onBack }) {
                                                 width: '40px',
                                                 height: '40px',
                                                 borderRadius: '12px',
-                                                backgroundColor: bg,
+                                                backgroundColor: item.bg,
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
                                                 marginBottom: '0.65rem',
                                             }}
                                             >
-                                                <Icon style={{ width: '20px', height: '20px', color }} />
+                                                <IconComp style={{ width: '20px', height: '20px', color: item.color }} />
                                             </div>
                                             <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
-                                                {value}
+                                                {item.value}
                                             </div>
                                             <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.35rem', fontWeight: 500 }}>
-                                                {label}
+                                                {item.label}
                                             </div>
-                                            {hint && (
+                                            {item.hint && (
                                                 <div style={{ fontSize: '0.6875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                                                    {hint}
-                                                </div>
-                                            )}
-                                            {isTokenCard && !authorAiUnlimited && authorAiUsedPercent != null && (
-                                                <div style={{ marginTop: '0.5rem' }}>
-                                                    <div style={{ height: '6px', borderRadius: '9999px', backgroundColor: '#f1f5f9', overflow: 'hidden' }}>
-                                                        <div
-                                                            style={{
-                                                                height: '100%',
-                                                                width: `${authorAiUsedPercent}%`,
-                                                                background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
-                                                            }}
-                                                        />
-                                                    </div>
-                                                    <div style={{ marginTop: '0.25rem', fontSize: '0.6875rem', color: '#94a3b8' }}>
-                                                        Đã dùng {authorAiUsedPercent}%
-                                                    </div>
+                                                    {item.hint}
                                                 </div>
                                             )}
                                         </div>
-                                    ))}
+                                    )})}
                                 </div>
                                 {authorAiBudgetError && (
                                     <p style={{ margin: 0, marginTop: '-0.5rem', marginBottom: '1rem', fontSize: '0.75rem', color: '#dc2626' }}>

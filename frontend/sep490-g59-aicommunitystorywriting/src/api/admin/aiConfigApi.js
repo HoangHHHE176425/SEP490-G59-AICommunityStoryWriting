@@ -78,16 +78,6 @@ export async function getAdminAiOpenRouterGeneration(generationId) {
     return res.data;
 }
 
-export async function getAuthorTokenDefaultsOnBecomeAuthor() {
-    const res = await axiosInstance.get("admin/ai-usage-stats/author-token-defaults");
-    return res.data;
-}
-
-export async function setAuthorTokenDefaultsOnBecomeAuthor(payload) {
-    const res = await axiosInstance.put("admin/ai-usage-stats/author-token-defaults", payload);
-    return res.data;
-}
-
 export async function getAdminAuthorAiTokenBudget(userId) {
     if (!userId) throw new Error("userId là bắt buộc.");
     const res = await axiosInstance.get(`admin/users/${userId}/author-ai-token-budget`);

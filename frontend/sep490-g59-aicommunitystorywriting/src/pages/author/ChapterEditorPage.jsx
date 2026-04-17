@@ -4,7 +4,7 @@ import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
 import { RichTextEditor } from '../../components/common/RichTextEditor';
-import { indexRag, suggestNextChapter, coCreate, checkBannedWords, checkChapterSpelling, compareChapterPreview, getAiUsageLimit, pickAiContextWarning } from '../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, checkBannedWords, checkChapterSpelling, compareChapterPreview, pickAiContextWarning } from '../../api/ai/aiApi';
 import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 import { refresh as refreshAuth } from '../../api/auth/authApi';
 import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
@@ -285,7 +285,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     const [suggestWarning, setSuggestWarning] = useState(null);
     const [suggestWarningCache, setSuggestWarningCache] = useState(null);
     const [suggestError, setSuggestError] = useState(null);
-    const [, setAiUsageLimit] = useState(null);
     const [copiedSuggestionIndex, setCopiedSuggestionIndex] = useState(null);
     const copySuggestionFeedbackRef = useRef(null);
 
@@ -299,34 +298,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         }
     }, [showSuggestPopup]);
 
-    const loadAiUsageLimit = async () => {
-        try {
-            const data = await getAiUsageLimit();
-            setAiUsageLimit(data ?? null);
-        } catch {
-            // ignore (user có thể chưa đăng nhập / BE lỗi)
-            setAiUsageLimit(null);
-        }
-    };
-
-    const hasRemainingAuthorAiToken = (usage) => {
-        const budget = usage?.authorTokenBudget ?? null;
-        if (!budget) return true;
-        if (budget.unlimitedLifetime) return true;
-        return Number(budget.tokensRemainingLifetime ?? 0) > 0;
-    };
-
-    const ensureAuthorTokenForAi = async () => {
-        const latest = await getAiUsageLimit();
-        setAiUsageLimit(latest ?? null);
-        if (!hasRemainingAuthorAiToken(latest)) {
-            const msg = 'Bạn đã dùng hết token AI khả dụng. Vui lòng liên hệ quản trị viên để được cấp thêm token.';
-            showToast(msg, 'error');
-            setSuggestError(msg);
-            return false;
-        }
-        return true;
-    };
 
     // Popup đồng sáng tác (AI gợi ý chương): bước 1 = nhập ý tưởng, bước 2 = xem kết quả + đồng ý
     const [showCoCreateIdeaPopup, setShowCoCreateIdeaPopup] = useState(false);
@@ -334,6 +305,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     const [useCoCreatePrompt, setUseCoCreatePrompt] = useState(false);
     const [coCreateIdea, setCoCreateIdea] = useState('');
     const [coCreateLoading, setCoCreateLoading] = useState(false);
+    const [coCreateError, setCoCreateError] = useState(null);
     const [coCreateResult, setCoCreateResult] = useState(null);
     const [coCreateContextWarning, setCoCreateContextWarning] = useState(null);
     const [manualSpellingCheckLoading, setManualSpellingCheckLoading] = useState(false);
@@ -612,8 +584,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             );
             return;
         }
-        if (!(await ensureAuthorTokenForAi())) return;
-
         setSuggestLoading(true);
         setSuggestions([]);
         setSuggestError(null);
@@ -650,13 +620,10 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         } catch (err) {
             const status = err?.response?.status;
             const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi gợi ý AI.';
-            if (status === 429) {
-                const tokenMsg = msg || 'Bạn đã dùng hết token AI khả dụng.';
+            if (status === 403) {
+                const tokenMsg = msg || 'Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo.';
                 showToast(tokenMsg, 'error');
                 setSuggestError(tokenMsg);
-            } else if (status === 403) {
-                showToast(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.', 'error');
-                setSuggestError(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.');
             } else {
                 showToast(msg, 'error');
                 setSuggestError(msg);
@@ -700,16 +667,12 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             }
             setUseCoCreatePrompt(false);
             setCoCreateIdea('');
+            setCoCreateError(null);
             setCoCreateResult(null);
             setShowCoCreateResultPopup(false);
             setShowCoCreateIdeaPopup(true);
         }
     };
-
-    // Load số lượt AI khi vào trang (nếu đã đăng nhập)
-    useEffect(() => {
-        loadAiUsageLimit();
-    }, []);
 
     const handleCoCreateSubmit = async () => {
         const storyId = story?.id ?? story?.Id;
@@ -724,7 +687,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             return;
         }
         const idea = useCoCreatePrompt ? (coCreateIdea || '').trim() : '';
-        if (!(await ensureAuthorTokenForAi())) return;
+        setCoCreateError(null);
         setCoCreateContextWarning(null);
         setCoCreateLoading(true);
         try {
@@ -738,8 +701,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             const chapterOrderIndex = (Number(chapterData.number) || 1) - 1;
             const chapterIdForAi = chapter?.id ?? chapter?.Id ?? null;
             const data = await coCreate(storyId, idea || null, { chapterOrderIndex, chapterId: chapterIdForAi });
-            // Đồng bộ lại với BE (không chặn UI).
-            loadAiUsageLimit();
             const ctxWarnCo = pickAiContextWarning(data);
             setCoCreateContextWarning(
                 ctxWarnCo
@@ -752,9 +713,11 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         } catch (err) {
             const status = err?.response?.status;
             const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi AI hỗ trợ.';
-            if (status === 429) showToast(msg || 'Bạn đã dùng hết token AI khả dụng.', 'error');
-            else if (status === 403) showToast(msg || 'Chỉ tác giả của truyện mới được sử dụng.', 'error');
-            else showToast(msg, 'error');
+            const errorText = status === 403
+                ? (msg || 'Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo.')
+                : msg;
+            setCoCreateError(errorText);
+            showToast(errorText, 'error');
         } finally {
             setCoCreateLoading(false);
         }
@@ -1222,32 +1185,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         }
     };
 
-    // Tìm vị trí (đoạn + dòng) của từ/cụm trong nội dung hiện tại để hiển thị "vị trí phạm lỗi"
-    const findIssuePosition = (needleRaw) => {
-        const needle = (needleRaw ?? '').toString().trim();
-        const content = (chapterData?.content ?? '').toString();
-        if (!needle || !content) return null;
-
-        const lowerNeedle = needle.toLowerCase();
-        const lines = content.split(/\r?\n/);
-
-        // Line index (1-based)
-        const lineIndex = lines.findIndex((ln) => ln.toLowerCase().includes(lowerNeedle));
-        const lineNo = lineIndex >= 0 ? lineIndex + 1 : null;
-
-        // Paragraph index (1-based) - paragraph = block separated by blank lines
-        const paragraphs = content.split(/\r?\n\s*\r?\n/);
-        const paraIndex = paragraphs.findIndex((p) => p.toLowerCase().includes(lowerNeedle));
-        const paraNo = paraIndex >= 0 ? paraIndex + 1 : null;
-
-        // Character offset (1-based) - first occurrence in full content
-        const idx = content.toLowerCase().indexOf(lowerNeedle);
-        const charOffset = idx >= 0 ? idx + 1 : null;
-
-        if (lineNo == null && paraNo == null && charOffset == null) return null;
-        return { lineNo, paraNo, charOffset };
-    };
-
     const policyTypeVi = (typeRaw) => {
         const t = String(typeRaw ?? '').trim().toUpperCase();
         if (t === 'BANNEDWORD') return 'Từ cấm';
@@ -1680,17 +1617,18 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb' }}>
                             <button
                                 type="button"
-                                onClick={() => setShowSuggestPopup(false)}
+                                onClick={() => !suggestLoading && setShowSuggestPopup(false)}
+                                disabled={suggestLoading}
                                 style={{
                                     width: '100%',
                                     padding: '0.625rem 1rem',
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
                                     color: '#ffffff',
-                                    backgroundColor: '#13ec5b',
+                                    backgroundColor: suggestLoading ? '#9ca3af' : '#13ec5b',
                                     border: 'none',
                                     borderRadius: '8px',
-                                    cursor: 'pointer',
+                                    cursor: suggestLoading ? 'not-allowed' : 'pointer',
                                 }}
                             >
                                 ĐÓNG
@@ -1712,7 +1650,12 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                         justifyContent: 'center',
                         backgroundColor: 'rgba(0,0,0,0.5)',
                     }}
-                    onClick={() => !coCreateLoading && setShowCoCreateIdeaPopup(false)}
+                    onClick={() => {
+                        if (!coCreateLoading) {
+                            setCoCreateError(null);
+                            setShowCoCreateIdeaPopup(false);
+                        }
+                    }}
                 >
                     <div
                         style={{
@@ -1742,6 +1685,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         onChange={() => {
                                             setUseCoCreatePrompt(false);
                                             setCoCreateIdea('');
+                                            setCoCreateError(null);
                                         }}
                                         disabled={coCreateLoading}
                                     />
@@ -1752,7 +1696,10 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         type="radio"
                                         name="co_create_prompt_mode"
                                         checked={useCoCreatePrompt}
-                                        onChange={() => setUseCoCreatePrompt(true)}
+                                        onChange={() => {
+                                            setUseCoCreatePrompt(true);
+                                            setCoCreateError(null);
+                                        }}
                                         disabled={coCreateLoading}
                                     />
                                     Nhập định hướng tùy chỉnh
@@ -1785,11 +1732,21 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', fontSize: '0.6875rem', color: '#9a3412' }}>
                                 Lưu ý: Khi nhập định hướng tùy chỉnh, tác giả phải chịu trách nhiệm với nội dung định hướng đã nhập và nội dung AI sinh ra theo định hướng đó.
                             </div>
+                            {coCreateError ? (
+                                <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', fontSize: '0.8125rem', color: '#b91c1c' }}>
+                                    {coCreateError}
+                                </div>
+                            ) : null}
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                             <button
                                 type="button"
-                                onClick={() => !coCreateLoading && setShowCoCreateIdeaPopup(false)}
+                                onClick={() => {
+                                    if (!coCreateLoading) {
+                                        setCoCreateError(null);
+                                        setShowCoCreateIdeaPopup(false);
+                                    }
+                                }}
                                 style={{
                                     padding: '0.5rem 1rem',
                                     fontSize: '0.875rem',

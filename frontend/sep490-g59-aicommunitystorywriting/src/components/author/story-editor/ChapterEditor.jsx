@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Sparkles, Settings, X, Lock, Unlock, Coins, Copy, Check } from 'lucide-react';
 import { useToast } from './Toast';
-import { indexRag, suggestNextChapter, coCreate, getAiUsageLimit, pickAiContextWarning } from '../../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, pickAiContextWarning } from '../../../api/ai/aiApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { translateCoCreateOutlineLabels } from '../../../utils/coCreateOutlineLabelsVi';
 import { RichTextEditor } from '../../common/RichTextEditor';
@@ -176,9 +176,9 @@ export function ChapterEditor({
     const [showCoCreateResultPopup, setShowCoCreateResultPopup] = useState(false);
     const [coCreateIdea, setCoCreateIdea] = useState('');
     const [coCreateLoading, setCoCreateLoading] = useState(false);
+    const [coCreateError, setCoCreateError] = useState(null);
     const [coCreateResult, setCoCreateResult] = useState(null);
     const [coCreateContextWarning, setCoCreateContextWarning] = useState(null);
-    const [, setAiUsageLimit] = useState(null);
 
     const storyId = story?.id ?? story?.Id ?? null;
     const chapterIdRaw = chapter?.id ?? chapter?.Id ?? null;
@@ -234,36 +234,6 @@ export function ChapterEditor({
     const storyTotalViews = Number(story?.totalViews ?? story?.TotalViews ?? 0) || 0;
     const canEnablePaidMode = storyTotalViews >= 500;
 
-    const loadAiUsageLimit = async () => {
-        try {
-            const data = await getAiUsageLimit();
-            setAiUsageLimit(data ?? null);
-        } catch {
-            setAiUsageLimit(null);
-        }
-    };
-
-    const hasRemainingAuthorAiToken = (usage) => {
-        const budget = usage?.authorTokenBudget ?? null;
-        if (!budget) return true;
-        if (budget.unlimitedLifetime) return true;
-        return Number(budget.tokensRemainingLifetime ?? 0) > 0;
-    };
-
-    const ensureAuthorTokenForAi = async () => {
-        const latest = await getAiUsageLimit();
-        setAiUsageLimit(latest ?? null);
-        if (!hasRemainingAuthorAiToken(latest)) {
-            showToast('Bạn đã dùng hết token AI khả dụng. Vui lòng liên hệ quản trị viên để được cấp thêm token.', 'error');
-            return false;
-        }
-        return true;
-    };
-
-    useEffect(() => {
-        if (storyId) loadAiUsageLimit();
-    }, [storyId]);
-
     useEffect(() => {
         if (!showSuggestPopup) {
             setCopiedSuggestionIndex(null);
@@ -300,7 +270,6 @@ export function ChapterEditor({
             );
             return;
         }
-        if (!(await ensureAuthorTokenForAi())) return;
         if (type === 'paragraph') {
             setSuggestions([]);
             setSuggestWarning(null);
@@ -320,8 +289,7 @@ export function ChapterEditor({
             } catch (err) {
                 const status = err?.response?.status;
                 const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi gợi ý AI.';
-                if (status === 429) showToast(msg || 'Bạn đã dùng hết token AI khả dụng.', 'error');
-                else if (status === 403) showToast(msg || 'Chỉ tác giả mới được sử dụng tính năng này.', 'error');
+                if (status === 403) showToast(msg || 'Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo.', 'error');
                 else showToast(msg, 'error');
                 setSuggestWarning(null);
                 setSuggestions([]);
@@ -330,6 +298,7 @@ export function ChapterEditor({
             }
         } else {
             setCoCreateIdea('');
+            setCoCreateError(null);
             setCoCreateResult(null);
             setShowCoCreateResultPopup(false);
             setShowCoCreateIdeaPopup(true);
@@ -353,7 +322,7 @@ export function ChapterEditor({
             showToast('Vui lòng nhập ý tưởng của bạn.', 'error');
             return;
         }
-        if (!(await ensureAuthorTokenForAi())) return;
+        setCoCreateError(null);
         setCoCreateContextWarning(null);
         setCoCreateLoading(true);
         try {
@@ -368,13 +337,14 @@ export function ChapterEditor({
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);
-            loadAiUsageLimit();
         } catch (err) {
             const status = err?.response?.status;
             const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi AI hỗ trợ.';
-            if (status === 429) showToast(msg || 'Bạn đã dùng hết token AI khả dụng.', 'error');
-            else if (status === 403) showToast(msg || 'Chỉ tác giả mới được sử dụng.', 'error');
-            else showToast(msg, 'error');
+            const errorText = status === 403
+                ? (msg || 'Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo.')
+                : msg;
+            setCoCreateError(errorText);
+            showToast(errorText, 'error');
         } finally {
             setCoCreateLoading(false);
         }
@@ -520,17 +490,18 @@ export function ChapterEditor({
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb' }}>
                             <button
                                 type="button"
-                                onClick={() => setShowSuggestPopup(false)}
+                                onClick={() => !suggestLoading && setShowSuggestPopup(false)}
+                                disabled={suggestLoading}
                                 style={{
                                     width: '100%',
                                     padding: '0.625rem 1rem',
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
                                     color: '#ffffff',
-                                    backgroundColor: '#13ec5b',
+                                    backgroundColor: suggestLoading ? '#9ca3af' : '#13ec5b',
                                     border: 'none',
                                     borderRadius: '8px',
-                                    cursor: 'pointer',
+                                    cursor: suggestLoading ? 'not-allowed' : 'pointer',
                                 }}
                             >
                                 ĐÓNG
@@ -552,7 +523,12 @@ export function ChapterEditor({
                         justifyContent: 'center',
                         backgroundColor: 'rgba(0,0,0,0.5)',
                     }}
-                    onClick={() => !coCreateLoading && setShowCoCreateIdeaPopup(false)}
+                    onClick={() => {
+                        if (!coCreateLoading) {
+                            setCoCreateError(null);
+                            setShowCoCreateIdeaPopup(false);
+                        }
+                    }}
                 >
                     <div
                         style={{
@@ -594,11 +570,21 @@ export function ChapterEditor({
                                     resize: 'vertical',
                                 }}
                             />
+                            {coCreateError ? (
+                                <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', fontSize: '0.8125rem', color: '#b91c1c' }}>
+                                    {coCreateError}
+                                </div>
+                            ) : null}
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                             <button
                                 type="button"
-                                onClick={() => !coCreateLoading && setShowCoCreateIdeaPopup(false)}
+                                onClick={() => {
+                                    if (!coCreateLoading) {
+                                        setCoCreateError(null);
+                                        setShowCoCreateIdeaPopup(false);
+                                    }
+                                }}
                                 style={{
                                     padding: '0.5rem 1rem',
                                     fontSize: '0.875rem',

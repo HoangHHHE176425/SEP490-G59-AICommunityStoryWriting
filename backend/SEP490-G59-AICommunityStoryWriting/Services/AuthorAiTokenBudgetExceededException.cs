@@ -18,7 +18,7 @@ public sealed class AuthorAiTokenBudgetExceededException : InvalidOperationExcep
     private static string BuildMessage(long usedTokens, long limitTokens, AuthorAiTokenBudgetPeriodKind period)
     {
         if (limitTokens <= 0)
-            return "Tài khoản bạn đã sử dụng hết token AI. Vui lòng liên hệ quản trị viên để được cấp thêm token.";
+            return "Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo.";
 
         var scope = period switch
         {
@@ -29,6 +29,6 @@ public sealed class AuthorAiTokenBudgetExceededException : InvalidOperationExcep
             _ => "AI"
         };
         return
-            $"Đã đạt giới hạn token ({usedTokens:N0} / {limitTokens:N0}) theo mức {scope}. Vui lòng liên hệ quản trị viên để được nâng hạn hoặc đợi sang kỳ tiếp theo (đối với hạn theo ngày/tuần/tháng).";
+            $"Đã đạt giới hạn token ({usedTokens:N0} / {limitTokens:N0}) theo mức {scope}. Vui lòng đợi đến kỳ cấp token tiếp theo.";
     }
 }
