@@ -165,6 +165,9 @@ namespace AIStory.API
             var jwtKey = builder.Configuration["Jwt:Key"];
             var jwtIssuer = builder.Configuration["Jwt:Issuer"];
             var jwtAudience = builder.Configuration["Jwt:Audience"];
+            // Keep validation defaults aligned with JwtHelper.GenerateToken().
+            if (string.IsNullOrWhiteSpace(jwtIssuer)) jwtIssuer = "AIStory.API";
+            if (string.IsNullOrWhiteSpace(jwtAudience)) jwtAudience = "AIStory.Client";
             if (!string.IsNullOrEmpty(jwtKey))
             {
                 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

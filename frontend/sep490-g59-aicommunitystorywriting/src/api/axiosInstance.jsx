@@ -20,6 +20,10 @@ function clearAccessToken() {
     localStorage.removeItem("accessToken");
 }
 
+function extractAccessToken(payload) {
+    return payload?.accessToken ?? payload?.AccessToken ?? "";
+}
+
 function notifySessionEnded(message) {
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent("app:auth:session-ended", {
@@ -138,7 +142,7 @@ axiosInstance.interceptors.response.use(
 
         try {
             const refreshRes = await refreshClient.post("/Auth/refresh");
-            const newToken = refreshRes?.data?.accessToken;
+            const newToken = extractAccessToken(refreshRes?.data);
             if (!newToken) {
                 clearAccessToken();
                 const translatedError = translateAxiosErrorMessage(error);
