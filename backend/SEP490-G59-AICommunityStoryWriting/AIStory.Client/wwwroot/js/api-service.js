@@ -1313,17 +1313,9 @@ class ApiService {
         return this.request(`/admin/users${qs ? '?' + qs : ''}`);
     }
 
-    /** Giới hạn token AI tích lũy theo user (admin). */
-    static async adminGetAuthorAiTokenBudget(userId) {
-        return this.request(`/admin/users/${encodeURIComponent(userId)}/author-ai-token-budget`);
-    }
-
-    /** Đặt giới hạn token AI. Body gồm các trường tùy chọn (null = bỏ hạn cột đó): tokenLimit, tokenLimitPerDay, tokenLimitPerWeek, tokenLimitPerMonth (UTC). */
-    static async adminPutAuthorAiTokenBudget(userId, body) {
-        return this.request(`/admin/users/${encodeURIComponent(userId)}/author-ai-token-budget`, {
-            method: 'PUT',
-            body: JSON.stringify(body != null ? body : {})
-        });
+    /** Chi tiết 1 user (admin). */
+    static async adminGetUserById(userId) {
+        return this.request(`/admin/users/${encodeURIComponent(userId)}`);
     }
 
     /** Token AI mặc định khi user lần đầu trở thành AUTHOR (admin). Null = không set cột tương ứng. */

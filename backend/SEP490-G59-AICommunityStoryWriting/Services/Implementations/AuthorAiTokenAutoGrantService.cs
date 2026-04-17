@@ -11,6 +11,13 @@ namespace Services.Implementations;
 
 public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantService
 {
+    // Singleton: bảng author_ai_token_auto_grant_rules chỉ có 1 dòng.
+    // Dòng này vừa dùng để:
+    // - cấp token ban đầu khi user trở thành AUTHOR (track bằng selected_user_ids),
+    // - gia hạn theo tháng (set ai_token_limit = grant_amount cho tất cả AUTHOR).
+    public const string SingletonRuleName = "AUTHOR_AI_TOKEN_SINGLETON";
+    private const string PeriodKindMonthlyUtc = "monthly_utc";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -24,6 +31,48 @@ public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantServi
     {
         _db = db;
         _logger = logger;
+    }
+
+    public async Task<bool> OnAuthorBecameAuthorAsync(Guid authorUserId, CancellationToken cancellationToken = default)
+    {
+        if (authorUserId == Guid.Empty) return false;
+
+        var rule = await _db.author_ai_token_auto_grant_rules
+            .OrderBy(r => r.created_at_utc)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+        if (rule == null) return false;
+
+        var ids = DeserializeSelected(rule.selected_user_ids);
+        if (ids.Contains(authorUserId))
+            return false; // already tracked
+
+        ids.Add(authorUserId);
+        rule.selected_user_ids = ids.Count == 0 ? "[]" : JsonSerializer.Serialize(ids.Distinct().ToList(), JsonOptions);
+        rule.updated_at_utc = DateTime.UtcNow;
+
+        // Nếu rule đang bật và có grant_amount thì cấp token ban đầu.
+        if (!rule.is_enabled || rule.grant_amount <= 0)
+        {
+            await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+
+        var user = await _db.users.FirstOrDefaultAsync(u => u.id == authorUserId, cancellationToken).ConfigureAwait(false);
+        if (user == null) return false;
+        try
+        {
+            // Không cộng dồn: cấp số dư ban đầu = grant_amount.
+            user.ai_token_limit = rule.grant_amount;
+        }
+        catch (OverflowException)
+        {
+            user.ai_token_limit = long.MaxValue;
+        }
+        user.updated_at = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     public async Task<IReadOnlyList<AuthorAiTokenAutoGrantRuleDto>> ListRulesAsync(CancellationToken cancellationToken = default)
@@ -49,22 +98,40 @@ public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantServi
     {
         ValidateUpsert(request);
         var now = DateTime.UtcNow;
-        var entity = new author_ai_token_auto_grant_rules
+        // Lịch gia hạn kế tiếp: cùng ngày của tháng sau (UTC 00:00).
+        // vd chạy ngày 17/4 -> last_run_at_utc = 17/5; đến 17/5 auto chạy -> 17/6...
+        var nextRenewal = AddMonthsPreserveDayUtc(UtcStartOfDay(now), 1);
+
+        // Singleton upsert: nếu đã có dòng thì update, không tạo thêm.
+        var entity = await _db.author_ai_token_auto_grant_rules
+            .OrderBy(r => r.created_at_utc)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (entity == null)
         {
-            id = Guid.NewGuid(),
-            is_enabled = request.IsEnabled,
-            display_name = string.IsNullOrWhiteSpace(request.DisplayName) ? null : request.DisplayName.Trim(),
-            period_kind = NormalizePeriodKind(request.PeriodKind),
-            grant_limit_field = NormalizeLimitField(request.GrantLimitField),
-            grant_amount = request.GrantAmount,
-            apply_to_all_authors = request.ApplyToAllAuthors,
-            selected_user_ids = SerializeSelected(request),
-            last_executed_period_key = null,
-            last_run_at_utc = null,
-            created_at_utc = now,
-            updated_at_utc = now,
-        };
-        _db.author_ai_token_auto_grant_rules.Add(entity);
+            entity = new author_ai_token_auto_grant_rules
+            {
+                id = Guid.NewGuid(),
+                created_at_utc = now,
+                selected_user_ids = "[]",
+                last_executed_period_key = null,
+                last_run_at_utc = nextRenewal,
+            };
+            _db.author_ai_token_auto_grant_rules.Add(entity);
+        }
+
+        entity.is_enabled = request.IsEnabled;
+        entity.display_name = SingletonRuleName;
+        entity.period_kind = PeriodKindMonthlyUtc;
+        entity.grant_limit_field = "lifetime";
+        entity.grant_amount = request.GrantAmount;
+        entity.apply_to_all_authors = true;
+        entity.updated_at_utc = now;
+        if (!entity.last_run_at_utc.HasValue) entity.last_run_at_utc = nextRenewal;
+
+        await SyncSelectedUserIdsToAllAuthorsAsync(entity, cancellationToken).ConfigureAwait(false);
+
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return MapToDto(entity);
     }
@@ -80,13 +147,21 @@ public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantServi
         if (entity == null) return null;
 
         entity.is_enabled = request.IsEnabled;
-        entity.display_name = string.IsNullOrWhiteSpace(request.DisplayName) ? null : request.DisplayName.Trim();
-        entity.period_kind = NormalizePeriodKind(request.PeriodKind);
-        entity.grant_limit_field = NormalizeLimitField(request.GrantLimitField);
+        entity.display_name = SingletonRuleName;
+        entity.period_kind = PeriodKindMonthlyUtc;
+        entity.grant_limit_field = "lifetime";
         entity.grant_amount = request.GrantAmount;
-        entity.apply_to_all_authors = request.ApplyToAllAuthors;
-        entity.selected_user_ids = SerializeSelected(request);
+        entity.apply_to_all_authors = true;
+        // selected_user_ids dùng để track ai đã được cấp token lần đầu khi lên AUTHOR.
+        if (string.IsNullOrWhiteSpace(entity.selected_user_ids))
+            entity.selected_user_ids = "[]";
+
+        // Nếu chưa có ngày gia hạn, set theo "cùng ngày tháng sau".
+        if (!entity.last_run_at_utc.HasValue)
+            entity.last_run_at_utc = AddMonthsPreserveDayUtc(UtcStartOfDay(DateTime.UtcNow), 1);
+
         entity.updated_at_utc = DateTime.UtcNow;
+        await SyncSelectedUserIdsToAllAuthorsAsync(entity, cancellationToken).ConfigureAwait(false);
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return MapToDto(entity);
     }
@@ -110,7 +185,7 @@ public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantServi
         var executed = 0;
         foreach (var rule in rules)
         {
-            if (await TryExecuteRuleIfNewPeriodAsync(rule, cancellationToken).ConfigureAwait(false))
+            if (await TryExecuteRuleIfDueAsync(rule, cancellationToken).ConfigureAwait(false))
                 executed++;
         }
 
@@ -124,34 +199,35 @@ public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantServi
         var rule = await _db.author_ai_token_auto_grant_rules.FirstOrDefaultAsync(r => r.id == ruleId, cancellationToken)
             .ConfigureAwait(false);
         if (rule == null) return null;
-        var periodKey = GetCurrentPeriodKeyUtc(DateTime.UtcNow, rule.period_kind);
-        var n = await ExecuteGrantForRuleAsync(rule, periodKey, cancellationToken).ConfigureAwait(false);
-        rule.last_executed_period_key = periodKey;
-        rule.last_run_at_utc = DateTime.UtcNow;
-        rule.updated_at_utc = DateTime.UtcNow;
+
+        var utcNow = DateTime.UtcNow;
+        var n = await ExecuteGrantForRuleAsync(rule, periodKeyForLog: "manual", cancellationToken).ConfigureAwait(false);
+
+        // Sau khi chạy tay: lịch kế tiếp = cùng ngày tháng sau (theo ngày chạy thực tế).
+        rule.last_run_at_utc = AddMonthsPreserveDayUtc(UtcStartOfDay(utcNow), 1);
+        rule.updated_at_utc = utcNow;
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        return new AuthorAiTokenAutoGrantRunResultDto { RuleId = rule.id, PeriodKey = periodKey, UsersUpdated = n };
+        return new AuthorAiTokenAutoGrantRunResultDto { RuleId = rule.id, PeriodKey = "manual", UsersUpdated = n };
     }
 
-    private async Task<bool> TryExecuteRuleIfNewPeriodAsync(
+    private async Task<bool> TryExecuteRuleIfDueAsync(
         author_ai_token_auto_grant_rules rule,
         CancellationToken cancellationToken)
     {
         var utcNow = DateTime.UtcNow;
-        var currentKey = GetCurrentPeriodKeyUtc(utcNow, rule.period_kind);
-        if (string.Equals(rule.last_executed_period_key, currentKey, StringComparison.Ordinal))
+        var due = rule.last_run_at_utc ?? AddMonthsPreserveDayUtc(UtcStartOfDay(utcNow), 1);
+        if (utcNow < due)
             return false;
 
-        var n = await ExecuteGrantForRuleAsync(rule, currentKey, cancellationToken).ConfigureAwait(false);
-        rule.last_executed_period_key = currentKey;
-        rule.last_run_at_utc = utcNow;
+        var n = await ExecuteGrantForRuleAsync(rule, periodKeyForLog: due.ToString("yyyy-MM-dd"), cancellationToken).ConfigureAwait(false);
+        rule.last_run_at_utc = AddMonthsPreserveDayUtc(due, 1);
         rule.updated_at_utc = utcNow;
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         if (n > 0)
             _logger.LogInformation(
                 "Author AI token auto-grant rule {RuleId}: period {PeriodKey}, users updated {N}.",
                 rule.id,
-                currentKey,
+                due.ToString("yyyy-MM-dd"),
                 n);
         return true;
     }
@@ -161,7 +237,12 @@ public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantServi
         string periodKeyForLog,
         CancellationToken cancellationToken)
     {
-        var userIds = await ResolveTargetAuthorUserIdsAsync(rule, cancellationToken).ConfigureAwait(false);
+        // Admin rule: luôn áp dụng cho tất cả AUTHOR.
+        var userIds = await _db.users.AsNoTracking()
+            .Where(u => (u.role ?? "").ToUpper() == "AUTHOR")
+            .Select(u => u.id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
         if (userIds.Count == 0)
         {
             _logger.LogWarning("Author AI token auto-grant rule {RuleId}: no target authors (period {Key}).", rule.id, periodKeyForLog);
@@ -171,6 +252,9 @@ public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantServi
         var field = rule.grant_limit_field;
         var amount = rule.grant_amount;
         var updated = 0;
+
+        // Keep selected_user_ids in sync with apply_to_all_authors=true (auditing/UI).
+        rule.selected_user_ids = userIds.Count == 0 ? "[]" : JsonSerializer.Serialize(userIds.Distinct().ToList(), JsonOptions);
 
         foreach (var chunk in userIds.Chunk(200))
         {
@@ -182,7 +266,8 @@ public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantServi
             {
                 if (!string.Equals(u.role, "AUTHOR", StringComparison.OrdinalIgnoreCase))
                     continue;
-                ApplyAdditive(u, field, amount);
+                // Schema mới: không cộng dồn, set số dư = grant_amount.
+                u.ai_token_limit = amount;
                 u.updated_at = DateTime.UtcNow;
                 updated++;
             }
@@ -191,58 +276,21 @@ public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantServi
         return updated;
     }
 
-    private static void ApplyAdditive(users u, string field, long delta)
+    private static DateTime UtcStartOfDay(DateTime utcNow)
     {
-        switch (field)
-        {
-            case "lifetime":
-                u.author_ai_token_limit = AddToNullableLimit(u.author_ai_token_limit, delta);
-                break;
-            case "per_day":
-                u.author_ai_token_limit_per_day = AddToNullableLimit(u.author_ai_token_limit_per_day, delta);
-                break;
-            case "per_week":
-                u.author_ai_token_limit_per_week = AddToNullableLimit(u.author_ai_token_limit_per_week, delta);
-                break;
-            case "per_month":
-                u.author_ai_token_limit_per_month = AddToNullableLimit(u.author_ai_token_limit_per_month, delta);
-                break;
-            default:
-                throw new InvalidOperationException($"Unknown grant_limit_field: {field}");
-        }
+        var d = DateTime.SpecifyKind(utcNow, DateTimeKind.Utc).Date;
+        return DateTime.SpecifyKind(d, DateTimeKind.Utc);
     }
 
-    /// <summary>Null = không giới hạn; lần cộng đầu đặt = delta. Đã có giới hạn thì cộng thêm.</summary>
-    private static long? AddToNullableLimit(long? current, long delta)
+    private static DateTime AddMonthsPreserveDayUtc(DateTime utcDate, int months)
     {
-        if (!current.HasValue)
-            return delta;
-        try
-        {
-            return checked(current.Value + delta);
-        }
-        catch (OverflowException)
-        {
-            return long.MaxValue;
-        }
+        var u = DateTime.SpecifyKind(utcDate, DateTimeKind.Utc);
+        var target = u.AddMonths(months);
+        var day = Math.Min(u.Day, DateTime.DaysInMonth(target.Year, target.Month));
+        return new DateTime(target.Year, target.Month, day, 0, 0, 0, DateTimeKind.Utc);
     }
 
-    private async Task<List<Guid>> ResolveTargetAuthorUserIdsAsync(
-        author_ai_token_auto_grant_rules rule,
-        CancellationToken cancellationToken)
-    {
-        if (rule.apply_to_all_authors)
-        {
-            return await _db.users.AsNoTracking()
-                .Where(u => (u.role ?? "").ToUpper() == "AUTHOR")
-                .Select(u => u.id)
-                .ToListAsync(cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        var ids = DeserializeSelected(rule.selected_user_ids);
-        return ids.Distinct().ToList();
-    }
+    // NOTE: Admin auto-grant đã chuyển sang luôn áp dụng cho tất cả AUTHOR.
 
     private static List<Guid> DeserializeSelected(string? json)
     {
@@ -273,52 +321,29 @@ public sealed class AuthorAiTokenAutoGrantService : IAuthorAiTokenAutoGrantServi
         }
     }
 
-    private static string? SerializeSelected(AuthorAiTokenAutoGrantRuleUpsertRequest request)
+    private async Task SyncSelectedUserIdsToAllAuthorsAsync(author_ai_token_auto_grant_rules rule, CancellationToken cancellationToken)
     {
-        if (request.ApplyToAllAuthors) return null;
-        var ids = (request.SelectedUserIds ?? new List<Guid>()).Where(x => x != Guid.Empty).Distinct().ToList();
-        return ids.Count == 0 ? "[]" : JsonSerializer.Serialize(ids, JsonOptions);
+        if (rule == null) return;
+        if (!rule.apply_to_all_authors) return;
+
+        var authorIds = await _db.users.AsNoTracking()
+            .Where(u => (u.role ?? "").ToUpper() == "AUTHOR")
+            .Select(u => u.id)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        rule.selected_user_ids = authorIds.Count == 0 ? "[]" : JsonSerializer.Serialize(authorIds.Distinct().ToList(), JsonOptions);
     }
 
     private static void ValidateUpsert(AuthorAiTokenAutoGrantRuleUpsertRequest request)
     {
         if (request == null) throw new ArgumentNullException(nameof(request));
-        _ = NormalizePeriodKind(request.PeriodKind);
-        _ = NormalizeLimitField(request.GrantLimitField);
+        // Admin UI/API: auto monthly + all authors.
         if (request.GrantAmount <= 0)
             throw new ArgumentException("grantAmount phải lớn hơn 0.");
-        if (!request.ApplyToAllAuthors)
-        {
-            var ids = request.SelectedUserIds ?? new List<Guid>();
-            if (ids.Count == 0 || ids.All(x => x == Guid.Empty))
-                throw new ArgumentException("Khi không chọn \"tất cả tác giả\", cần ít nhất một selectedUserId.");
-        }
     }
 
-    private static string NormalizePeriodKind(string raw)
-    {
-        var s = (raw ?? "").Trim().ToLowerInvariant();
-        return s switch
-        {
-            "daily_utc" => "daily_utc",
-            "weekly_utc" => "weekly_utc",
-            "monthly_utc" => "monthly_utc",
-            _ => throw new ArgumentException("periodKind phải là daily_utc, weekly_utc hoặc monthly_utc."),
-        };
-    }
-
-    private static string NormalizeLimitField(string raw)
-    {
-        var s = (raw ?? "").Trim().ToLowerInvariant();
-        return s switch
-        {
-            "lifetime" => "lifetime",
-            "per_day" => "per_day",
-            "per_week" => "per_week",
-            "per_month" => "per_month",
-            _ => throw new ArgumentException("grantLimitField phải là lifetime, per_day, per_week hoặc per_month."),
-        };
-    }
+    // NOTE: Admin auto-grant cố định monthly_utc + lifetime.
 
     private static string GetCurrentPeriodKeyUtc(DateTime utcNow, string periodKind)
     {

@@ -1,23 +1,23 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text.Json;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Services.DTOs.Admin;
+using System.Text.Json;
 
 namespace AIStory.API.Controllers;
 
-/// <summary>Admin cấu hình hạn mức token AI mặc định khi user lần đầu trở thành AUTHOR.</summary>
+/// <summary>
+/// Admin cấu hình token AI mặc định cấp cho user khi lần đầu trở thành AUTHOR.
+/// Lưu chung trong singleton rule của <c>author_ai_token_auto_grant_rules</c>.
+/// </summary>
 [ApiController]
 [Route("api/admin/ai-usage-stats/author-token-defaults")]
 [Authorize(Roles = "ADMIN")]
 public sealed class AdminAuthorAiTokenDefaultsController : ControllerBase
 {
-    private const string SettingsKey = "author_ai_token_defaults_on_become_author";
-
+    private const string RuleName = global::Services.Implementations.AuthorAiTokenAutoGrantService.SingletonRuleName;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -34,24 +34,19 @@ public sealed class AdminAuthorAiTokenDefaultsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get(CancellationToken cancellationToken)
     {
-        var row = await _db.system_settings.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.key == SettingsKey, cancellationToken)
+        var rule = await _db.author_ai_token_auto_grant_rules.AsNoTracking()
+            .OrderBy(r => r.created_at_utc)
+            .FirstOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        if (row == null || string.IsNullOrWhiteSpace(row.value))
-            return Ok(new AuthorAiTokenDefaultsOnBecomeAuthorDto());
-
-        try
+        // Map về DTO cũ để không vỡ UI hiện tại (chỉ dùng Lifetime).
+        return Ok(new AuthorAiTokenDefaultsOnBecomeAuthorDto
         {
-            var dto = JsonSerializer.Deserialize<AuthorAiTokenDefaultsOnBecomeAuthorDto>(row.value, JsonOptions)
-                      ?? new AuthorAiTokenDefaultsOnBecomeAuthorDto();
-            return Ok(dto);
-        }
-        catch
-        {
-            // Nếu DB có value hỏng, trả empty để UI không vỡ.
-            return Ok(new AuthorAiTokenDefaultsOnBecomeAuthorDto());
-        }
+            Lifetime = rule != null && rule.is_enabled && rule.grant_amount > 0 ? rule.grant_amount : null,
+            PerDay = null,
+            PerWeek = null,
+            PerMonth = null
+        });
     }
 
     [HttpPut]
@@ -64,36 +59,55 @@ public sealed class AdminAuthorAiTokenDefaultsController : ControllerBase
         if (Invalid(body.Lifetime) || Invalid(body.PerDay) || Invalid(body.PerWeek) || Invalid(body.PerMonth))
             return BadRequest(new { message = "Giá trị token không được âm (hoặc null để không set)." });
 
-        Guid? updatedBy = null;
-        var sub = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
-        if (sub != null && Guid.TryParse(sub.Value, out var uid))
-            updatedBy = uid;
+        var amount = body.Lifetime ?? 0;
+        var rule = await _db.author_ai_token_auto_grant_rules
+            .OrderBy(r => r.created_at_utc)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
 
-        var json = JsonSerializer.Serialize(body, JsonOptions);
-        var row = await _db.system_settings.FirstOrDefaultAsync(x => x.key == SettingsKey, cancellationToken).ConfigureAwait(false);
-        if (row == null)
+        if (rule == null)
         {
-            row = new system_settings
+            var authorIds = await _db.users.AsNoTracking()
+                .Where(u => (u.role ?? "").ToUpper() == "AUTHOR")
+                .Select(u => u.id)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            rule = new author_ai_token_auto_grant_rules
             {
-                key = SettingsKey,
-                value = json,
-                value_type = "json",
-                description = "Default AI token limits applied when a user first becomes AUTHOR (null = do not set column).",
-                updated_at = DateTime.UtcNow,
-                updated_by = updatedBy
+                id = Guid.NewGuid(),
+                is_enabled = amount > 0,
+                display_name = RuleName,
+                period_kind = "monthly_utc",
+                grant_limit_field = "lifetime",
+                grant_amount = amount,
+                apply_to_all_authors = true,
+                selected_user_ids = authorIds.Count == 0 ? "[]" : JsonSerializer.Serialize(authorIds.Distinct().ToList(), JsonOptions),
+                created_at_utc = DateTime.UtcNow,
+                updated_at_utc = DateTime.UtcNow
             };
-            _db.system_settings.Add(row);
+            _db.author_ai_token_auto_grant_rules.Add(rule);
         }
         else
         {
-            row.value = json;
-            row.value_type = "json";
-            row.updated_at = DateTime.UtcNow;
-            row.updated_by = updatedBy;
+            rule.is_enabled = amount > 0;
+            rule.grant_amount = amount;
+            rule.display_name = RuleName;
+            rule.apply_to_all_authors = true;
+            rule.period_kind = "monthly_utc";
+            rule.grant_limit_field = "lifetime";
+            var authorIds = await _db.users.AsNoTracking()
+                .Where(u => (u.role ?? "").ToUpper() == "AUTHOR")
+                .Select(u => u.id)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+            rule.selected_user_ids = authorIds.Count == 0 ? "[]" : JsonSerializer.Serialize(authorIds.Distinct().ToList(), JsonOptions);
+            rule.updated_at_utc = DateTime.UtcNow;
         }
 
         await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        return Ok(body);
+        // Trả DTO cũ (Lifetime) cho UI hiện tại.
+        return Ok(new AuthorAiTokenDefaultsOnBecomeAuthorDto { Lifetime = amount > 0 ? amount : null, PerDay = null, PerWeek = null, PerMonth = null });
     }
 }
 

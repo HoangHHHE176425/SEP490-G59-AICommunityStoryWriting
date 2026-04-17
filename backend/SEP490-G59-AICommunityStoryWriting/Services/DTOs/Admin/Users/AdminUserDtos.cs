@@ -26,6 +26,9 @@ namespace Services.DTOs.Admin.Users
         public string? Phone { get; set; }
         public string? IdNumber { get; set; }
         public bool IsEmailVerified { get; set; }
+
+        // Schema mới: số dư token AI nằm trực tiếp ở users.ai_token_limit
+        public long AiTokenLimit { get; set; }
     }
 
     public class AdminUserDetailDto : AdminUserListItemDto

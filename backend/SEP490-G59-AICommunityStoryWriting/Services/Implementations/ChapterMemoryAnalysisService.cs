@@ -21,7 +21,6 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
     private readonly IStoryEventMemoryRepository _eventMemoryRepository;
     private readonly IStoryStoryStateRepository _storyStateRepository;
     private readonly IAIUsageLogRepository _aiUsageLogRepository;
-    private readonly IAuthorAiTokenBudgetService _authorAiTokenBudget;
 
     public ChapterMemoryAnalysisService(
         IConfiguration configuration,
@@ -29,8 +28,7 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
         IStoryCharacterMemoryRepository characterMemoryRepository,
         IStoryEventMemoryRepository eventMemoryRepository,
         IStoryStoryStateRepository storyStateRepository,
-        IAIUsageLogRepository aiUsageLogRepository,
-        IAuthorAiTokenBudgetService authorAiTokenBudget)
+        IAIUsageLogRepository aiUsageLogRepository)
     {
         _configuration = configuration;
         _storyRepository = storyRepository;
@@ -38,7 +36,6 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
         _eventMemoryRepository = eventMemoryRepository;
         _storyStateRepository = storyStateRepository;
         _aiUsageLogRepository = aiUsageLogRepository;
-        _authorAiTokenBudget = authorAiTokenBudget;
     }
 
     public async Task ExtractAndPersistAsync(
@@ -63,18 +60,7 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
         if (story == null)
             return;
 
-        var authorId = story.author_id ?? Guid.Empty;
-        if (authorId != Guid.Empty)
-        {
-            try
-            {
-                await _authorAiTokenBudget.EnsureWithinBudgetAsync(authorId, cancellationToken).ConfigureAwait(false);
-            }
-            catch (AuthorAiTokenBudgetExceededException)
-            {
-                return;
-            }
-        }
+        // Feature hỗ trợ hệ thống: không check/trừ token.
 
         var storyTitle = story.title ?? "";
 
@@ -181,6 +167,7 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
             status = "SUCCESS",
             created_at = DateTime.UtcNow
         });
+
     }
 
     private static string BuildExistingMemoryPromptBlock(

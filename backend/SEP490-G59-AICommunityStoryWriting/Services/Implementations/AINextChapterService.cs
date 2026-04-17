@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.ClientModel;
 using BusinessObjects.Entities;
+using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Configuration;
 using OpenAI.Chat;
 using Repositories;
@@ -177,6 +178,9 @@ namespace Services.Implementations
                 status = "SUCCESS",
                 created_at = DateTime.UtcNow
             });
+
+            // Debit token balance (clamp >= 0).
+            try { UserDAO.DebitAiTokenLimit(authorUserId, promptTokens + completionTokens); } catch { /* best-effort */ }
 
             return new SuggestNextChapterResponse
             {
