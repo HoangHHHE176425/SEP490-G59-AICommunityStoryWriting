@@ -1,34 +1,52 @@
 using AIStory.Services.Helpers;
+using BusinessObjects;
 using BusinessObjects.Account;
 using BusinessObjects.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Repositories.Interfaces;
+using Services.DTOs.Admin;
 using Services.DTOs.Account;
 using Services.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace Services.Implementations
 {
     public class AccountService : IAccountService
     {
+        private const string AuthorDefaultsSettingsKey = "author_ai_token_defaults_on_become_author";
+        private static readonly JsonSerializerOptions AuthorDefaultsJsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = false
+        };
+
         private readonly IUserRepository _userRepo;
         private readonly IPolicyRepository _policyRepo;
         private readonly IAuthorPolicyAcceptanceRepository _authorPolicyAcceptanceRepo;
         private readonly JwtHelper _jwtHelper;
+        private readonly StoryPlatformDbContext _db;
+        private readonly IConfiguration _config;
 
         public AccountService(
             IUserRepository userRepo,
             IPolicyRepository policyRepo,
             IAuthorPolicyAcceptanceRepository authorPolicyAcceptanceRepo,
-            JwtHelper jwtHelper)
+            JwtHelper jwtHelper,
+            StoryPlatformDbContext db,
+            IConfiguration config)
         {
             _userRepo = userRepo;
             _policyRepo = policyRepo;
             _authorPolicyAcceptanceRepo = authorPolicyAcceptanceRepo;
             _jwtHelper = jwtHelper;
+            _db = db;
+            _config = config;
         }
         public async Task DeleteAccountAsync(Guid userId)
         {
@@ -258,6 +276,9 @@ namespace Services.Implementations
                 user.must_resign_policy = false;
                 user.updated_at = DateTime.UtcNow;
                 await _userRepo.UpdateUser(user);
+
+                // Khi user lần đầu trở thành AUTHOR (luồng tự đăng ký), set hạn mức token AI mặc định nếu user chưa có hạn nào.
+                await TryApplyDefaultAuthorAiTokenLimitsIfUnsetAsync(user).ConfigureAwait(false);
             }
 
             return new BecomeAuthorResponse
@@ -313,6 +334,68 @@ namespace Services.Implementations
             if (acceptance == null) return false;
             var effectiveFrom = policy.activated_at ?? policy.created_at ?? DateTime.MinValue;
             return acceptance.accepted_at >= effectiveFrom;
+        }
+
+        private async Task TryApplyDefaultAuthorAiTokenLimitsIfUnsetAsync(users user)
+        {
+            // Chỉ áp dụng khi đang là AUTHOR.
+            var role = NormalizeRole(user.role);
+            if (role != "AUTHOR") return;
+
+            // Không overwrite nếu đã có bất kỳ hạn nào.
+            if (user.author_ai_token_limit.HasValue
+                || user.author_ai_token_limit_per_day.HasValue
+                || user.author_ai_token_limit_per_week.HasValue
+                || user.author_ai_token_limit_per_month.HasValue)
+            {
+                return;
+            }
+
+            // 1) Ưu tiên đọc config do admin set trong DB (system_settings).
+            AuthorAiTokenDefaultsOnBecomeAuthorDto? fromDb = null;
+            try
+            {
+                var row = await _db.system_settings.AsNoTracking()
+                    .Where(x => x.key == AuthorDefaultsSettingsKey)
+                    .Select(x => x.value)
+                    .FirstOrDefaultAsync()
+                    .ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(row))
+                    fromDb = JsonSerializer.Deserialize<AuthorAiTokenDefaultsOnBecomeAuthorDto>(row, AuthorDefaultsJsonOptions);
+            }
+            catch
+            {
+                fromDb = null;
+            }
+
+            long? limLife = fromDb?.Lifetime ?? _config.GetValue<long?>("AuthorAiTokenDefaults:Lifetime");
+            long? limDay = fromDb?.PerDay ?? _config.GetValue<long?>("AuthorAiTokenDefaults:PerDay");
+            long? limWeek = fromDb?.PerWeek ?? _config.GetValue<long?>("AuthorAiTokenDefaults:PerWeek");
+            long? limMonth = fromDb?.PerMonth ?? _config.GetValue<long?>("AuthorAiTokenDefaults:PerMonth");
+
+            var setLife = limLife.HasValue;
+            var setDay = limDay.HasValue;
+            var setWeek = limWeek.HasValue;
+            var setMonth = limMonth.HasValue;
+            if (!setLife && !setDay && !setWeek && !setMonth) return;
+
+            await _userRepo.SetAuthorAiTokenBudgetLimitsAsync(
+                    user.id,
+                    setLife,
+                    limLife,
+                    setDay,
+                    limDay,
+                    setWeek,
+                    limWeek,
+                    setMonth,
+                    limMonth)
+                .ConfigureAwait(false);
+
+            // keep entity in sync for later callers in this request
+            if (setLife) user.author_ai_token_limit = limLife;
+            if (setDay) user.author_ai_token_limit_per_day = limDay;
+            if (setWeek) user.author_ai_token_limit_per_week = limWeek;
+            if (setMonth) user.author_ai_token_limit_per_month = limMonth;
         }
     }
 }

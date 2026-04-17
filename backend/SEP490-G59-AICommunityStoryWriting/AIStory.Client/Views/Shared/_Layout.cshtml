@@ -89,6 +89,9 @@
                                 <li class="px-3 py-2 text-muted small" id="userWalletBalanceItem" style="white-space: normal; display: none;">
                                     <i class="bi bi-wallet2 me-1"></i> Ví coin: <span id="userWalletBalanceValue">0</span>
                                 </li>
+                                <li class="px-3 py-2 text-muted small" id="userAiTokenRemainingItem" style="white-space: normal; display: none;">
+                                    <i class="bi bi-cpu me-1"></i> Token AI còn lại: <span class="font-monospace" id="userAiTokenRemainingValue">—</span>
+                                </li>
                                 <li>
                                     <a class="dropdown-item" href="#" id="profileLink">
                                         <i class="bi bi-person"></i> Hồ sơ
@@ -218,6 +221,48 @@
                             walletItem.style.display = 'none';
                         });
                 }
+
+                // Load remaining AI token (AUTHOR)
+                const aiTokItem = document.getElementById('userAiTokenRemainingItem');
+                const aiTokVal = document.getElementById('userAiTokenRemainingValue');
+                const isAuthorForAi = (typeof AuthHelper !== 'undefined' && AuthHelper.isAuthor && AuthHelper.isAuthor());
+                if (aiTokItem && aiTokVal) {
+                    if (!isAuthorForAi) {
+                        aiTokItem.style.display = 'none';
+                    } else {
+                        aiTokItem.style.display = 'block';
+                        aiTokVal.textContent = '—';
+                        ApiService.getAiUsageLimit()
+                            .then(function (r) {
+                                const budget = r?.authorTokenBudget ?? r?.AuthorTokenBudget ?? null;
+                                const blocked = r?.authorTokenBudgetBlocked ?? r?.AuthorTokenBudgetBlocked ?? false;
+                                if (!budget) {
+                                    aiTokVal.textContent = '—';
+                                    return;
+                                }
+                                const unlimited = budget?.unlimitedLifetime ?? budget?.UnlimitedLifetime ?? (budget?.tokenLimit ?? budget?.TokenLimit) == null;
+                                if (unlimited) {
+                                    aiTokVal.textContent = '∞';
+                                    return;
+                                }
+                                const used = budget?.tokensUsed ?? budget?.TokensUsed ?? 0;
+                                const limit = budget?.tokenLimit ?? budget?.TokenLimit ?? null;
+                                const rem =
+                                    budget?.tokensRemainingLifetime ?? budget?.TokensRemainingLifetime ??
+                                    budget?.tokensRemaining ?? budget?.TokensRemaining ??
+                                    (limit != null ? (Number(limit) - Number(used)) : null);
+                                if (rem == null || !Number.isFinite(Number(rem))) {
+                                    aiTokVal.textContent = '—';
+                                    return;
+                                }
+                                const s = Number(rem).toLocaleString('vi-VN');
+                                aiTokVal.textContent = blocked ? (s + ' (đã chạm hạn)') : s;
+                            })
+                            .catch(function () {
+                                aiTokItem.style.display = 'none';
+                            });
+                    }
+                }
             } else {
                 // Hiển thị login/register
                 loginNavItem.style.display = 'block';
@@ -234,6 +279,8 @@
 
                 const walletItem = document.getElementById('userWalletBalanceItem');
                 if (walletItem) walletItem.style.display = 'none';
+                const aiTokItem = document.getElementById('userAiTokenRemainingItem');
+                if (aiTokItem) aiTokItem.style.display = 'none';
             }
         }
 

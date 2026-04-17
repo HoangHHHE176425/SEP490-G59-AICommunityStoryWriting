@@ -116,10 +116,13 @@ namespace AIStory.API
             builder.Services.AddScoped<IPolicyService, PolicyService>();
             builder.Services.AddScoped<IAdminPolicyService, AdminPolicyService>();
             builder.Services.AddScoped<IAdminUserService, AdminUserService>();
+            builder.Services.AddScoped<IAuthorAiTokenBudgetService, AuthorAiTokenBudgetService>();
+            builder.Services.AddScoped<IAuthorAiTokenAutoGrantService, AuthorAiTokenAutoGrantService>();
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
             builder.Services.AddScoped<IReviewDeadlineForfeitureService, ReviewDeadlineForfeitureService>();
             builder.Services.AddScoped<IModerationService, ModerationService>();
             builder.Services.AddHostedService<ReviewDeadlineForfeitureBackgroundService>();
+            builder.Services.AddHostedService<AuthorAiTokenAutoGrantBackgroundService>();
             builder.Services.AddScoped<IReviewEscalationService, ReviewEscalationService>();
             builder.Services.AddScoped<IAdminUnifiedEscalationService, AdminUnifiedEscalationService>();
             builder.Services.AddScoped<IStoryReportService, StoryReportService>();
@@ -148,6 +151,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IAiSensitiveWordsRepository, AiSensitiveWordsRepository>();
             builder.Services.AddScoped<IAiConfigsRepository, AiConfigsRepository>();
             builder.Services.AddScoped<IAIUsageLimitConfigService, AIUsageLimitConfigService>();
+            builder.Services.AddScoped<IAdminAiUsageStatsService, AdminAiUsageStatsService>();
             builder.Services.AddScoped<IChapterCompareService, ChapterCompareService>();
             builder.Services.AddScoped<IChapterVersionAiCompareService, ChapterVersionAiCompareService>();
             builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();

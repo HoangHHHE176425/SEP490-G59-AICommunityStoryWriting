@@ -566,5 +566,29 @@ namespace DataAccessObjects.DAOs
                 .Select(u => u.email)
                 .FirstOrDefault();
         }
+
+        /// <summary>Đặt một hoặc nhiều giới hạn token AI; chỉ cập nhật trường khi cờ set tương ứng là true (null = bỏ giới hạn cột đó).</summary>
+        public async Task<int> SetAuthorAiTokenBudgetLimitsAsync(
+            StoryPlatformDbContext context,
+            Guid userId,
+            bool setLifetime,
+            long? lifetimeLimit,
+            bool setPerDay,
+            long? perDayLimit,
+            bool setPerWeek,
+            long? perWeekLimit,
+            bool setPerMonth,
+            long? perMonthLimit,
+            CancellationToken cancellationToken = default)
+        {
+            var u = await context.users.FirstOrDefaultAsync(x => x.id == userId, cancellationToken);
+            if (u == null) return 0;
+            if (setLifetime) u.author_ai_token_limit = lifetimeLimit;
+            if (setPerDay) u.author_ai_token_limit_per_day = perDayLimit;
+            if (setPerWeek) u.author_ai_token_limit_per_week = perWeekLimit;
+            if (setPerMonth) u.author_ai_token_limit_per_month = perMonthLimit;
+            u.updated_at = DateTime.UtcNow;
+            return await context.SaveChangesAsync(cancellationToken);
+        }
     }
 }

@@ -71,5 +71,29 @@ namespace Repositories.Implementations
 
         public Task<(int Total, int Active, int Inactive, int Banned, int Pending, int Authors, int Moderators)> GetStatsAsync()
             => UserDAO.Instance.GetStatsAsync(_context);
+
+        public Task<int> SetAuthorAiTokenBudgetLimitsAsync(
+            Guid userId,
+            bool setLifetime,
+            long? lifetimeLimit,
+            bool setPerDay,
+            long? perDayLimit,
+            bool setPerWeek,
+            long? perWeekLimit,
+            bool setPerMonth,
+            long? perMonthLimit,
+            CancellationToken cancellationToken = default)
+            => UserDAO.Instance.SetAuthorAiTokenBudgetLimitsAsync(
+                _context,
+                userId,
+                setLifetime,
+                lifetimeLimit,
+                setPerDay,
+                perDayLimit,
+                setPerWeek,
+                perWeekLimit,
+                setPerMonth,
+                perMonthLimit,
+                cancellationToken);
     }
 }

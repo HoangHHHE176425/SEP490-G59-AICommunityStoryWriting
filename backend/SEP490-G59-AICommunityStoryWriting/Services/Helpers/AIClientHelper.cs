@@ -51,6 +51,16 @@ public static class AIClientHelper
         return (provider, model, apiKey!, baseUrl);
     }
 
+    /// <summary>JSON thường có <c>""</c> cho key tùy chọn; <see cref="string.IsNullOrWhiteSpace"/> phải fallback giống null (không dùng <c>??</c> vì <c>""</c> không null).</summary>
+    private static string? FirstNonWhiteApiKey(params string?[] candidates)
+    {
+        foreach (var c in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(c)) return c;
+        }
+        return null;
+    }
+
     private static (string provider, string? apiKey, string? baseUrl) NormalizeProviderConfig(string provider, string? apiKey, string? baseUrl)
     {
         if (provider.Equals("Ollama", StringComparison.OrdinalIgnoreCase))
@@ -91,13 +101,13 @@ public static class AIClientHelper
         if (agentName == AgentWriter)
         {
             provider = configuration["AI:WritingProvider"] ?? configuration["AI:Provider"] ?? "Ollama";
-            apiKey = configuration["AI:WritingApiKey"] ?? configuration["AI:ApiKey"];
+            apiKey = FirstNonWhiteApiKey(configuration["AI:WritingApiKey"], configuration["AI:ApiKey"]);
             baseUrl = configuration["AI:WritingBaseUrl"] ?? configuration["AI:BaseUrl"];
         }
         else
         {
             provider = configuration["AI:AnalysisProvider"] ?? configuration["AI:Provider"] ?? "Ollama";
-            apiKey = configuration["AI:AnalysisApiKey"] ?? configuration["AI:ApiKey"];
+            apiKey = FirstNonWhiteApiKey(configuration["AI:AnalysisApiKey"], configuration["AI:ApiKey"]);
             baseUrl = configuration["AI:AnalysisBaseUrl"] ?? configuration["AI:BaseUrl"];
         }
 
