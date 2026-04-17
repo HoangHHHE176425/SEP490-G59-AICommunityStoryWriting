@@ -17,6 +17,9 @@ public sealed class AuthorAiTokenBudgetExceededException : InvalidOperationExcep
 
     private static string BuildMessage(long usedTokens, long limitTokens, AuthorAiTokenBudgetPeriodKind period)
     {
+        if (limitTokens <= 0)
+            return "Tài khoản bạn đã sử dụng hết token AI. Vui lòng liên hệ quản trị viên để được cấp thêm token.";
+
         var scope = period switch
         {
             AuthorAiTokenBudgetPeriodKind.Lifetime => "tích lũy toàn thời gian",

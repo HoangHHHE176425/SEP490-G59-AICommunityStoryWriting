@@ -51,7 +51,7 @@ namespace AIStory.API.Controllers
         [JsonPropertyName("authorTokenBudget")]
         public AuthorAiTokenBudgetDto? AuthorTokenBudget { get; set; }
 
-        /// <summary>True khi tác giả đã vượt ít nhất một hạn token đang bật (khớp logic <see cref="IAuthorAiTokenBudgetService.EnsureWithinBudgetAsync"/>).</summary>
+        /// <summary>True khi số dư token AI đã cạn (khớp logic <see cref="IAuthorAiTokenBudgetService.EnsureWithinBudgetAsync"/>).</summary>
         [JsonPropertyName("authorTokenBudgetBlocked")]
         public bool AuthorTokenBudgetBlocked { get; set; }
     }
@@ -102,7 +102,7 @@ namespace AIStory.API.Controllers
 
         private static object BuildTokenBudgetExceededPayload(AuthorAiTokenBudgetExceededException ex) => new
         {
-            message = ex.Message,
+            message = string.IsNullOrWhiteSpace(ex.Message) ? "Tài khoản bạn đã sử dụng hết token AI." : ex.Message,
             tokensUsed = ex.UsedTokens,
             tokenLimit = ex.LimitTokens,
             period = ex.Period.ToString()
@@ -130,15 +130,8 @@ namespace AIStory.API.Controllers
             return StatusCode(403, BuildTokenBudgetExceededPayload(ex!));
         }
 
-        /// <summary>Khớp thứ tự kiểm tra trong <see cref="IAuthorAiTokenBudgetService.EnsureWithinBudgetAsync"/>.</summary>
         private static bool IsAuthorTokenBudgetBlocked(AuthorAiTokenBudgetDto b)
-        {
-            if (!b.UnlimitedPerDay && b.TokenLimitPerDay is { } d && b.TokensUsedTodayUtc >= d) return true;
-            if (!b.UnlimitedPerWeek && b.TokenLimitPerWeek is { } w && b.TokensUsedThisWeekUtc >= w) return true;
-            if (!b.UnlimitedPerMonth && b.TokenLimitPerMonth is { } m && b.TokensUsedThisMonthUtc >= m) return true;
-            if (!b.Unlimited && b.TokenLimit is { } l && b.TokensUsed >= l) return true;
-            return false;
-        }
+            => (b.TokensRemaining ?? 0) <= 0;
 
         /// <summary>Xem giới hạn sử dụng AI (mặc định 3 lần/24h mỗi loại). Hai bộ đếm tách: suggest-next-chapter và co-create.</summary>
         [HttpGet("usage-limit")]

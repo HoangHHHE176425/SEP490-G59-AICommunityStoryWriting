@@ -240,23 +240,14 @@
                                     aiTokVal.textContent = '—';
                                     return;
                                 }
-                                const unlimited = budget?.unlimitedLifetime ?? budget?.UnlimitedLifetime ?? (budget?.tokenLimit ?? budget?.TokenLimit) == null;
-                                if (unlimited) {
-                                    aiTokVal.textContent = '∞';
-                                    return;
-                                }
-                                const used = budget?.tokensUsed ?? budget?.TokensUsed ?? 0;
-                                const limit = budget?.tokenLimit ?? budget?.TokenLimit ?? null;
-                                const rem =
-                                    budget?.tokensRemainingLifetime ?? budget?.TokensRemainingLifetime ??
-                                    budget?.tokensRemaining ?? budget?.TokensRemaining ??
-                                    (limit != null ? (Number(limit) - Number(used)) : null);
+                                // Schema mới: số dư token AI nằm trực tiếp ở users.ai_token_limit.
+                                const rem = budget?.tokensRemaining ?? budget?.TokensRemaining ?? null;
                                 if (rem == null || !Number.isFinite(Number(rem))) {
                                     aiTokVal.textContent = '—';
                                     return;
                                 }
                                 const s = Number(rem).toLocaleString('vi-VN');
-                                aiTokVal.textContent = blocked ? (s + ' (đã chạm hạn)') : s;
+                                aiTokVal.textContent = blocked ? (s + ' (đã hết token)') : s;
                             })
                             .catch(function () {
                                 aiTokItem.style.display = 'none';
