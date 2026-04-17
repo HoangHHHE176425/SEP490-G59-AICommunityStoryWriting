@@ -9,6 +9,7 @@ using AIStory.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using System.Text.Json.Serialization;
 using Repositories;
 using Services;
@@ -71,6 +72,7 @@ namespace AIStory.API.Controllers
         private readonly IStoryRepository _storyRepository;
         private readonly IAISuggestRateLimitService _rateLimitService;
         private readonly IAuthorAiTokenBudgetService _authorAiTokenBudget;
+        private readonly IConfiguration _configuration;
         private readonly IWebHostEnvironment _env;
         private readonly ILogger<AIController> _logger;
 
@@ -84,6 +86,7 @@ namespace AIStory.API.Controllers
             IStoryRepository storyRepository,
             IAISuggestRateLimitService rateLimitService,
             IAuthorAiTokenBudgetService authorAiTokenBudget,
+            IConfiguration configuration,
             IWebHostEnvironment env,
             ILogger<AIController> logger)
         {
@@ -96,13 +99,14 @@ namespace AIStory.API.Controllers
             _storyRepository = storyRepository;
             _rateLimitService = rateLimitService;
             _authorAiTokenBudget = authorAiTokenBudget;
+            _configuration = configuration;
             _env = env;
             _logger = logger;
         }
 
         private static object BuildTokenBudgetExceededPayload(AuthorAiTokenBudgetExceededException ex) => new
         {
-            message = string.IsNullOrWhiteSpace(ex.Message) ? "Tài khoản bạn đã sử dụng hết token AI." : ex.Message,
+            message = string.IsNullOrWhiteSpace(ex.Message) ? "Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo." : ex.Message,
             tokensUsed = ex.UsedTokens,
             tokenLimit = ex.LimitTokens,
             period = ex.Period.ToString()
@@ -128,6 +132,23 @@ namespace AIStory.API.Controllers
             var (ok, ex) = await TryEnsureAuthorTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
             if (ok) return null;
             return StatusCode(403, BuildTokenBudgetExceededPayload(ex!));
+        }
+
+        private async Task<IActionResult?> TryRejectInsufficientEstimatedTokensAsync(
+            Guid authorUserId,
+            int requiredTokens,
+            CancellationToken cancellationToken)
+        {
+            if (requiredTokens <= 0) return null;
+            var budget = await _authorAiTokenBudget.GetBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+            var remaining = budget?.TokensRemaining;
+            if ((remaining ?? long.MaxValue) >= requiredTokens) return null;
+            return StatusCode(403, new
+            {
+                message = $"Số token AI còn lại không đủ để thực hiện yêu cầu này (cần tối thiểu {requiredTokens:N0} token). Vui lòng đợi đến kỳ cấp token tiếp theo.",
+                tokensRemaining = remaining,
+                minRequiredTokens = requiredTokens
+            });
         }
 
         private static bool IsAuthorTokenBudgetBlocked(AuthorAiTokenBudgetDto b)
@@ -180,7 +201,7 @@ namespace AIStory.API.Controllers
             return Ok(payload);
         }
 
-        /// <summary>Gợi ý 3 hướng đi khác nhau cho chương tiếp theo. Chỉ tác giả của truyện được gọi. Có giới hạn số lần gọi theo user (tránh 429).</summary>
+        /// <summary>Gợi ý 3 hướng đi khác nhau cho chương tiếp theo. Chỉ tác giả của truyện được gọi. Kiểm soát bằng token budget của tác giả.</summary>
         [HttpPost("suggest-next-chapter")]
         public async Task<IActionResult> SuggestNextChapter([FromBody] SuggestNextChapterRequest request, CancellationToken cancellationToken)
         {
@@ -194,17 +215,11 @@ namespace AIStory.API.Controllers
             var tokenCap = await TryRejectOverTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
             if (tokenCap != null)
                 return tokenCap;
-
-            if (!_rateLimitService.TryAcquire(authorUserId, AiRateLimitKind.SuggestNextChapter, out var retryAfterSeconds))
-            {
-                Response.Headers.RetryAfter = retryAfterSeconds.ToString();
-                return StatusCode(429, new
-                {
-                    message = "Bạn đã đạt giới hạn gợi ý chương (suggest-next-chapter) trong cửa sổ 24h. Vui lòng thử lại sau.",
-                    retryAfterSeconds,
-                    kind = "suggestNextChapter"
-                });
-            }
+            // Default theo observed usage thực tế: suggest-next-chapter thường ~3.6k-3.7k token/lần.
+            var minSuggestTokens = _configuration.GetValue("AI:SuggestMinRequiredTokens", 3800);
+            var insufficientTokens = await TryRejectInsufficientEstimatedTokensAsync(authorUserId, minSuggestTokens, cancellationToken).ConfigureAwait(false);
+            if (insufficientTokens != null)
+                return insufficientTokens;
 
             try
             {
@@ -262,16 +277,15 @@ namespace AIStory.API.Controllers
                 await Response.WriteAsJsonAsync(BuildTokenBudgetExceededPayload(budgetEx!), cancellationToken);
                 return;
             }
-
-            if (!_rateLimitService.TryAcquire(authorUserId, AiRateLimitKind.CoCreate, out var retryAfterSeconds))
+            // Default theo observed usage thực tế: co-create (outline + write) thường >13k token/lần.
+            var minCoCreateTokens = _configuration.GetValue("AI:CoCreateMinRequiredTokens", 14000);
+            var coCreateInsufficient = await TryRejectInsufficientEstimatedTokensAsync(authorUserId, minCoCreateTokens, cancellationToken).ConfigureAwait(false);
+            if (coCreateInsufficient != null)
             {
-                Response.StatusCode = 429;
-                Response.Headers.RetryAfter = retryAfterSeconds.ToString();
-                await Response.WriteAsJsonAsync(new
+                Response.StatusCode = 403;
+                await Response.WriteAsJsonAsync(coCreateInsufficient is ObjectResult o ? o.Value : new
                 {
-                    message = "Bạn đã đạt giới hạn đồng sáng tác (co-create) trong cửa sổ 24h. Vui lòng thử lại sau.",
-                    retryAfterSeconds,
-                    kind = "coCreate"
+                    message = "Số token AI còn lại không đủ để thực hiện đồng sáng tác. Vui lòng đợi đến kỳ cấp token tiếp theo."
                 }, cancellationToken);
                 return;
             }
