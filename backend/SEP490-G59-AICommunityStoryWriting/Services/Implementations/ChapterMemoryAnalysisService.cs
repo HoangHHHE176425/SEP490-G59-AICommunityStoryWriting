@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using OpenAI.Chat;
 using Repositories;
 using Repositories.Interfaces;
+using Services;
 using Services.Helpers;
 using Services.Interfaces;
 
@@ -20,6 +21,7 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
     private readonly IStoryEventMemoryRepository _eventMemoryRepository;
     private readonly IStoryStoryStateRepository _storyStateRepository;
     private readonly IAIUsageLogRepository _aiUsageLogRepository;
+    private readonly IAuthorAiTokenBudgetService _authorAiTokenBudget;
 
     public ChapterMemoryAnalysisService(
         IConfiguration configuration,
@@ -27,7 +29,8 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
         IStoryCharacterMemoryRepository characterMemoryRepository,
         IStoryEventMemoryRepository eventMemoryRepository,
         IStoryStoryStateRepository storyStateRepository,
-        IAIUsageLogRepository aiUsageLogRepository)
+        IAIUsageLogRepository aiUsageLogRepository,
+        IAuthorAiTokenBudgetService authorAiTokenBudget)
     {
         _configuration = configuration;
         _storyRepository = storyRepository;
@@ -35,6 +38,7 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
         _eventMemoryRepository = eventMemoryRepository;
         _storyStateRepository = storyStateRepository;
         _aiUsageLogRepository = aiUsageLogRepository;
+        _authorAiTokenBudget = authorAiTokenBudget;
     }
 
     public async Task ExtractAndPersistAsync(
@@ -56,7 +60,23 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
             return;
 
         var story = _storyRepository.GetById(storyId);
-        var storyTitle = story?.title ?? "";
+        if (story == null)
+            return;
+
+        var authorId = story.author_id ?? Guid.Empty;
+        if (authorId != Guid.Empty)
+        {
+            try
+            {
+                await _authorAiTokenBudget.EnsureWithinBudgetAsync(authorId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (AuthorAiTokenBudgetExceededException)
+            {
+                return;
+            }
+        }
+
+        var storyTitle = story.title ?? "";
 
         var existingCharacters = _characterMemoryRepository.GetByStoryId(storyId);
         var existingState = _storyStateRepository.GetByStoryId(storyId);
@@ -111,6 +131,8 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
                 chapter_id = chapterId,
                 action_type = ActionType,
                 model_name = model,
+                generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+                cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
                 status = "EMPTY_RESPONSE",
                 created_at = DateTime.UtcNow
             });
@@ -133,6 +155,8 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
                 chapter_id = chapterId,
                 action_type = ActionType,
                 model_name = model,
+                generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+                cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
                 prompt_tokens = promptTokens,
                 completion_tokens = completionTokens,
                 total_tokens = promptTokens + completionTokens,
@@ -149,6 +173,8 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
             chapter_id = chapterId,
             action_type = ActionType,
             model_name = model,
+            generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+            cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
             prompt_tokens = promptTokens,
             completion_tokens = completionTokens,
             total_tokens = promptTokens + completionTokens,

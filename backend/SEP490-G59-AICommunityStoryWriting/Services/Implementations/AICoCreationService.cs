@@ -142,11 +142,11 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         var (p1, m1, k1, u1) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlanner);
         var clientPlanner = AIClientHelper.CreateChatClient(p1, m1, k1, u1);
         var swOutline = Stopwatch.StartNew();
-        var outlineJson = await RunAgent1OutlineAsync(clientPlanner, story, contextBlock, effectiveIdea, languageInstruction, cancellationToken);
+        var (outlineJson, outlineCompletion) = await RunAgent1OutlineAsync(clientPlanner, story, contextBlock, effectiveIdea, languageInstruction, cancellationToken);
         swOutline.Stop();
         durations.Add(new AgentDuration { Step = "Outline", DurationMs = swOutline.ElapsedMilliseconds });
         progress?.Report(new CoCreateProgressEvent { Step = "Outline", DurationMs = swOutline.ElapsedMilliseconds, Message = "Đã xong dàn ý" });
-        LogUsage(authorUserId, request.StoryId, null, ActionOutline, m1, 0, 0);
+        LogUsageFromCompletion(authorUserId, request.StoryId, null, ActionOutline, m1, outlineCompletion);
 
         string? ideaConflictWarning = null;
         var ideaFeedback = TryParseIdeaContradiction(outlineJson);
@@ -159,7 +159,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
                 DurationMs = 0,
                 Message = "Phát hiện xung đột ý tưởng; đang điều chỉnh để vẫn viết tiếp."
             });
-            outlineJson = await RunAgent1OutlineAsync(
+            var (outlineJsonAdjusted, outlineCompletion2) = await RunAgent1OutlineAsync(
                 clientPlanner,
                 story,
                 contextBlock,
@@ -167,6 +167,8 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
                 languageInstruction,
                 cancellationToken,
                 allowContradictionResponse: false);
+            LogUsageFromCompletion(authorUserId, request.StoryId, null, ActionOutline, m1, outlineCompletion2);
+            outlineJson = outlineJsonAdjusted;
 
             // Nếu model vẫn trả nhánh contradiction thì fallback dàn ý tối thiểu để không dừng luồng.
             if (TryParseIdeaContradiction(outlineJson) != null)
@@ -184,12 +186,12 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         var clientWriter = AIClientHelper.CreateChatClient(p2, m2, k2, u2);
 
         var swWrite = Stopwatch.StartNew();
-        var draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, languageInstruction, suggestedTitle, cancellationToken);
+        var (draft, writeCompletion) = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, languageInstruction, suggestedTitle, cancellationToken);
         swWrite.Stop();
         draft = StripTrailingFeedbackFromDraft(draft);
         durations.Add(new AgentDuration { Step = "Write", DurationMs = swWrite.ElapsedMilliseconds });
         progress?.Report(new CoCreateProgressEvent { Step = "Write", DurationMs = swWrite.ElapsedMilliseconds, Message = "Đã viết nội dung" });
-        LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
+        LogUsageFromCompletion(authorUserId, request.StoryId, null, ActionWrite, m2, writeCompletion);
 
         var (draftAfterRefine, approved, reviewFeedback, revisionCount) = await RefineDraftWithSelfCorrectionAsync(
             clientWriter,
@@ -210,7 +212,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         if (CountWords(draft) < MinDraftWordCount)
         {
             var swExpand = Stopwatch.StartNew();
-            draft = await RunAgent2ExpandAsync(
+            var (expandedDraft, expandCompletion) = await RunAgent2ExpandAsync(
                 clientWriter,
                 contextBlock,
                 outlineForPrompt,
@@ -218,11 +220,12 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
                 languageInstruction,
                 suggestedTitle,
                 cancellationToken);
+            draft = expandedDraft;
             swExpand.Stop();
             draft = StripTrailingFeedbackFromDraft(draft);
             durations.Add(new AgentDuration { Step = "Length_Expand", DurationMs = swExpand.ElapsedMilliseconds });
             progress?.Report(new CoCreateProgressEvent { Step = "Length_Expand", DurationMs = swExpand.ElapsedMilliseconds, Message = "Đã mở rộng nội dung để đạt độ dài tối thiểu" });
-            LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
+            LogUsageFromCompletion(authorUserId, request.StoryId, null, ActionWrite, m2, expandCompletion);
 
             var (draftExpanded, expandApproved, expandReviewFeedback, expandRewrites) = await RefineDraftWithSelfCorrectionAsync(
                 clientWriter,
@@ -493,7 +496,7 @@ Quy tắc:
         return parts.Count == 0 ? null : string.Join("\n", parts);
     }
 
-    private async Task<string> RunAgent2CorrectAsync(
+    private async Task<(string Text, ChatCompletion Completion)> RunAgent2CorrectAsync(
         ChatClient client,
         string contextBlock,
         string outline,
@@ -517,10 +520,11 @@ Quy tắc:
         };
         var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentWriter);
         var completion = await client.CompleteChatAsync(messages, options, ct);
-        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+        var c = completion.Value;
+        var text = c.Content?.Count > 0 ? c.Content[0].Text : null;
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("Agent sửa bản nháp không trả về nội dung.");
-        return text.Trim();
+        return (text.Trim(), c);
     }
 
     /// <summary>Lặp tối đa N lần: kiểm tra từ cấm + chính tả → nếu lỗi thì Agent 2 viết lại.</summary>
@@ -588,13 +592,14 @@ Quy tắc:
                 break;
 
             var swW = Stopwatch.StartNew();
-            draft = await RunAgent2CorrectAsync(clientWriter, contextBlock, outlineForPrompt, draft, languageInstruction, instr, ct);
+            var (correctedDraft, correctCompletion) = await RunAgent2CorrectAsync(clientWriter, contextBlock, outlineForPrompt, draft, languageInstruction, instr, ct);
+            draft = correctedDraft;
             swW.Stop();
             draft = StripTrailingFeedbackFromDraft(draft);
             rewrites++;
             durations.Add(new AgentDuration { Step = $"{prefix}_Rewrite", DurationMs = swW.ElapsedMilliseconds });
             progress?.Report(new CoCreateProgressEvent { Step = $"{prefix}_Rewrite", DurationMs = swW.ElapsedMilliseconds, Message = $"Agent 2 đang viết lại bản nháp (lần {rewrites})" });
-            LogUsage(authorUserId, storyId, null, ActionWriteCorrect, writerModelName, 0, 0);
+            LogUsageFromCompletion(authorUserId, storyId, null, ActionWriteCorrect, writerModelName, correctCompletion);
         }
 
         var swGf = Stopwatch.StartNew();
@@ -626,7 +631,7 @@ Quy tắc:
         return (draft, okFinal, review, rewrites);
     }
 
-    private async Task<string> RunAgent1OutlineAsync(
+    private async Task<(string Text, ChatCompletion Completion)> RunAgent1OutlineAsync(
         ChatClient client,
         stories story,
         string contextBlock,
@@ -647,10 +652,11 @@ Quy tắc:
         };
         var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentPlanner);
         var completion = await client.CompleteChatAsync(messages, options);
-        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+        var c = completion.Value;
+        var text = c.Content?.Count > 0 ? c.Content[0].Text : null;
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("Agent dàn ý không trả về nội dung.");
-        return text.Trim();
+        return (text.Trim(), c);
     }
 
     private static string BuildForcedOutlineFallbackJson(string effectiveIdea)
@@ -673,7 +679,7 @@ Quy tắc:
         });
     }
 
-    private async Task<string> RunAgent2ExpandAsync(
+    private async Task<(string Text, ChatCompletion Completion)> RunAgent2ExpandAsync(
         ChatClient client,
         string contextBlock,
         string outline,
@@ -698,10 +704,11 @@ Quy tắc:
         };
         var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentWriter);
         var completion = await client.CompleteChatAsync(messages, options);
-        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+        var c = completion.Value;
+        var text = c.Content?.Count > 0 ? c.Content[0].Text : null;
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("Agent mở rộng nội dung không trả về nội dung.");
-        return text.Trim();
+        return (text.Trim(), c);
     }
 
     private static int CountWords(string? text)
@@ -1110,7 +1117,7 @@ Chỉ trả về nội dung truyện (draft).
 → Chỉ nội dung mà người đọc nhìn thấy
 """ + "\n\n" + ConstitutionalRules;
 
-    private async Task<string> RunAgent2WriteAsync(
+    private async Task<(string Text, ChatCompletion Completion)> RunAgent2WriteAsync(
         ChatClient client,
         string contextBlock,
         string outline,
@@ -1131,10 +1138,11 @@ Chỉ trả về nội dung truyện (draft).
         };
         var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentWriter);
         var completion = await client.CompleteChatAsync(messages, options);
-        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+        var c = completion.Value;
+        var text = c.Content?.Count > 0 ? c.Content[0].Text : null;
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("Agent viết nội dung không trả về nội dung.");
-        return text.Trim();
+        return (text.Trim(), c);
     }
 
     /// <summary>Cắt bỏ đoạn "Feedback: ..." mà model đôi khi thêm vào cuối bản nháp.</summary>
@@ -1148,8 +1156,9 @@ Chỉ trả về nội dung truyện (draft).
         return draft;
     }
 
-    private void LogUsage(Guid userId, Guid storyId, Guid? chapterId, string actionType, string modelName, int promptTokens, int completionTokens)
+    private void LogUsageFromCompletion(Guid userId, Guid storyId, Guid? chapterId, string actionType, string modelName, ChatCompletion completion)
     {
+        var (promptTokens, completionTokens, totalTokens) = AiChatCompletionUsageHelper.GetTokenCounts(completion);
         _aiUsageLogRepository.Log(new ai_usage_logs
         {
             user_id = userId,
@@ -1157,9 +1166,11 @@ Chỉ trả về nội dung truyện (draft).
             chapter_id = chapterId,
             action_type = actionType,
             model_name = modelName,
+            generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+            cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
             prompt_tokens = promptTokens,
             completion_tokens = completionTokens,
-            total_tokens = promptTokens + completionTokens,
+            total_tokens = totalTokens,
             status = "SUCCESS",
             created_at = DateTime.UtcNow
         });

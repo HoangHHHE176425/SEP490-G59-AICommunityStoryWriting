@@ -917,6 +917,11 @@ class ApiService {
         });
     }
 
+    // AI - Author usage limit
+    static async getAiUsageLimit() {
+        return this.request('/ai/usage-limit', { method: 'GET' });
+    }
+
     static async getMyChapterUnlockHistory(page = 1, pageSize = 20, filters = {}) {
         const params = new URLSearchParams({
             page: String(page),
@@ -1238,6 +1243,130 @@ class ApiService {
         return this.request(`/admin/compliance-story-reports/admin-action-requests/${encodeURIComponent(requestId)}/resolve`, {
             method: 'POST',
             body: JSON.stringify(body)
+        });
+    }
+
+    /** Thống kê AI (OpenRouter key + log request). Role ADMIN. */
+    static async adminGetAiOpenRouterKeyStats() {
+        return this.request('/admin/ai-usage-stats/openrouter-key');
+    }
+
+    /** Danh sách API key OpenRouter + usage (GET /api/v1/keys, cần Management key). */
+    static async adminGetAiOpenRouterKeysList() {
+        return this.request('/admin/ai-usage-stats/openrouter-keys');
+    }
+
+    /** Chi tiết một key theo hash (GET /api/v1/keys/{hash}). */
+    static async adminGetAiOpenRouterKeyByHash(hash) {
+        return this.request(`/admin/ai-usage-stats/openrouter-keys/${encodeURIComponent(hash)}`);
+    }
+
+    /** Credits account OpenRouter: đã nạp / đã dùng (GET /api/v1/credits, Management key). */
+    static async adminGetAiOpenRouterCredits() {
+        return this.request('/admin/ai-usage-stats/openrouter-credits');
+    }
+
+    /** Activity account-level (GET /api/v1/activity). Query: date (YYYY-MM-DD), api_key_hash, user_id. */
+    static async adminGetAiOpenRouterActivity(query = {}) {
+        const params = new URLSearchParams();
+        if (query.date) params.append('date', query.date);
+        if (query.api_key_hash) params.append('api_key_hash', query.api_key_hash);
+        if (query.user_id) params.append('user_id', query.user_id);
+        const qs = params.toString();
+        return this.request(`/admin/ai-usage-stats/openrouter-activity${qs ? '?' + qs : ''}`);
+    }
+
+    static async adminGetAiUsageRequests(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach((key) => {
+            const v = query[key];
+            if (v !== null && v !== undefined && v !== '') params.append(key, v);
+        });
+        const qs = params.toString();
+        return this.request(`/admin/ai-usage-stats/requests${qs ? '?' + qs : ''}`);
+    }
+
+    /** Số request theo ngày UTC (biểu đồ Generations). Query: fromUtc, toUtc, modelName, status, actionType. */
+    static async adminGetAiGenerationsDaily(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach((key) => {
+            const v = query[key];
+            if (v !== null && v !== undefined && v !== '') params.append(key, v);
+        });
+        const qs = params.toString();
+        return this.request(`/admin/ai-usage-stats/generations-daily${qs ? '?' + qs : ''}`);
+    }
+
+    /** JSON object từ GET /admin/ai-usage-stats/openrouter-generation/{id} */
+    static async adminGetAiOpenRouterGeneration(generationId) {
+        return this.request(`/admin/ai-usage-stats/openrouter-generation/${encodeURIComponent(generationId)}`);
+    }
+
+    /** Danh sách user (admin). Query: page, pageSize, role, status, search */
+    static async adminGetUsers(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach((key) => {
+            const v = query[key];
+            if (v !== null && v !== undefined && v !== '') params.append(key, String(v));
+        });
+        const qs = params.toString();
+        return this.request(`/admin/users${qs ? '?' + qs : ''}`);
+    }
+
+    /** Giới hạn token AI tích lũy theo user (admin). */
+    static async adminGetAuthorAiTokenBudget(userId) {
+        return this.request(`/admin/users/${encodeURIComponent(userId)}/author-ai-token-budget`);
+    }
+
+    /** Đặt giới hạn token AI. Body gồm các trường tùy chọn (null = bỏ hạn cột đó): tokenLimit, tokenLimitPerDay, tokenLimitPerWeek, tokenLimitPerMonth (UTC). */
+    static async adminPutAuthorAiTokenBudget(userId, body) {
+        return this.request(`/admin/users/${encodeURIComponent(userId)}/author-ai-token-budget`, {
+            method: 'PUT',
+            body: JSON.stringify(body != null ? body : {})
+        });
+    }
+
+    /** Token AI mặc định khi user lần đầu trở thành AUTHOR (admin). Null = không set cột tương ứng. */
+    static async adminGetAuthorAiTokenDefaultsOnBecomeAuthor() {
+        return this.request('/admin/ai-usage-stats/author-token-defaults');
+    }
+
+    /** Lưu token AI mặc định khi user lần đầu trở thành AUTHOR (admin). */
+    static async adminPutAuthorAiTokenDefaultsOnBecomeAuthor(body) {
+        return this.request('/admin/ai-usage-stats/author-token-defaults', {
+            method: 'PUT',
+            body: JSON.stringify(body != null ? body : {})
+        });
+    }
+
+    // ===== Author AI token auto-grant rules (admin) =====
+    static async adminListAuthorAiTokenAutoGrantRules() {
+        return this.request('/admin/author-ai-token-auto-grants');
+    }
+
+    static async adminCreateAuthorAiTokenAutoGrantRule(body) {
+        return this.request('/admin/author-ai-token-auto-grants', {
+            method: 'POST',
+            body: JSON.stringify(body != null ? body : {})
+        });
+    }
+
+    static async adminUpdateAuthorAiTokenAutoGrantRule(ruleId, body) {
+        return this.request(`/admin/author-ai-token-auto-grants/${encodeURIComponent(ruleId)}`, {
+            method: 'PUT',
+            body: JSON.stringify(body != null ? body : {})
+        });
+    }
+
+    static async adminDeleteAuthorAiTokenAutoGrantRule(ruleId) {
+        return this.request(`/admin/author-ai-token-auto-grants/${encodeURIComponent(ruleId)}`, {
+            method: 'DELETE'
+        });
+    }
+
+    static async adminRunAuthorAiTokenAutoGrantRuleNow(ruleId) {
+        return this.request(`/admin/author-ai-token-auto-grants/${encodeURIComponent(ruleId)}/run-now`, {
+            method: 'POST'
         });
     }
 }

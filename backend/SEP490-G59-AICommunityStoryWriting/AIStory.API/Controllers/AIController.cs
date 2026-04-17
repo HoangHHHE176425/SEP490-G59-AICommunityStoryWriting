@@ -11,6 +11,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json.Serialization;
 using Repositories;
+using Services;
+using Services.DTOs.Admin;
 using Services.DTOs.AI;
 using Services.Interfaces;
 
@@ -44,6 +46,14 @@ namespace AIStory.API.Controllers
         public int Remaining { get; set; }
         [JsonPropertyName("resetsAtUtc")]
         public DateTime? ResetsAtUtc { get; set; }
+
+        /// <summary>Chi tiết token AI đã dùng so với hạn (ngày/tuần/tháng/tích lũy). Null nếu không lấy được.</summary>
+        [JsonPropertyName("authorTokenBudget")]
+        public AuthorAiTokenBudgetDto? AuthorTokenBudget { get; set; }
+
+        /// <summary>True khi tác giả đã vượt ít nhất một hạn token đang bật (khớp logic <see cref="IAuthorAiTokenBudgetService.EnsureWithinBudgetAsync"/>).</summary>
+        [JsonPropertyName("authorTokenBudgetBlocked")]
+        public bool AuthorTokenBudgetBlocked { get; set; }
     }
 
     /// <summary>API AI: gợi ý chương tiếp theo, đồng sáng tác (dàn ý + viết + guardrail).</summary>
@@ -60,6 +70,7 @@ namespace AIStory.API.Controllers
         private readonly IStoryRagService _ragService;
         private readonly IStoryRepository _storyRepository;
         private readonly IAISuggestRateLimitService _rateLimitService;
+        private readonly IAuthorAiTokenBudgetService _authorAiTokenBudget;
         private readonly IWebHostEnvironment _env;
         private readonly ILogger<AIController> _logger;
 
@@ -72,6 +83,7 @@ namespace AIStory.API.Controllers
             IStoryRagService ragService,
             IStoryRepository storyRepository,
             IAISuggestRateLimitService rateLimitService,
+            IAuthorAiTokenBudgetService authorAiTokenBudget,
             IWebHostEnvironment env,
             ILogger<AIController> logger)
         {
@@ -83,19 +95,70 @@ namespace AIStory.API.Controllers
             _ragService = ragService;
             _storyRepository = storyRepository;
             _rateLimitService = rateLimitService;
+            _authorAiTokenBudget = authorAiTokenBudget;
             _env = env;
             _logger = logger;
         }
 
+        private static object BuildTokenBudgetExceededPayload(AuthorAiTokenBudgetExceededException ex) => new
+        {
+            message = ex.Message,
+            tokensUsed = ex.UsedTokens,
+            tokenLimit = ex.LimitTokens,
+            period = ex.Period.ToString()
+        };
+
+        private async Task<(bool Ok, AuthorAiTokenBudgetExceededException? Error)> TryEnsureAuthorTokenBudgetAsync(
+            Guid authorUserId,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                await _authorAiTokenBudget.EnsureWithinBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+                return (true, null);
+            }
+            catch (AuthorAiTokenBudgetExceededException ex)
+            {
+                return (false, ex);
+            }
+        }
+
+        private async Task<IActionResult?> TryRejectOverTokenBudgetAsync(Guid authorUserId, CancellationToken cancellationToken)
+        {
+            var (ok, ex) = await TryEnsureAuthorTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+            if (ok) return null;
+            return StatusCode(403, BuildTokenBudgetExceededPayload(ex!));
+        }
+
+        /// <summary>Khớp thứ tự kiểm tra trong <see cref="IAuthorAiTokenBudgetService.EnsureWithinBudgetAsync"/>.</summary>
+        private static bool IsAuthorTokenBudgetBlocked(AuthorAiTokenBudgetDto b)
+        {
+            if (!b.UnlimitedPerDay && b.TokenLimitPerDay is { } d && b.TokensUsedTodayUtc >= d) return true;
+            if (!b.UnlimitedPerWeek && b.TokenLimitPerWeek is { } w && b.TokensUsedThisWeekUtc >= w) return true;
+            if (!b.UnlimitedPerMonth && b.TokenLimitPerMonth is { } m && b.TokensUsedThisMonthUtc >= m) return true;
+            if (!b.Unlimited && b.TokenLimit is { } l && b.TokensUsed >= l) return true;
+            return false;
+        }
+
         /// <summary>Xem giới hạn sử dụng AI (mặc định 3 lần/24h mỗi loại). Hai bộ đếm tách: suggest-next-chapter và co-create.</summary>
         [HttpGet("usage-limit")]
-        public IActionResult GetUsageLimit()
+        public async Task<IActionResult> GetUsageLimit(CancellationToken cancellationToken)
         {
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
                 return Unauthorized(new { message = "Vui lòng đăng nhập." });
             var suggest = _rateLimitService.GetDailyLimitInfo(userId, AiRateLimitKind.SuggestNextChapter);
             var coCreate = _rateLimitService.GetDailyLimitInfo(userId, AiRateLimitKind.CoCreate);
+
+            AuthorAiTokenBudgetDto? authorBudget = null;
+            try
+            {
+                authorBudget = await _authorAiTokenBudget.GetBudgetAsync(userId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "GetBudgetAsync failed for UserId={UserId}", userId);
+            }
 
             var payload = new AiUsageLimitResponse
             {
@@ -116,7 +179,9 @@ namespace AIStory.API.Controllers
                 LimitPerDay = suggest.LimitPerDay,
                 UsedInWindow = suggest.UsedInWindow,
                 Remaining = suggest.Remaining,
-                ResetsAtUtc = suggest.ResetsAtUtc
+                ResetsAtUtc = suggest.ResetsAtUtc,
+                AuthorTokenBudget = authorBudget,
+                AuthorTokenBudgetBlocked = authorBudget != null && IsAuthorTokenBudgetBlocked(authorBudget)
             };
 
             return Ok(payload);
@@ -132,6 +197,10 @@ namespace AIStory.API.Controllers
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))
                 return Unauthorized(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." });
+
+            var tokenCap = await TryRejectOverTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+            if (tokenCap != null)
+                return tokenCap;
 
             if (!_rateLimitService.TryAcquire(authorUserId, AiRateLimitKind.SuggestNextChapter, out var retryAfterSeconds))
             {
@@ -190,6 +259,14 @@ namespace AIStory.API.Controllers
             {
                 Response.StatusCode = 401;
                 await Response.WriteAsJsonAsync(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." }, cancellationToken);
+                return;
+            }
+
+            var (budgetOk, budgetEx) = await TryEnsureAuthorTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+            if (!budgetOk)
+            {
+                Response.StatusCode = 403;
+                await Response.WriteAsJsonAsync(BuildTokenBudgetExceededPayload(budgetEx!), cancellationToken);
                 return;
             }
 

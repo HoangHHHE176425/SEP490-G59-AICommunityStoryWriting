@@ -169,6 +169,8 @@ namespace Services.Implementations
                 chapter_id = usageLogChapterId,
                 action_type = ActionType,
                 model_name = model,
+                generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+                cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
                 prompt_tokens = promptTokens,
                 completion_tokens = completionTokens,
                 total_tokens = promptTokens + completionTokens,
