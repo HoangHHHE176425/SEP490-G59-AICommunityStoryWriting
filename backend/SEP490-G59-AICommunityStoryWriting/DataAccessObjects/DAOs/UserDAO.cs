@@ -449,8 +449,13 @@ namespace DataAccessObjects.DAOs
 
         public static bool IsAuthorWritingSuspended(Guid authorUserId)
         {
-            // Cột author_writing_suspended_until đã bị loại bỏ khỏi schema.
-            return false;
+            if (authorUserId == Guid.Empty) return false;
+            using var context = new StoryPlatformDbContext();
+            var until = context.users.AsNoTracking()
+                .Where(u => u.id == authorUserId)
+                .Select(u => u.author_writing_suspended_until)
+                .FirstOrDefault();
+            return until.HasValue && until.Value > DateTime.UtcNow;
         }
 
         /// <summary>Số user có role AUTHOR, không tính tài khoản đã ban (thống kê công khai /community/stats).</summary>
@@ -481,8 +486,12 @@ namespace DataAccessObjects.DAOs
         /// <summary>Mốc đình chỉ quyền viết (UTC) — dùng cho thông báo lỗi / DTO.</summary>
         public static DateTime? GetAuthorWritingSuspendedUntilUtc(Guid userId)
         {
-            // Cột author_writing_suspended_until đã bị loại bỏ khỏi schema.
-            return null;
+            if (userId == Guid.Empty) return null;
+            using var context = new StoryPlatformDbContext();
+            return context.users.AsNoTracking()
+                .Where(u => u.id == userId)
+                .Select(u => u.author_writing_suspended_until)
+                .FirstOrDefault();
         }
 
         /// <summary>Batch: status + author_writing_suspended_until cho hàng đợi compliance.</summary>
@@ -496,10 +505,10 @@ namespace DataAccessObjects.DAOs
             using var context = new StoryPlatformDbContext();
             var rows = context.users.AsNoTracking()
                 .Where(u => ids.Contains(u.id))
-                .Select(u => new { u.id, u.status })
+                .Select(u => new { u.id, u.status, u.author_writing_suspended_until })
                 .ToList();
             foreach (var r in rows)
-                result[r.id] = (r.status, null);
+                result[r.id] = (r.status, r.author_writing_suspended_until);
             return result;
         }
 
@@ -534,8 +543,13 @@ namespace DataAccessObjects.DAOs
 
         public static void SetAuthorWritingSuspendedUntil(Guid userId, DateTime? untilUtc)
         {
-            // Cột author_writing_suspended_until đã bị loại bỏ khỏi schema.
-            // Giữ method để tương thích ngược nhưng không còn tác dụng.
+            if (userId == Guid.Empty) return;
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.FirstOrDefault(x => x.id == userId);
+            if (u == null) return;
+            u.author_writing_suspended_until = untilUtc;
+            u.updated_at = DateTime.UtcNow;
+            context.SaveChanges();
         }
 
         public static long GetAiTokenLimit(Guid userId)

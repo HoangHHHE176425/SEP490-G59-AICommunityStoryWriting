@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Repositories.Interfaces;
 using Services.DTOs.Account;
 using Services.Interfaces;
+using Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -154,7 +155,7 @@ namespace Services.Implementations
                 IsVerified = user.status == "ACTIVE",
 
                 Role = (user.role ?? "USER").Trim().ToUpperInvariant(),
-                AuthorWritingSuspendedUntilUtc = null,
+                AuthorWritingSuspendedUntilUtc = ApiDateTime.AsUtcForJson(user.author_writing_suspended_until),
 
                 Tags = tags,
 

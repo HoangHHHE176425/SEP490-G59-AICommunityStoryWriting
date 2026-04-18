@@ -1108,6 +1108,7 @@ public partial class StoryPlatformDbContext : DbContext
                 .HasDefaultValue("PENDING");
             entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.ai_token_limit).HasDefaultValue(0);
+            entity.Property(e => e.author_writing_suspended_until).HasColumnType("datetime2");
 
             entity.HasMany(d => d.comment).WithMany(p => p.user)
                 .UsingEntity<Dictionary<string, object>>(
