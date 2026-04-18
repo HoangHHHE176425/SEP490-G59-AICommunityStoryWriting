@@ -917,7 +917,7 @@ export function ChapterEditor({
                                 fontSize: '0.75rem',
                                 color: '#92400e',
                             }}>
-                                <strong>Lưu ý:</strong> Người đọc cần xu để mở khóa. Bạn nhận 70% số xu, nền tảng giữ 30%.
+                                <strong>Lưu ý:</strong> Người đọc cần xu để mở khóa. Bạn nhận 30% số xu, nền tảng giữ 70%.
                             </div>
                         )}
                     </div>
