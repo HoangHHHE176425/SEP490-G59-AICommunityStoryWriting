@@ -33,7 +33,10 @@ export function AuthorPolicyResignGuard() {
         checkingRef.current = true;
         try {
             const status = await getMyAuthorPolicyStatus('AUTHOR');
-            const mustResignNow = Boolean(status?.policy?.requireResign) && !Boolean(status?.hasAccepted);
+            // Ưu tiên cờ DB (khớp AuthorMustResignPolicyHandler); thêm điều kiện policy để không phụ thuộc một nguồn.
+            const mustResignNow =
+                Boolean(status?.mustResignPolicy) ||
+                (Boolean(status?.policy?.requireResign) && !Boolean(status?.hasAccepted));
             if (!mustResignNow) return;
 
             const currentPath = `${location.pathname}${location.search}${location.hash}`;

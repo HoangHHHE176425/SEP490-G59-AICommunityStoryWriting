@@ -19,6 +19,9 @@ namespace Services.DTOs.Policies
         public PolicyResponseDto Policy { get; set; } = null!;
         public bool HasAccepted { get; set; }
         public DateTime? AcceptedAt { get; set; }
+
+        /// <summary>Khớp cột users.must_resign_policy — dùng cho redirect FE và đồng bộ với AuthorMustResignPolicyHandler.</summary>
+        public bool MustResignPolicy { get; set; }
     }
 }
 

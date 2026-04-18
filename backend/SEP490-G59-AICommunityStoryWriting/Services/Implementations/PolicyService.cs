@@ -36,11 +36,15 @@ namespace Services.Implementations
             var acceptance = await _acceptRepo.GetAcceptanceAsync(userId, active.id);
             var hasAcceptedCurrent = IsAcceptanceValidForPolicy(acceptance, active);
 
+            var user = await _userRepo.GetUserById(userId);
+            var mustResignPolicy = user?.must_resign_policy == true;
+
             return new AuthorPolicyStatusDto
             {
                 Policy = Map(active),
                 HasAccepted = hasAcceptedCurrent,
-                AcceptedAt = hasAcceptedCurrent ? acceptance?.accepted_at : null
+                AcceptedAt = hasAcceptedCurrent ? acceptance?.accepted_at : null,
+                MustResignPolicy = mustResignPolicy
             };
         }
 
