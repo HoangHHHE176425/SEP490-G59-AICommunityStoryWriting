@@ -38,7 +38,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         _configuration = configuration;
     }
 
-    public async Task<string> BuildContextForCoCreateAsync(Guid storyId, string authorIdea, CancellationToken cancellationToken = default)
+    public async Task<string> BuildContextForCoCreateAsync(Guid storyId, string authorIdeaForPrompt, string ragQueryForRetrieval, CancellationToken cancellationToken = default)
     {
         var story = _storyRepository.GetById(storyId);
         if (story == null)
@@ -55,7 +55,9 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);
         if (ragMaxChars < 1000) ragMaxChars = DefaultRagMaxChars;
         if (ragTopK < 5) ragTopK = 5;
-        var query = authorIdea.Trim();
+        var query = ragQueryForRetrieval.Trim();
+        if (string.IsNullOrWhiteSpace(query))
+            query = authorIdeaForPrompt.Trim();
         var ragBlock = await _ragService.RetrieveContextAsync(storyId, query, maxChars: ragMaxChars, topK: ragTopK, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(ragBlock))
@@ -72,7 +74,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         if (!string.IsNullOrWhiteSpace(eventBlock)) parts.Add(eventBlock);
         if (!string.IsNullOrWhiteSpace(stateBlock)) parts.Add(stateBlock);
         parts.Add("## Ý tưởng tác giả");
-        parts.Add(authorIdea.Trim());
+        parts.Add(authorIdeaForPrompt.Trim());
 
         return string.Join("\n\n", parts.Where(s => !string.IsNullOrWhiteSpace(s)));
     }

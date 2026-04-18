@@ -88,8 +88,7 @@ namespace Services.Implementations
             var ragQuery = $"{story.summary ?? ""} {lastChapterContent}".Trim();
             var contextBlock = await _memoryEngine.BuildContextForSuggestAsync(request.StoryId, ragQuery, cancellationToken);
 
-            var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(contextBlock);
-            var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
+            var languageInstruction = StoryLanguageHelper.VietnameseOnlyInstruction;
 
             var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlanner);
             var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
@@ -288,7 +287,7 @@ Trả về DUY NHẤT một JSON hợp lệ, không markdown:
   ]
 }
 
-Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, xung đột hoặc kết cục); mỗi gợi ý phải đủ dài và cụ thể, không sơ sài; bám sát mạch truyện và đặc biệt nội dung các chương/đoạn gần nhất trong dữ liệu — chỉ gợi ý nội dung tiếp theo trên dòng thời gian, không đảo ngược hay lặp lại sự kiện đã xảy ra. Ngôn ngữ: Nội dung sinh ra (title, summary, direction, key_events, characters_involved) phải thuần theo đúng ngôn ngữ của bộ truyện; không xen từ hoặc cụm từ thuộc ngôn ngữ khác — mọi từ phải cùng một ngôn ngữ với truyện.
+Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, xung đột hoặc kết cục); mỗi gợi ý phải đủ dài và cụ thể, không sơ sài; bám sát mạch truyện và đặc biệt nội dung các chương/đoạn gần nhất trong dữ liệu — chỉ gợi ý nội dung tiếp theo trên dòng thời gian, không đảo ngược hay lặp lại sự kiện đã xảy ra. Ngôn ngữ: Toàn bộ nội dung sinh ra (title, summary, direction, key_events, characters_involved) phải bằng tiếng Việt; không xen từ hoặc cụm từ ngôn ngữ khác.
 """;
         }
 

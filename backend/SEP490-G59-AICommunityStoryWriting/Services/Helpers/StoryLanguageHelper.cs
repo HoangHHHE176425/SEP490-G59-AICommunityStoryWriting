@@ -1,47 +1,9 @@
-using System.Text.RegularExpressions;
-
 namespace Services.Helpers;
 
-/// <summary>Phát hiện ngôn ngữ bộ truyện từ mẫu văn bản (title, summary, nội dung chương) để AI viết đúng ngôn ngữ.</summary>
+/// <summary>Chỉ thị ngôn ngữ cho prompt AI: nền tảng chỉ hỗ trợ nội dung truyện tiếng Việt (không tự phát hiện ngôn ngữ từ context).</summary>
 public static class StoryLanguageHelper
 {
-    /// <summary>Ký tự và tổ hợp tiếng Việt (có dấu, đ). Mẫu văn bản chứa nhiều ký tự này thường là Tiếng Việt.</summary>
-    private static readonly Regex VietnameseChars = new Regex(
-        @"[\u00C0-\u024F\u1E00-\u1EFFđĐ]",
-        RegexOptions.Compiled);
-
-    /// <summary>Phát hiện ngôn ngữ chính từ mẫu văn bản (vd. vài trăm đến vài nghìn ký tự đầu context). Trả về "Vietnamese" hoặc "English".</summary>
-    public static string DetectFromStoryContext(string? sampleText)
-    {
-        if (string.IsNullOrWhiteSpace(sampleText))
-            return "English";
-
-        var take = Math.Min(2500, sampleText.Length);
-        var sample = sampleText[..take];
-        var letterCount = 0;
-        var vnCount = 0;
-        foreach (var c in sample)
-        {
-            if (char.IsLetter(c))
-            {
-                letterCount++;
-                if (VietnameseChars.IsMatch(c.ToString()))
-                    vnCount++;
-            }
-        }
-
-        if (letterCount < 10)
-            return "English";
-
-        var ratio = (double)vnCount / letterCount;
-        return ratio >= 0.08 ? "Vietnamese" : "English";
-    }
-
-    /// <summary>Chỉ thị ngôn ngữ đưa vào prompt: bắt buộc AI viết (dàn ý, nội dung, feedback) đúng ngôn ngữ bộ truyện, không xen ngôn ngữ khác.</summary>
-    public static string GetLanguageInstruction(string language)
-    {
-        return language.Equals("Vietnamese", StringComparison.OrdinalIgnoreCase)
-            ? "Ngôn ngữ bộ truyện: Tiếng Việt. Viết toàn bộ nội dung sinh ra (dàn ý, chương, feedback) bằng đúng ngôn ngữ đó. Không được xen bất kỳ từ hoặc cụm từ thuộc ngôn ngữ khác; mọi từ (từ nối, trạng từ, mô tả) phải thuần một ngôn ngữ của truyện."
-            : "Story language: English. Write all output (outline, chapter content, feedback) entirely in that language. Do not mix in words or phrases from any other language; every word must be in the story's language only.";
-    }
+    /// <summary>Đưa vào user prompt cùng các agent; bắt buộc mọi output liên quan truyện bằng tiếng Việt.</summary>
+    public const string VietnameseOnlyInstruction =
+        "Ngôn ngữ: Tiếng Việt. Viết toàn bộ nội dung sinh ra (dàn ý, chương, gợi ý, feedback) bằng tiếng Việt. Không được xen bất kỳ từ hoặc cụm từ thuộc ngôn ngữ khác; mọi từ phải thuần tiếng Việt.";
 }
