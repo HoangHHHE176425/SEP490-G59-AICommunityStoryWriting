@@ -73,6 +73,7 @@ public class ComplianceStoryReportsController : ControllerBase
 
         await using var db = new StoryPlatformDbContext();
 
+        // Mọi nhánh Concat phải gán cùng bộ thuộc tính (EF Core không UNION được projection lệch).
         var reportsQ = db.reports.AsNoTracking()
             .Where(r => r.compliance_resolved_by == uid.Value && r.resolved_at != null)
             .Select(r => new ComplianceLogItemDto
@@ -80,6 +81,8 @@ public class ComplianceStoryReportsController : ControllerBase
                 Source = SrcReportResolution,
                 RowId = r.id,
                 ReportId = r.id,
+                ComplianceUserId = uid.Value,
+                ComplianceUserName = (string?)null,
                 TargetType = r.target_type,
                 TargetId = r.target_id,
                 Status = r.status,
@@ -89,7 +92,10 @@ public class ComplianceStoryReportsController : ControllerBase
                     : (r.status == "DISMISSED"
                         ? "Đã kết luận không đủ bằng chứng để xử lý."
                         : "Đã xử lý phiếu báo cáo."),
-                CreatedAtUtc = r.resolved_at!.Value
+                TargetLabel = (string?)null,
+                OwnerLabel = (string?)null,
+                CreatedAtUtc = r.resolved_at!.Value,
+                ResolvedAtUtc = r.resolved_at
             });
 
         var actionQ = db.compliance_admin_action_requests.AsNoTracking()
@@ -98,12 +104,18 @@ public class ComplianceStoryReportsController : ControllerBase
             {
                 Source = SrcAdminActionRequest,
                 RowId = x.id,
+                ReportId = (Guid?)null,
+                ComplianceUserId = uid.Value,
+                ComplianceUserName = (string?)null,
                 TargetType = "STORY",
                 TargetId = x.story_id,
                 Status = x.status,
                 Action = x.request_kind,
                 Message = x.message,
-                CreatedAtUtc = x.created_at
+                TargetLabel = (string?)null,
+                OwnerLabel = (string?)null,
+                CreatedAtUtc = x.created_at,
+                ResolvedAtUtc = (DateTime?)null
             });
 
         var lockQ = db.compliance_report_lock_requests.AsNoTracking()
@@ -112,12 +124,18 @@ public class ComplianceStoryReportsController : ControllerBase
             {
                 Source = SrcLockRequest,
                 RowId = x.id,
+                ReportId = (Guid?)null,
+                ComplianceUserId = uid.Value,
+                ComplianceUserName = (string?)null,
                 TargetType = x.target_type,
                 TargetId = x.target_id,
                 Status = x.status,
                 Action = x.resolution_action,
                 Message = x.message,
-                CreatedAtUtc = x.created_at
+                TargetLabel = (string?)null,
+                OwnerLabel = (string?)null,
+                CreatedAtUtc = x.created_at,
+                ResolvedAtUtc = (DateTime?)null
             });
 
         var violationQ = db.violation_logs.AsNoTracking()
@@ -136,12 +154,17 @@ public class ComplianceStoryReportsController : ControllerBase
                     .OrderByDescending(r => r.resolved_at)
                     .Select(r => (Guid?)r.id)
                     .FirstOrDefault(),
+                ComplianceUserId = uid.Value,
+                ComplianceUserName = (string?)null,
                 TargetType = v.target_type,
                 TargetId = v.target_id,
                 Status = "DONE",
                 Action = v.penalty_type,
                 Message = v.reason,
-                CreatedAtUtc = v.created_at!.Value
+                TargetLabel = (string?)null,
+                OwnerLabel = (string?)null,
+                CreatedAtUtc = v.created_at!.Value,
+                ResolvedAtUtc = (DateTime?)null
             });
 
         var q = reportsQ.Concat(actionQ).Concat(lockQ).Concat(violationQ);

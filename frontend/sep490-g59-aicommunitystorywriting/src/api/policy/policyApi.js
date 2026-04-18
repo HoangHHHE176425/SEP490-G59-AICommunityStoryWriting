@@ -36,6 +36,9 @@ export async function getMyAuthorPolicyStatus(type = 'AUTHOR') {
       policy: normalizePolicy(res?.data?.policy ?? res?.data?.Policy),
       hasAccepted: res?.data?.hasAccepted ?? res?.data?.HasAccepted ?? false,
       acceptedAt: res?.data?.acceptedAt ?? res?.data?.AcceptedAt ?? null,
+      mustResignPolicy: Boolean(
+        res?.data?.mustResignPolicy ?? res?.data?.MustResignPolicy ?? res?.data?.must_resign_policy,
+      ),
     };
   } catch (err) {
     if (err?.response?.status === 404 || err?.response?.status === 403) return null;
