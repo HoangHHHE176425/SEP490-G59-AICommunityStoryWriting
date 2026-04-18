@@ -27,5 +27,18 @@ namespace Repositories.Interfaces
         // Admin
         Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(AdminUserQuery query);
         Task<(int Total, int Active, int Inactive, int Banned, int Pending, int Authors, int Moderators)> GetStatsAsync();
+
+        /// <summary>Cập nhật các cột giới hạn token AI; chỉ cập nhật trường có cờ <paramref name="set"/> tương ứng. Trả số bản ghi SaveChanges (0 nếu không có user).</summary>
+        Task<int> SetAuthorAiTokenBudgetLimitsAsync(
+            Guid userId,
+            bool setLifetime,
+            long? lifetimeLimit,
+            bool setPerDay,
+            long? perDayLimit,
+            bool setPerWeek,
+            long? perWeekLimit,
+            bool setPerMonth,
+            long? perMonthLimit,
+            CancellationToken cancellationToken = default);
     }
 }

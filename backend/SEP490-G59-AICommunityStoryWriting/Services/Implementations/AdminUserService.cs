@@ -1,11 +1,14 @@
+using BusinessObjects;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using DataAccessObjects.Queries;
+using Microsoft.EntityFrameworkCore;
 using Repositories.Interfaces;
 using Services.DTOs.Admin;
 using Services.DTOs.Admin.Users;
 using Services.Interfaces;
 using System;
+using Microsoft.Extensions.Configuration;
 
 namespace Services.Implementations
 {
@@ -14,14 +17,23 @@ namespace Services.Implementations
         private readonly IUserRepository _userRepo;
         private readonly IModeratorCategoryAssignmentRepository _modCatRepo;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
+        private readonly IConfiguration _config;
+        private readonly StoryPlatformDbContext _db;
+        private readonly IAuthorAiTokenAutoGrantService _authorAiTokenAutoGrant;
 
         public AdminUserService(
             IUserRepository userRepo,
             IModeratorCategoryAssignmentRepository modCatRepo,
+            StoryPlatformDbContext db,
+            IConfiguration config,
+            IAuthorAiTokenAutoGrantService authorAiTokenAutoGrant,
             INotificationHubNotifier? notificationHubNotifier = null)
         {
             _userRepo = userRepo;
             _modCatRepo = modCatRepo;
+            _db = db;
+            _config = config;
+            _authorAiTokenAutoGrant = authorAiTokenAutoGrant;
             _notificationHubNotifier = notificationHubNotifier;
         }
 
@@ -107,6 +119,16 @@ namespace Services.Implementations
 
             await _userRepo.AddUser(user);
 
+            // Nếu tạo mới với role=AUTHOR thì set hạn mức token mặc định cho tác giả (nếu user chưa có hạn nào).
+            if (string.Equals(user.role, "AUTHOR", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    await _authorAiTokenAutoGrant.OnAuthorBecameAuthorAsync(user.id).ConfigureAwait(false);
+                }
+                catch { /* best-effort */ }
+            }
+
             var created = await _userRepo.GetUserById(userId);
             return MapDetail(created!);
         }
@@ -138,6 +160,7 @@ namespace Services.Implementations
             var user = await _userRepo.GetUserById(id);
             if (user == null) return false;
 
+            var prevRole = (user.role ?? "").Trim();
             user.role = (role ?? "").Trim().ToUpperInvariant();
             user.updated_at = DateTime.UtcNow;
             await _userRepo.UpdateUser(user);
@@ -145,8 +168,22 @@ namespace Services.Implementations
             // Không còn gán moderator theo thể loại: xóa mọi bản ghi moderator_category_assignments khi đổi role.
             await _modCatRepo.ReplaceAssignmentsAsync(id, Array.Empty<Guid>());
 
+            // Khi user lần đầu chuyển sang AUTHOR thì set hạn mức token mặc định (không overwrite nếu đã có hạn).
+            if (!string.Equals(prevRole, "AUTHOR", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(user.role, "AUTHOR", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    await _authorAiTokenAutoGrant.OnAuthorBecameAuthorAsync(user.id).ConfigureAwait(false);
+                }
+                catch { /* best-effort */ }
+            }
+
             return true;
         }
+
+        // NOTE: Cơ chế cấp token cho tác giả mới đã chuyển sang singleton rule trong author_ai_token_auto_grant_rules
+        // (bảng author_ai_token_auto_grant_rules) và xử lý trong IAuthorAiTokenAutoGrantService.OnAuthorBecameAuthorAsync.
 
         public async Task<bool> DeleteAsync(Guid id)
         {
@@ -192,7 +229,8 @@ namespace Services.Implementations
                 Nickname = u.user_profiles?.nickname,
                 Phone = u.user_profiles?.phone,
                 IdNumber = u.user_profiles?.id_number,
-                IsEmailVerified = u.email_verified_at != null
+                IsEmailVerified = u.email_verified_at != null,
+                AiTokenLimit = u.ai_token_limit
             };
         }
 
@@ -211,7 +249,8 @@ namespace Services.Implementations
                 Nickname = u.user_profiles?.nickname,
                 Phone = u.user_profiles?.phone,
                 IdNumber = u.user_profiles?.id_number,
-                IsEmailVerified = u.email_verified_at != null
+                IsEmailVerified = u.email_verified_at != null,
+                AiTokenLimit = u.ai_token_limit
             };
             return dto;
         }

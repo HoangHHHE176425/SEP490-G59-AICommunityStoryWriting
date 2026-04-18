@@ -111,11 +111,16 @@ export default function StoryHeader({
                                         </span>
                                     )}
                                 </div>
+                                {story.usesAi && (
+                                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-teal-50 dark:bg-teal-950/30 text-teal-700 dark:text-teal-300 border border-teal-200/60 dark:border-teal-900/50">
+                                        Truyện sử dụng AI hỗ trợ
+                                    </span>
+                                )}
                             </div>
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 <span className="text-slate-500 dark:text-slate-400">Trạng thái truyện:</span>
                                 <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-900/50">
-                                    {story.storyProgressLabel ?? 'Đang ra'}
+                                    {story.storyProgressLabel ?? 'Đang rrrra'}
                                 </span>
                             </div>
                         </div>

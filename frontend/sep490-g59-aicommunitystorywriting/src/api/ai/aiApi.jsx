@@ -24,7 +24,7 @@ export async function indexRag(storyId) {
 }
 
 /**
- * Gợi ý 3 hướng đi cho chương tiếp theo (chỉ tác giả, có rate limit).
+ * Gợi ý 3 hướng đi cho chương tiếp theo (chỉ tác giả, check token từ BE).
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null} afterChapterId - ID chương sau đó muốn gợi ý; null = sau chương mới nhất
  * @param {string|null} prompt - Prompt tùy chọn do tác giả nhập
@@ -96,7 +96,7 @@ function parseCoCreateSseResponse(rawText) {
 }
 
 /**
- * Đồng sáng tác: ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → Guardrail → Agent 3 (kiểm duyệt). Có rate limit.
+ * Đồng sáng tác: ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → Guardrail → Agent 3 (kiểm duyệt). Check token từ BE.
  * BE trả về SSE (không phải JSON thuần) — axios phải đọc text rồi parse sự kiện `result`.
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null|undefined} authorIdea - Ý tưởng của tác giả (có thể null khi BE cho phép auto)
@@ -144,10 +144,10 @@ export async function coCreate(storyId, authorIdea, options = {}) {
         err.response = { status: 401, data: { message: msg } };
         throw err;
     }
-    if (response.status === 429) {
-        const msg = tryJsonMessage() || "Bạn đã đạt giới hạn sử dụng AI trong ngày.";
+    if (response.status === 403) {
+        const msg = tryJsonMessage() || "Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo.";
         const err = new Error(msg);
-        err.response = { status: 429, data: { message: msg } };
+        err.response = { status: 403, data: { message: msg } };
         throw err;
     }
     if (response.status === 400) {
@@ -307,22 +307,12 @@ export async function checkBannedWords(payload) {
 }
 
 /**
- * Xem giới hạn sử dụng AI của user hiện tại (số lần/24h).
- * @returns {Promise<{
- *   suggestNextChapter: { limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string|null },
- *   coCreate: { limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string|null },
- *   // legacy root (mirror suggest)
- *   limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string|null
- * }>}
+ * Xem giới hạn sử dụng AI của user hiện tại.
+ * Hỗ trợ cả payload cũ (rate-limit theo ngày) và payload mới (token budget author).
  */
 export async function getAiUsageLimit() {
     const response = await axiosInstance.get("ai/usage-limit");
     const raw = response?.data ?? {};
-    // DEBUG tạm: in payload usage-limit đúng 1 lần để đối chiếu BE runtime.
-    if (typeof window !== "undefined" && !window.__aiUsageLimitLoggedOnce) {
-        window.__aiUsageLimitLoggedOnce = true;
-        console.log("[AI usage-limit raw payload]", raw);
-    }
     const payload = raw?.data ?? raw?.Data ?? raw;
     const suggestRaw =
         payload?.suggestNextChapter ??
@@ -375,6 +365,48 @@ export async function getAiUsageLimit() {
         resetsAtUtc: hasCoCreateObject ? pickVal(coCreateRaw, ["resetsAtUtc", "ResetsAtUtc", "resets_at_utc"], null) : null,
     };
 
+    const tokenBudgetRaw =
+        payload?.authorTokenBudget ??
+        payload?.AuthorTokenBudget ??
+        null;
+    const tokenBudgetBlocked = Boolean(
+        payload?.authorTokenBudgetBlocked ??
+        payload?.AuthorTokenBudgetBlocked ??
+        false
+    );
+
+    const tokenLimit = pickVal(tokenBudgetRaw, ["tokenLimit", "TokenLimit"], null);
+    const grantAmountRaw =
+        pickVal(
+            tokenBudgetRaw,
+            ["grantAmount", "GrantAmount", "monthlyGrantAmount", "MonthlyGrantAmount"],
+            null
+        ) ??
+        pickVal(
+            payload,
+            ["grantAmount", "GrantAmount", "monthlyGrantAmount", "MonthlyGrantAmount"],
+            null
+        );
+    const grantAmount = grantAmountRaw != null && Number.isFinite(Number(grantAmountRaw))
+        ? Number(grantAmountRaw)
+        : null;
+    const tokensUsed = pickNum(tokenBudgetRaw, ["tokensUsed", "TokensUsed"], 0);
+    const tokensRemainingLifetimeRaw = pickVal(
+        tokenBudgetRaw,
+        ["tokensRemainingLifetime", "TokensRemainingLifetime", "tokensRemaining", "TokensRemaining"],
+        null
+    );
+    const unlimitedLifetime = Boolean(
+        pickVal(tokenBudgetRaw, ["unlimitedLifetime", "UnlimitedLifetime"], tokenLimit == null)
+    );
+    const tokensRemainingLifetime = unlimitedLifetime
+        ? null
+        : (tokensRemainingLifetimeRaw != null && Number.isFinite(Number(tokensRemainingLifetimeRaw))
+            ? Number(tokensRemainingLifetimeRaw)
+            : (tokenLimit != null && Number.isFinite(Number(tokenLimit))
+                ? Math.max(0, Number(tokenLimit) - Number(tokensUsed))
+                : null));
+
     return {
         suggestNextChapter: suggest,
         coCreate,
@@ -383,5 +415,15 @@ export async function getAiUsageLimit() {
         usedInWindow: suggest.usedInWindow,
         remaining: suggest.remaining,
         resetsAtUtc: suggest.resetsAtUtc,
+        authorTokenBudget: tokenBudgetRaw
+            ? {
+                tokenLimit: tokenLimit != null && Number.isFinite(Number(tokenLimit)) ? Number(tokenLimit) : null,
+                grantAmount,
+                tokensUsed,
+                tokensRemainingLifetime,
+                unlimitedLifetime,
+            }
+            : null,
+        authorTokenBudgetBlocked: tokenBudgetBlocked,
     };
 }

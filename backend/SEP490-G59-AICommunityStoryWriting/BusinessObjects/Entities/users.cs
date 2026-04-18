@@ -25,8 +25,8 @@ public partial class users
 
     public DateTime? updated_at { get; set; }
 
-    /// <summary>Đến thời điểm này (UTC) tác giả không được tạo truyện/chương mới (compliance + admin).</summary>
-    public DateTime? author_writing_suspended_until { get; set; }
+    /// <summary>Số dư token AI hiện tại của user (chỉ cộng/trừ trên cột này).</summary>
+    public long ai_token_limit { get; set; }
 
     public virtual ICollection<admin_audit_logs> admin_audit_logs { get; set; } = new List<admin_audit_logs>();
 

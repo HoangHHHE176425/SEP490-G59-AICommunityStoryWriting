@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using OpenAI.Chat;
 using Repositories;
 using Repositories.Interfaces;
+using Services;
 using Services.Helpers;
 using Services.Interfaces;
 
@@ -56,7 +57,12 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
             return;
 
         var story = _storyRepository.GetById(storyId);
-        var storyTitle = story?.title ?? "";
+        if (story == null)
+            return;
+
+        // Feature hỗ trợ hệ thống: không check/trừ token.
+
+        var storyTitle = story.title ?? "";
 
         var existingCharacters = _characterMemoryRepository.GetByStoryId(storyId);
         var existingState = _storyStateRepository.GetByStoryId(storyId);
@@ -111,6 +117,8 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
                 chapter_id = chapterId,
                 action_type = ActionType,
                 model_name = model,
+                generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+                cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
                 status = "EMPTY_RESPONSE",
                 created_at = DateTime.UtcNow
             });
@@ -133,6 +141,8 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
                 chapter_id = chapterId,
                 action_type = ActionType,
                 model_name = model,
+                generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+                cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
                 prompt_tokens = promptTokens,
                 completion_tokens = completionTokens,
                 total_tokens = promptTokens + completionTokens,
@@ -149,12 +159,15 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
             chapter_id = chapterId,
             action_type = ActionType,
             model_name = model,
+            generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+            cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
             prompt_tokens = promptTokens,
             completion_tokens = completionTokens,
             total_tokens = promptTokens + completionTokens,
             status = "SUCCESS",
             created_at = DateTime.UtcNow
         });
+
     }
 
     private static string BuildExistingMemoryPromptBlock(

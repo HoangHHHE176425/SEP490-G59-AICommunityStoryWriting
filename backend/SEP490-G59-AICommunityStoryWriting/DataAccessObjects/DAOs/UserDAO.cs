@@ -449,11 +449,8 @@ namespace DataAccessObjects.DAOs
 
         public static bool IsAuthorWritingSuspended(Guid authorUserId)
         {
-            using var context = new StoryPlatformDbContext();
-            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == authorUserId);
-            if (u?.author_writing_suspended_until == null)
-                return false;
-            return u.author_writing_suspended_until > DateTime.UtcNow;
+            // Cột author_writing_suspended_until đã bị loại bỏ khỏi schema.
+            return false;
         }
 
         /// <summary>Số user có role AUTHOR, không tính tài khoản đã ban (thống kê công khai /community/stats).</summary>
@@ -484,9 +481,8 @@ namespace DataAccessObjects.DAOs
         /// <summary>Mốc đình chỉ quyền viết (UTC) — dùng cho thông báo lỗi / DTO.</summary>
         public static DateTime? GetAuthorWritingSuspendedUntilUtc(Guid userId)
         {
-            using var context = new StoryPlatformDbContext();
-            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == userId);
-            return u?.author_writing_suspended_until;
+            // Cột author_writing_suspended_until đã bị loại bỏ khỏi schema.
+            return null;
         }
 
         /// <summary>Batch: status + author_writing_suspended_until cho hàng đợi compliance.</summary>
@@ -500,10 +496,10 @@ namespace DataAccessObjects.DAOs
             using var context = new StoryPlatformDbContext();
             var rows = context.users.AsNoTracking()
                 .Where(u => ids.Contains(u.id))
-                .Select(u => new { u.id, u.status, u.author_writing_suspended_until })
+                .Select(u => new { u.id, u.status })
                 .ToList();
             foreach (var r in rows)
-                result[r.id] = (r.status, r.author_writing_suspended_until);
+                result[r.id] = (r.status, null);
             return result;
         }
 
@@ -538,10 +534,41 @@ namespace DataAccessObjects.DAOs
 
         public static void SetAuthorWritingSuspendedUntil(Guid userId, DateTime? untilUtc)
         {
+            // Cột author_writing_suspended_until đã bị loại bỏ khỏi schema.
+            // Giữ method để tương thích ngược nhưng không còn tác dụng.
+        }
+
+        public static long GetAiTokenLimit(Guid userId)
+        {
             using var context = new StoryPlatformDbContext();
-            var u = context.users.FirstOrDefault(x => x.id == userId)
-                ?? throw new InvalidOperationException("User not found.");
-            u.author_writing_suspended_until = untilUtc;
+            return context.users.AsNoTracking()
+                .Where(u => u.id == userId)
+                .Select(u => u.ai_token_limit)
+                .FirstOrDefault();
+        }
+
+        /// <summary>Trừ token AI khỏi số dư. Không cho phép âm (nếu thiếu thì clamp về 0).</summary>
+        public static void DebitAiTokenLimit(Guid userId, long tokens)
+        {
+            if (userId == Guid.Empty || tokens <= 0) return;
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.FirstOrDefault(x => x.id == userId);
+            if (u == null) return;
+            var cur = u.ai_token_limit;
+            var next = cur - tokens;
+            u.ai_token_limit = next >= 0 ? next : 0;
+            u.updated_at = DateTime.UtcNow;
+            context.SaveChanges();
+        }
+
+        /// <summary>Cộng token AI vào số dư.</summary>
+        public static void CreditAiTokenLimit(Guid userId, long tokens)
+        {
+            if (userId == Guid.Empty || tokens <= 0) return;
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.FirstOrDefault(x => x.id == userId);
+            if (u == null) return;
+            u.ai_token_limit = checked(u.ai_token_limit + tokens);
             u.updated_at = DateTime.UtcNow;
             context.SaveChanges();
         }
@@ -565,6 +592,36 @@ namespace DataAccessObjects.DAOs
                 .Where(u => u.id == userId)
                 .Select(u => u.email)
                 .FirstOrDefault();
+        }
+
+        /// <summary>Đặt một hoặc nhiều giới hạn token AI; chỉ cập nhật trường khi cờ set tương ứng là true (null = bỏ giới hạn cột đó).</summary>
+        public async Task<int> SetAuthorAiTokenBudgetLimitsAsync(
+            StoryPlatformDbContext context,
+            Guid userId,
+            bool setLifetime,
+            long? lifetimeLimit,
+            bool setPerDay,
+            long? perDayLimit,
+            bool setPerWeek,
+            long? perWeekLimit,
+            bool setPerMonth,
+            long? perMonthLimit,
+            CancellationToken cancellationToken = default)
+        {
+            var u = await context.users.FirstOrDefaultAsync(x => x.id == userId, cancellationToken);
+            if (u == null) return 0;
+            // Schema mới: chỉ dùng users.ai_token_limit (số dư token).
+            // Giữ signature để tương thích ngược; chỉ lấy lifetimeLimit.
+            _ = setPerDay;
+            _ = perDayLimit;
+            _ = setPerWeek;
+            _ = perWeekLimit;
+            _ = setPerMonth;
+            _ = perMonthLimit;
+            if (setLifetime)
+                u.ai_token_limit = Math.Max(0L, lifetimeLimit ?? 0L);
+            u.updated_at = DateTime.UtcNow;
+            return await context.SaveChangesAsync(cancellationToken);
         }
     }
 }
