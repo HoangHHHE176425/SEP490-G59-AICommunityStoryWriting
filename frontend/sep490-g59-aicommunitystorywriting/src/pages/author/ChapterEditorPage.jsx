@@ -1814,23 +1814,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             </h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
-                            {(() => {
-                                const ideaBlock = (coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ?? '').toString().trim();
-                                const hasContent = ((coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString().trim().length > 0)
-                                    || (((coCreateResult.outline ?? coCreateResult.Outline) || '').toString().trim().length > 0);
-                                const hardStop = ideaBlock.length > 0 && !hasContent;
-                                return hardStop;
-                            })() ? (
-                                <div style={{ padding: '1rem', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b' }}>
-                                    {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
-                                </div>
-                            ) : (
-                                <>
-                                    {((coCreateResult.ideaConflictWarning ?? coCreateResult.IdeaConflictWarning ?? coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback) || '').toString().trim() ? (
-                                        <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
-                                            {coCreateResult.ideaConflictWarning ?? coCreateResult.IdeaConflictWarning ?? coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
-                                        </div>
-                                    ) : null}
                                     {coCreateContextWarning ? (
                                         <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
                                             {coCreateContextWarning}
@@ -1908,34 +1891,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                             );
                                         })()}
                                     </div>
-                                </>
-                            )}
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                            {(() => {
-                                const ideaBlock = (coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ?? '').toString().trim();
-                                const hasContent = ((coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString().trim().length > 0)
-                                    || (((coCreateResult.outline ?? coCreateResult.Outline) || '').toString().trim().length > 0);
-                                return ideaBlock.length > 0 && !hasContent;
-                            })() ? (
-                                <button
-                                    type="button"
-                                    onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); setCoCreateContextWarning(null); }}
-                                    style={{
-                                        padding: '0.5rem 1.25rem',
-                                        fontSize: '0.875rem',
-                                        fontWeight: 600,
-                                        color: '#ffffff',
-                                        backgroundColor: '#13ec5b',
-                                        border: 'none',
-                                        borderRadius: '8px',
-                                        cursor: 'pointer',
-                                    }}
-                                >
-                                    Đóng
-                                </button>
-                            ) : (
-                                <>
                                     <button
                                         type="button"
                                         onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); setCoCreateContextWarning(null); }}
@@ -1968,8 +1925,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                     >
                                         ĐỒNG Ý SỬ DỤNG NỘI DUNG NÀY
                                     </button>
-                                </>
-                            )}
                         </div>
                     </div>
                 </div>
