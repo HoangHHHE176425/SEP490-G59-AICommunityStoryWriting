@@ -22,7 +22,6 @@ namespace Services.Implementations
         private readonly IStoryRagService _ragService;
         private readonly IStoryMemoryEngine _memoryEngine;
         private readonly IAIUsageLogRepository _aiUsageLogRepository;
-        private readonly IAiGeneratedContentRepository _aiContentRepository;
         private readonly IConfiguration _configuration;
         private readonly IUserLookup _userLookup;
 
@@ -32,7 +31,6 @@ namespace Services.Implementations
             IStoryRagService ragService,
             IStoryMemoryEngine memoryEngine,
             IAIUsageLogRepository aiUsageLogRepository,
-            IAiGeneratedContentRepository aiContentRepository,
             IConfiguration configuration,
             IUserLookup userLookup)
         {
@@ -41,7 +39,6 @@ namespace Services.Implementations
             _ragService = ragService;
             _memoryEngine = memoryEngine;
             _aiUsageLogRepository = aiUsageLogRepository;
-            _aiContentRepository = aiContentRepository;
             _configuration = configuration;
             _userLookup = userLookup;
         }
@@ -145,22 +142,6 @@ namespace Services.Implementations
                     throw new InvalidOperationException("ChapterId không khớp truyện.");
                 if (targetChapter != null)
                     usageLogChapterId = targetChapter.id;
-                foreach (var dto in dtoList)
-                {
-                    var json = JsonSerializer.Serialize(dto);
-                    _aiContentRepository.Add(new ai_generated_content
-                    {
-                        id = Guid.NewGuid(),
-                        chapter_id = targetChapter?.id,
-                        draft_chapter_id = targetChapter == null ? request.ChapterId.Value : null,
-                        story_id = request.StoryId,
-                        user_id = authorUserId,
-                        input_prompt = ActionType,
-                        ai_output = json,
-                        chapter_index = targetChapter?.order_index,
-                        created_at = DateTime.UtcNow
-                    });
-                }
             }
 
             var promptTokens = completion.Usage?.InputTokenCount ?? 0;

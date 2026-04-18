@@ -169,7 +169,7 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
         });
 
     }
-
+    //Xây dựng bối cảnh bộ nhớ hiện tại(nhân vật + story state) dưới dạng text cho promt
     private static string BuildExistingMemoryPromptBlock(
         IReadOnlyList<story_character_memory> characters,
         story_story_state? state)
