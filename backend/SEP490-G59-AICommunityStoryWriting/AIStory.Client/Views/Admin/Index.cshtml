@@ -76,7 +76,7 @@
     <div class="row mb-4">
         <div class="col-12">
             <h2 class="mb-1"><i class="bi bi-gear-wide-connected text-secondary"></i> Admin – Theo dõi hoạt động duyệt</h2>
-            <p class="text-muted small mb-0">Tab <strong>Nội dung kiểm duyệt</strong> gom truyện/chương ở mọi giai đoạn (chờ / đã duyệt / từ chối) với tìm kiếm và phân trang; kèm moderation logs và hiệu suất moderator. Tab <strong>Đơn gửi admin</strong> hiển thị <strong>một danh sách</strong> đơn escalation: moderator (gia hạn / hủy nhận duyệt) và compliance (gỡ lock báo cáo truyện, yêu cầu ban / tạm khóa viết), cùng mức độ STANDARD / HIGH / CRITICAL. Hạn duyệt moderator: chọn khi nhận; chưa nhận thì gợi ý +7 ngày từ lúc gửi.</p>
+            <p class="text-muted small mb-0">Tab <strong>Nội dung kiểm duyệt</strong> gom truyện/chương ở mọi giai đoạn (chờ / đã duyệt / từ chối) với tìm kiếm và phân trang; kèm moderation logs và hiệu suất moderator. Tab <strong>Đơn gửi admin</strong> hiển thị <strong>một danh sách</strong> đơn escalation: moderator (gia hạn / hủy nhận duyệt) và compliance (gỡ lock báo cáo truyện, yêu cầu ban / tạm khóa viết), cùng mức độ STANDARD / HIGH / CRITICAL. Hạn duyệt moderator: chọn khi nhận; chưa nhận thì gợi ý +7 ngày từ lúc gửi. Tab <strong>Thống kê AI</strong>: usage OpenRouter theo key, nhật ký request (token, generation id), credits, và <strong>giới hạn token tích lũy theo từng tác giả</strong> (danh sách AUTHOR). Mở nhanh: <code>?tab=ai</code>.</p>
         </div>
     </div>
 
@@ -160,6 +160,11 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="tab-system-coin-ledger" data-bs-toggle="tab" data-bs-target="#panel-system-coin-ledger" type="button">
                     <i class="bi bi-list-ul me-1"></i> Nhật ký tiền hệ thống
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-ai-usage-stats" data-bs-toggle="tab" data-bs-target="#panel-ai-usage-stats" type="button">
+                    <i class="bi bi-cpu me-1"></i> Thống kê AI
                 </button>
             </li>
         </ul>
@@ -908,6 +913,453 @@
                     </div>
                 </div>
             </div>
+
+            <div class="tab-pane fade" id="panel-ai-usage-stats">
+                <div class="row g-3 mb-1">
+                    <div class="col-12">
+                        <div class="card border-primary border-opacity-25">
+                            <div class="card-body">
+                                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                                    <div>
+                                        <h5 class="mb-0"><i class="bi bi-bar-chart-line"></i> Activity (OpenRouter)</h5>
+                                        <p class="text-muted small mb-0">Dữ liệu <strong>account-level</strong> từ <code>GET /api/v1/activity</code> (30 ngày UTC hoàn tất gần nhất), giống trang Activity trên web — khác với usage từng key trong bảng <code>/keys</code>.</p>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                                        <select class="form-select form-select-sm" id="aiActivityRange" style="width:auto; min-width: 10rem;" title="Lọc theo số ngày (trên dữ liệu API trả về)">
+                                            <option value="30" selected>30 ngày</option>
+                                            <option value="14">14 ngày</option>
+                                            <option value="7">7 ngày</option>
+                                        </select>
+                                        <select class="form-select form-select-sm" id="aiActivityKeyHash" style="width:auto; min-width: 12rem;" title="Lọc theo API key (gửi api_key_hash tới OpenRouter)">
+                                            <option value="">Toàn bộ account</option>
+                                        </select>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" id="btnAiActivityRefresh"><i class="bi bi-arrow-clockwise"></i> Làm mới</button>
+                                    </div>
+                                </div>
+                                <div id="aiActivityLoading" class="text-muted small py-1" style="display:none;">Đang tải activity…</div>
+                                <div id="aiActivityError" class="alert alert-warning py-2 small d-none"></div>
+                                <div id="aiActivityWrap" class="d-none">
+                                    <div class="row g-3">
+                                        <div class="col-lg-4">
+                                            <div class="border rounded p-3 h-100 bg-light bg-opacity-50">
+                                                <div class="text-muted small text-uppercase">Spend (USD)</div>
+                                                <div class="fs-4 fw-semibold mb-2" id="aiActivityTotalSpend">—</div>
+                                                <canvas id="aiActivityCanvasSpend" class="w-100" style="height: 140px;" width="400" height="140"></canvas>
+                                                <div class="small mt-2" id="aiActivityLegendSpend"></div>
+                                            </div>
+                                        </div>
+                                        <div class="col-lg-4">
+                                            <div class="border rounded p-3 h-100 bg-light bg-opacity-50">
+                                                <div class="text-muted small text-uppercase">Requests</div>
+                                                <div class="fs-4 fw-semibold mb-2" id="aiActivityTotalReq">—</div>
+                                                <canvas id="aiActivityCanvasReq" class="w-100" style="height: 140px;" width="400" height="140"></canvas>
+                                                <div class="small mt-2" id="aiActivityLegendReq"></div>
+                                            </div>
+                                        </div>
+                                        <div class="col-lg-4">
+                                            <div class="border rounded p-3 h-100 bg-light bg-opacity-50">
+                                                <div class="text-muted small text-uppercase">Tokens</div>
+                                                <div class="fs-4 fw-semibold mb-2" id="aiActivityTotalTok">—</div>
+                                                <canvas id="aiActivityCanvasTok" class="w-100" style="height: 140px;" width="400" height="140"></canvas>
+                                                <div class="small mt-2" id="aiActivityLegendTok"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3 mb-1">
+                    <div class="col-12">
+                        <div class="card border-success border-opacity-25">
+                            <div class="card-body py-3">
+                                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-1">
+                                    <h5 class="mb-0"><i class="bi bi-wallet2"></i> Credits OpenRouter</h5>
+                                    <button type="button" class="btn btn-sm btn-outline-success" id="btnAiCreditsRefresh" title="Chỉ tải lại /credits"><i class="bi bi-arrow-clockwise"></i> Làm mới credits</button>
+                                </div>
+                                <p class="text-muted small mb-2">Tổng đã nạp / đã dùng từ <code>GET /api/v1/credits</code> (cần <code>AI:OpenRouterManagementApiKey</code>). Nút <strong>Làm mới</strong> trong card OpenRouter API key bên dưới cũng cập nhật credits.</p>
+                                <div id="aiCreditsErr" class="alert alert-warning py-1 small d-none mb-0"></div>
+                                <div id="aiCreditsWrap" class="d-none">
+                                    <dl class="row small mb-0">
+                                        <dt class="col-sm-4 col-md-2">Đã nạp</dt><dd class="col-sm-8 col-md-2 text-md-end fw-medium" id="aiCreditDeposited">—</dd>
+                                        <dt class="col-sm-4 col-md-2">Đã dùng</dt><dd class="col-sm-8 col-md-2 text-md-end fw-medium" id="aiCreditUsed">—</dd>
+                                        <dt class="col-sm-4 col-md-2">Còn lại</dt><dd class="col-sm-8 col-md-2 text-md-end fw-medium" id="aiCreditRemaining">—</dd>
+                                    </dl>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3 mb-1">
+                    <div class="col-12">
+                        <div class="card border-primary border-opacity-25">
+                            <div class="card-body py-3">
+                                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-1">
+                                    <div>
+                                        <h5 class="mb-0"><i class="bi bi-sliders me-1"></i> Token mặc định khi user lần đầu trở thành AUTHOR</h5>
+                                        <p class="text-muted small mb-0">
+                                            Các giá trị này sẽ được áp dụng <strong>một lần</strong> khi user <strong>lần đầu</strong> có role <code>AUTHOR</code>.
+                                            Chỉ cần nhập <strong>Mặc định hạn tích lũy</strong>. Để trống = <strong>không giới hạn</strong>.
+                                        </p>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                                        <button type="button" class="btn btn-sm btn-outline-primary" id="btnAiAuthorDefaultsRefresh"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                                    </div>
+                                </div>
+
+                                <div id="aiAuthorDefaultsErr" class="alert alert-warning py-2 small d-none mb-2"></div>
+                                <div id="aiAuthorDefaultsOk" class="alert alert-success py-2 small d-none mb-2"></div>
+
+                                <div class="border rounded p-3 bg-light bg-opacity-50 mb-0">
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-12 col-md-4">
+                                            <label class="form-label small mb-0">Mặc định hạn tích lũy</label>
+                                            <input type="text" class="form-control form-control-sm font-monospace" id="aiAuthorDefaultsLifetime" placeholder="Trống = không giới hạn" autocomplete="off" />
+                                            <div class="text-muted small mt-1">Setting hiện tại: <span class="font-monospace" id="aiAuthorDefaultsLifetimeCurrent">—</span></div>
+                                        </div>
+                                        <div class="col-12 col-md-auto d-grid d-md-inline-grid">
+                                            <button type="button" class="btn btn-sm btn-primary" id="btnAiAuthorDefaultsSave"><i class="bi bi-check2"></i> Lưu mặc định</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3 mb-1">
+                    <div class="col-12">
+                        <div class="card border-warning border-opacity-25">
+                            <div class="card-body py-3">
+                                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-1">
+                                    <div>
+                                        <h5 class="mb-0"><i class="bi bi-arrow-repeat me-1"></i> Gia hạn token AI tự động (tác giả)</h5>
+                                        <p class="text-muted small mb-0">
+                                            Admin cấu hình rule cộng thêm token vào các cột trên <code>users</code> theo chu kỳ UTC: ngày / tuần / tháng.
+                                            Rule có thể áp dụng cho <strong>tất cả tác giả</strong> hoặc danh sách <strong>UserId</strong> cụ thể.
+                                        </p>
+                                    </div>
+                                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                                        <button type="button" class="btn btn-sm btn-outline-warning" id="btnAiAutoGrantRefresh"><i class="bi bi-arrow-clockwise"></i> Làm mới</button>
+                                    </div>
+                                </div>
+
+                                <div id="aiAutoGrantErr" class="alert alert-warning py-2 small d-none mb-2"></div>
+                                <div id="aiAutoGrantOk" class="alert alert-success py-2 small d-none mb-2"></div>
+
+                                <div class="border rounded p-3 bg-light bg-opacity-50 mb-3">
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0">Số token mỗi kỳ (set số dư)</label>
+                                            <input type="number" class="form-control form-control-sm" id="aiAutoGrantAmount" min="1" step="1" value="100000" />
+                                            <div class="text-muted small mt-1">Khi đến hạn, hệ thống sẽ <strong>set</strong> <code>users.ai_token_limit</code> = số này (không cộng dồn).</div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0">Chu kỳ</label>
+                                            <input type="text" class="form-control form-control-sm font-monospace" value="monthly_utc" readonly />
+                                            <div class="text-muted small mt-1">Áp dụng tự động cho <strong>tất cả AUTHOR</strong>.</div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0">Gia hạn kế tiếp (UTC)</label>
+                                            <input type="text" class="form-control form-control-sm font-monospace" id="aiAutoGrantNextRenewal" value="—" readonly />
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0 d-block">Trạng thái</label>
+                                            <div class="d-flex flex-wrap gap-2 mt-1">
+                                                <button type="button" class="btn btn-sm btn-success" id="btnAiAutoGrantEnable"><i class="bi bi-toggle-on"></i> Bật (chạy ngay)</button>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiAutoGrantDisable"><i class="bi bi-toggle-off"></i> Tắt</button>
+                                            </div>
+                                            <div class="text-muted small mt-1">Bật sẽ chạy gia hạn ngay lập tức; tắt sẽ ngừng chạy tự động.</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered align-middle small mb-0">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Bật</th>
+                                                <th class="text-end">Token mỗi kỳ</th>
+                                                <th>Gia hạn kế tiếp (UTC)</th>
+                                                <th class="text-end">Hành động</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="aiAutoGrantBody">
+                                            <tr><td colspan="4" class="text-center text-muted">Mở tab để tải.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div class="border rounded p-3 bg-light bg-opacity-50 mt-3">
+                                    <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-2">
+                                        <div>
+                                            <div class="fw-semibold">Danh sách user</div>
+                                            <div class="text-muted small">Dữ liệu từ <code>GET /api/admin/users</code> (lọc role = <code>AUTHOR</code>). Ghi chú: <code>selected_user_ids</code> hiện có <span id="aiAutoGrantSelectedCount">0</span> user.</div>
+                                        </div>
+                                        <div class="d-flex flex-wrap gap-2 align-items-end">
+                                            <div>
+                                                <label class="form-label small mb-0">Tìm</label>
+                                                <input type="search" class="form-control form-control-sm" id="aiAutoGrantUsersSearch" placeholder="email / nickname / GUID" autocomplete="off" />
+                                            </div>
+                                            <div>
+                                                <label class="form-label small mb-0">/trang</label>
+                                                <select class="form-select form-select-sm" id="aiAutoGrantUsersPageSize">
+                                                    <option value="20">20</option>
+                                                    <option value="50" selected>50</option>
+                                                    <option value="100">100</option>
+                                                </select>
+                                            </div>
+                                            <button type="button" class="btn btn-sm btn-outline-warning" id="btnAiAutoGrantUsersRefresh"><i class="bi bi-arrow-clockwise"></i> Tải</button>
+                                        </div>
+                                    </div>
+                                    <div id="aiAutoGrantUsersLoading" class="text-muted small py-1 d-none">Đang tải…</div>
+                                    <div id="aiAutoGrantUsersErr" class="alert alert-danger py-1 small d-none mb-2"></div>
+                                    <div class="table-responsive" style="max-height: 320px; overflow-y:auto;">
+                                        <table class="table table-sm table-bordered align-middle small mb-0">
+                                            <thead class="table-light sticky-top">
+                                                <tr>
+                                                    <th>User</th>
+                                                    <th>Role</th>
+                                                    <th>Status</th>
+                                                    <th class="text-end">AI token (ai_token_limit)</th>
+                                                    <th class="text-muted small">UserId</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="aiAutoGrantUsersBody">
+                                                <tr><td colspan="5" class="text-center text-muted">—</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiAutoGrantUsersPrev"><i class="bi bi-arrow-left"></i> Trước</button>
+                                        <span class="text-muted small" id="aiAutoGrantUsersPageInfo">—</span>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiAutoGrantUsersNext">Sau <i class="bi bi-arrow-right"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3 mb-1">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="mb-1"><i class="bi bi-lightning-charge"></i> Generations (log chi tiết từng request)</h5>
+                                <p class="text-muted small mb-3">Nguồn <strong>bảng <code>ai_usage_logs</code></strong> — mỗi lần ứng dụng gọi OpenRouter (chat/embedding) ghi một dòng. OpenRouter <strong>không công khai API</strong> liệt kê generations như trang web; tại đây bạn xem log đầy đủ trong DB và mở chi tiết qua <code>GET /api/v1/generation</code> khi có <code>generationId</code>.</p>
+                                <div class="filter-panel p-3 mb-3">
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-md-3 col-lg-2">
+                                            <label class="form-label small mb-0">Từ</label>
+                                            <input type="datetime-local" class="form-control form-control-sm" id="aiGenFrom" />
+                                        </div>
+                                        <div class="col-md-3 col-lg-2">
+                                            <label class="form-label small mb-0">Đến</label>
+                                            <input type="datetime-local" class="form-control form-control-sm" id="aiGenTo" />
+                                        </div>
+                                        <div class="col-md-3 col-lg-2">
+                                            <label class="form-label small mb-0">Model (chuỗi con)</label>
+                                            <input type="text" class="form-control form-control-sm" id="aiGenModel" placeholder="vd. gpt-4o-mini" autocomplete="off" />
+                                        </div>
+                                        <div class="col-md-2 col-lg-2">
+                                            <label class="form-label small mb-0">Status</label>
+                                            <input type="text" class="form-control form-control-sm" id="aiGenStatus" placeholder="vd. OK" autocomplete="off" />
+                                        </div>
+                                        <div class="col-md-3 col-lg-2">
+                                            <label class="form-label small mb-0">actionType</label>
+                                            <input type="text" class="form-control form-control-sm" id="aiGenAction" placeholder="tùy chọn" autocomplete="off" />
+                                        </div>
+                                        <div class="col-md-2 col-lg-1">
+                                            <label class="form-label small mb-0">/trang</label>
+                                            <select class="form-select form-select-sm" id="aiGenPageSize">
+                                                <option value="25" selected>25</option>
+                                                <option value="50">50</option>
+                                                <option value="100">100</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-1 col-lg-1 d-grid">
+                                            <button type="button" class="btn btn-primary btn-sm" id="btnAiGenApply">Lọc</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="aiGenChartWrap" class="mb-3" style="min-height: 120px;">
+                                    <canvas id="aiGenVolCanvas" class="w-100" style="height: 120px; max-width: 100%;" width="800" height="120"></canvas>
+                                    <div class="text-muted small mt-1" id="aiGenChartHint">Số request theo ngày (UTC) trong khoảng đã chọn.</div>
+                                </div>
+                                <div id="aiGenLoading" class="text-muted small py-2 d-none">Đang tải…</div>
+                                <div id="aiGenError" class="alert alert-danger py-2 small d-none"></div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered align-middle mb-0">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Thời gian</th>
+                                                <th>Model</th>
+                                                <th>App / action</th>
+                                                <th class="text-end">Tokens (in → out)</th>
+                                                <th class="text-end">Cost (USD)</th>
+                                                <th>Status</th>
+                                                <th>User</th>
+                                                <th class="text-end">Chi tiết</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="aiGenBody">
+                                            <tr><td colspan="8" class="text-center text-muted">Mở tab để tải.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiGenPrev"><i class="bi bi-arrow-left"></i> Trước</button>
+                                    <span class="text-muted small" id="aiGenPageInfo">—</span>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiGenNext">Sau <i class="bi bi-arrow-right"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3">
+                    <div class="col-12 col-xl-5">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                                    <h5 class="mb-0"><i class="bi bi-key"></i> OpenRouter (API key)</h5>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnAiKeyRefresh"><i class="bi bi-arrow-clockwise"></i> Làm mới</button>
+                                </div>
+                                <p class="text-muted small mb-2"><strong>GET /api/v1/key</strong> mô tả đúng key trong <code>Authorization</code> (nếu là Management key thì <code>usage*</code> thường = 0 vì không gọi completion). <strong>Usage tiền model</strong> xem bảng bên dưới từ <strong>GET /api/v1/keys</strong> (cần <code>AI:OpenRouterManagementApiKey</code>). <strong>Credits</strong> xem card riêng phía trên.</p>
+                                <div id="aiKeyLoading" class="text-muted small py-2" style="display:none;">Đang tải…</div>
+                                <div id="aiKeyError" class="alert alert-warning py-2 small d-none"></div>
+                                <div id="aiKeyUnavailable" class="alert alert-secondary py-2 small d-none"></div>
+                                <div id="aiKeyStats" class="d-none">
+                                    <dl class="row small mb-0">
+                                        <dt class="col-6">usage (all)</dt><dd class="col-6 text-end" id="aiKeyUsage">—</dd>
+                                        <dt class="col-6">usage_daily</dt><dd class="col-6 text-end" id="aiKeyUsageDaily">—</dd>
+                                        <dt class="col-6">usage_weekly</dt><dd class="col-6 text-end" id="aiKeyUsageWeekly">—</dd>
+                                        <dt class="col-6">usage_monthly</dt><dd class="col-6 text-end" id="aiKeyUsageMonthly">—</dd>
+                                        <dt class="col-6">limit</dt><dd class="col-6 text-end" id="aiKeyLimit">—</dd>
+                                        <dt class="col-6">limit_remaining</dt><dd class="col-6 text-end" id="aiKeyLimitRemaining">—</dd>
+                                        <dt class="col-6">limit_reset</dt><dd class="col-6 text-end" id="aiKeyLimitReset">—</dd>
+                                        <dt class="col-6">label</dt><dd class="col-6 text-end text-break" id="aiKeyLabel">—</dd>
+                                        <dt class="col-6">is_free_tier</dt><dd class="col-6 text-end" id="aiKeyFreeTier">—</dd>
+                                    </dl>
+                                </div>
+                                <hr class="my-3" />
+                                <h6 class="small text-uppercase text-muted mb-2">API keys (usage / limit)</h6>
+                                <div id="aiKeysListLoading" class="text-muted small py-1" style="display:none;">Đang tải danh sách keys…</div>
+                                <div id="aiKeysListError" class="alert alert-warning py-2 small d-none"></div>
+                                <div class="table-responsive" style="max-height: 320px; overflow-y: auto;">
+                                    <table class="table table-sm table-bordered align-middle mb-0">
+                                        <thead class="table-light sticky-top">
+                                            <tr>
+                                                <th>label</th>
+                                                <th>hash</th>
+                                                <th class="text-end">usage</th>
+                                                <th class="text-end">daily</th>
+                                                <th class="text-end">weekly</th>
+                                                <th class="text-end">monthly</th>
+                                                <th class="text-end">limit</th>
+                                                <th class="text-end">remaining</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="aiKeysListBody">
+                                            <tr><td colspan="8" class="text-center text-muted small">—</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-xl-7">
+                        <div class="card">
+                            <div class="card-body">
+                                <h5 class="card-title mb-2"><i class="bi bi-table"></i> Log từng request (DB)</h5>
+                                <p class="text-muted small mb-2">Mỗi lần gọi AI ghi một dòng trong DB. Trên trang này các request được <strong>gộp theo user</strong>; <strong>bấm vào dòng user</strong> để mở bảng chi tiết (generation, tokens…).</p>
+                                <div class="filter-panel p-3 mb-3">
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0">Từ (UTC local)</label>
+                                            <input type="datetime-local" class="form-control form-control-sm" id="aiReqFrom" />
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0">Đến (UTC local)</label>
+                                            <input type="datetime-local" class="form-control form-control-sm" id="aiReqTo" />
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0">actionType</label>
+                                            <input type="text" class="form-control form-control-sm" id="aiReqAction" placeholder="vd. SUGGEST_NEXT_CHAPTER" autocomplete="off" />
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label small mb-0">/trang</label>
+                                            <select class="form-select form-select-sm" id="aiReqPageSize">
+                                                <option value="20">20</option>
+                                                <option value="50">50</option>
+                                                <option value="100">100</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-1 d-grid">
+                                            <button type="button" class="btn btn-primary btn-sm" id="btnAiReqApply">Lọc</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div id="aiReqLoading" class="text-muted small py-2 d-none">Đang tải…</div>
+                                <div id="aiReqError" class="alert alert-danger py-2 small d-none"></div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered align-middle">
+                                        <thead>
+                                            <tr>
+                                                <th style="width:2rem" class="text-center"></th>
+                                                <th>User</th>
+                                                <th class="text-end">Số request</th>
+                                                <th>Thời gian (trang)</th>
+                                                <th class="text-end">Σ tokens</th>
+                                                <th>Model</th>
+                                                <th class="text-muted small">Chi tiết</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="aiReqBody">
+                                            <tr><td colspan="7" class="text-center text-muted">Mở tab để tải.</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiReqPrev"><i class="bi bi-arrow-left"></i> Trước</button>
+                                    <span class="text-muted small" id="aiReqPageInfo">—</span>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiReqNext">Sau <i class="bi bi-arrow-right"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="openRouterKeyDetailModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-scrollable modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-braces"></i> OpenRouter key (GET /keys/{hash})</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="aiOrKeyLoading" class="text-muted small">Đang tải…</div>
+                        <div id="aiOrKeyError" class="alert alert-warning d-none"></div>
+                        <pre id="aiOrKeyJson" class="small bg-light border rounded p-2 mb-0" style="max-height: 70vh; overflow: auto; white-space: pre-wrap;"></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="aiGenerationModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-scrollable modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-braces"></i> OpenRouter generation</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="aiGenModalLoading" class="text-muted small">Đang tải…</div>
+                        <div id="aiGenModalError" class="alert alert-warning d-none"></div>
+                        <pre id="aiGenModalJson" class="small bg-light p-2 rounded mb-0" style="max-height:60vh;white-space:pre-wrap;"></pre>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Xử lý đơn escalation moderator -->
@@ -1096,6 +1548,8 @@
                 else if (id === 'panel-compliance-logs') loadComplianceLogs(1);
                 else if (id === 'panel-compliance-performance') loadCompliancePerformance(1);
                 else if (id === 'panel-platform-wallet') loadPlatformWallet();
+                else if (id === 'panel-system-coin-ledger') loadSysLedger(true);
+                else if (id === 'panel-ai-usage-stats') loadAiUsageStatsTab();
             }
 
             function reloadActiveAdminEscalationSubTab() {
@@ -1185,11 +1639,1283 @@
             function applyAdminEscalationDeepLink() {
                 try {
                     var p = new URLSearchParams(window.location.search);
+                    if (p.get('tab') === 'ai') {
+                        var aiTab = document.getElementById('tab-ai-usage-stats');
+                        if (aiTab) bootstrap.Tab.getOrCreateInstance(aiTab).show();
+                        return;
+                    }
                     if (p.get('esc') !== 'compliance') return;
                     var mainTab = document.getElementById('tab-review-escalations');
                     if (!mainTab) return;
                     bootstrap.Tab.getOrCreateInstance(mainTab).show();
                 } catch (e) { console.warn(e); }
+            }
+
+            var aiUsagePage = 1;
+
+            function fmtUsd(n) {
+                if (n === null || n === undefined || n === '') return '—';
+                var x = typeof n === 'number' ? n : parseFloat(n);
+                if (isNaN(x)) return String(n);
+                return x.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+            }
+
+            var aiActivityCache = { items: null, apiKeyHash: null };
+
+            function activityNum(v) {
+                if (v === null || v === undefined || v === '') return 0;
+                var x = typeof v === 'number' ? v : parseFloat(v);
+                return isNaN(x) ? 0 : x;
+            }
+
+            function utcTodayYmd() {
+                return new Date().toISOString().slice(0, 10);
+            }
+
+            function ymdDaysAgoFromToday(n) {
+                var t = Date.UTC(
+                    new Date().getUTCFullYear(),
+                    new Date().getUTCMonth(),
+                    new Date().getUTCDate() - n
+                );
+                return new Date(t).toISOString().slice(0, 10);
+            }
+
+            function aggregateActivityRows(rawItems) {
+                var map = {};
+                (rawItems || []).forEach(function (r) {
+                    var d = r.date || r.Date;
+                    if (!d) return;
+                    var m = r.model || r.Model || '—';
+                    var k = d + '\0' + m;
+                    if (!map[k]) {
+                        map[k] = {
+                            date: d,
+                            model: m,
+                            usage: 0,
+                            byok: 0,
+                            requests: 0,
+                            tokens: 0
+                        };
+                    }
+                    map[k].usage += activityNum(r.usage);
+                    map[k].byok += activityNum(r.byok_usage_inference != null ? r.byok_usage_inference : r.byokUsageInference);
+                    map[k].requests += Math.round(activityNum(r.requests));
+                    var pt = activityNum(r.prompt_tokens != null ? r.prompt_tokens : r.promptTokens);
+                    var ct = activityNum(r.completion_tokens != null ? r.completion_tokens : r.completionTokens);
+                    var rt = activityNum(r.reasoning_tokens != null ? r.reasoning_tokens : r.reasoningTokens);
+                    map[k].tokens += pt + ct + rt;
+                });
+                return Object.keys(map).map(function (x) { return map[x]; });
+            }
+
+            function filterActivityByRange(rows, rangeDays) {
+                var to = utcTodayYmd();
+                var from = ymdDaysAgoFromToday(Math.max(0, (parseInt(rangeDays, 10) || 30) - 1));
+                return rows.filter(function (r) {
+                    return r.date >= from && r.date <= to;
+                });
+            }
+
+            var aiActivityPalette = ['#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#06b6d4', '#a855f7', '#ef4444', '#84cc16', '#14b8a6', '#eab308', '#64748b'];
+
+            function modelColor(idx) {
+                return aiActivityPalette[idx % aiActivityPalette.length];
+            }
+
+            function fmtCompactCount(n) {
+                if (n >= 1000000) return (n / 1000000).toLocaleString('vi-VN', { maximumFractionDigits: 2 }) + 'M';
+                if (n >= 1000) return (n / 1000).toLocaleString('vi-VN', { maximumFractionDigits: 2 }) + 'K';
+                return String(Math.round(n));
+            }
+
+            function buildActivitySeries(rows, metric) {
+                var datesSet = {};
+                rows.forEach(function (r) { datesSet[r.date] = true; });
+                var dates = Object.keys(datesSet).sort();
+                if (!dates.length) return { dates: [], models: [], byDate: {}, totalsByModel: {}, grand: 0 };
+
+                var byDate = {};
+                var totalsByModel = {};
+                rows.forEach(function (r) {
+                    var val = metric === 'usage' ? (r.usage + r.byok) : (metric === 'requests' ? r.requests : r.tokens);
+                    if (!byDate[r.date]) byDate[r.date] = {};
+                    if (!byDate[r.date][r.model]) byDate[r.date][r.model] = 0;
+                    byDate[r.date][r.model] += val;
+                    totalsByModel[r.model] = (totalsByModel[r.model] || 0) + val;
+                });
+                var grand = rows.reduce(function (s, r) {
+                    return s + (metric === 'usage' ? (r.usage + r.byok) : (metric === 'requests' ? r.requests : r.tokens));
+                }, 0);
+                var models = Object.keys(totalsByModel).sort(function (a, b) {
+                    return (totalsByModel[b] || 0) - (totalsByModel[a] || 0);
+                });
+                return { dates: dates, models: models, byDate: byDate, totalsByModel: totalsByModel, grand: grand };
+            }
+
+            function drawActivityStackedChart(canvasId, series) {
+                var el = document.getElementById(canvasId);
+                if (!el || !series.dates.length) return;
+                var dpr = window.devicePixelRatio || 1;
+                var wCss = el.parentElement ? el.parentElement.clientWidth : 400;
+                if (wCss < 120) wCss = 400;
+                var hCss = 140;
+                el.width = Math.floor(wCss * dpr);
+                el.height = Math.floor(hCss * dpr);
+                el.style.width = wCss + 'px';
+                el.style.height = hCss + 'px';
+                var ctx = el.getContext('2d');
+                if (!ctx) return;
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.scale(dpr, dpr);
+                ctx.clearRect(0, 0, wCss, hCss);
+                var padL = 4, padR = 4, padB = 18, padT = 4;
+                var chartW = wCss - padL - padR;
+                var chartH = hCss - padT - padB;
+                var n = series.dates.length;
+                var gap = Math.min(6, chartW / (n * 3));
+                var barW = Math.max(2, (chartW - gap * (n + 1)) / n);
+                var maxDay = 0;
+                series.dates.forEach(function (d) {
+                    var sum = 0;
+                    series.models.forEach(function (m) {
+                        sum += (series.byDate[d] && series.byDate[d][m]) ? series.byDate[d][m] : 0;
+                    });
+                    if (sum > maxDay) maxDay = sum;
+                });
+                if (maxDay <= 0) maxDay = 1;
+                series.dates.forEach(function (d, i) {
+                    var x = padL + gap + i * (barW + gap);
+                    var y0 = padT + chartH;
+                    series.models.forEach(function (model, mi) {
+                        var v = (series.byDate[d] && series.byDate[d][model]) ? series.byDate[d][model] : 0;
+                        if (v <= 0) return;
+                        var h = (v / maxDay) * chartH;
+                        var y1 = y0 - h;
+                        ctx.fillStyle = modelColor(mi);
+                        ctx.fillRect(x, y1, barW, h);
+                        y0 = y1;
+                    });
+                });
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '10px system-ui,sans-serif';
+                ctx.textAlign = 'center';
+                var step = n > 14 ? Math.ceil(n / 7) : (n > 10 ? 2 : 1);
+                for (var i = 0; i < n; i += step) {
+                    var lab = series.dates[i].slice(5);
+                    ctx.fillText(lab, padL + gap + i * (barW + gap) + barW / 2, hCss - 4);
+                }
+            }
+
+            function renderActivityLegend(containerId, series, metric, topN) {
+                var el = document.getElementById(containerId);
+                if (!el) return;
+                topN = topN || 6;
+                var models = series.models.slice();
+                var other = 0;
+                var show = models.slice(0, topN);
+                if (models.length > topN) {
+                    models.slice(topN).forEach(function (m) {
+                        other += series.totalsByModel[m] || 0;
+                    });
+                }
+                var rows = show.map(function (m, i) {
+                    var v = series.totalsByModel[m] || 0;
+                    var txt = metric === 'usage' ? ('$' + fmtUsd(v)) : (metric === 'requests' ? v.toLocaleString('vi-VN') : fmtCompactCount(v));
+                    return '<div class="d-flex align-items-center gap-2 mb-1"><span class="d-inline-block rounded" style="width:10px;height:10px;background:' + modelColor(series.models.indexOf(m)) + '"></span><span class="text-truncate flex-grow-1" title="' + escapeHtml(m) + '">' + escapeHtml(m) + '</span><span class="text-nowrap text-muted">' + escapeHtml(txt) + '</span></div>';
+                });
+                if (other > 0) {
+                    var ot = metric === 'usage' ? ('$' + fmtUsd(other)) : (metric === 'requests' ? other.toLocaleString('vi-VN') : fmtCompactCount(other));
+                    rows.push('<div class="d-flex align-items-center gap-2 mb-0"><span class="d-inline-block rounded bg-secondary" style="width:10px;height:10px;"></span><span class="text-truncate flex-grow-1">Khác</span><span class="text-nowrap text-muted">' + escapeHtml(ot) + '</span></div>');
+                }
+                el.innerHTML = rows.join('');
+            }
+
+            function renderAiActivityDashboard() {
+                var rangeEl = document.getElementById('aiActivityRange');
+                var rangeDays = rangeEl ? parseInt(rangeEl.value, 10) || 30 : 30;
+                var items = aiActivityCache.items;
+                if (items == null) {
+                    var wx = document.getElementById('aiActivityWrap');
+                    if (wx) wx.classList.add('d-none');
+                    return;
+                }
+                if (!items.length) {
+                    var w0 = document.getElementById('aiActivityWrap');
+                    if (w0) w0.classList.remove('d-none');
+                    var ts0 = document.getElementById('aiActivityTotalSpend');
+                    var tr0 = document.getElementById('aiActivityTotalReq');
+                    var tt0 = document.getElementById('aiActivityTotalTok');
+                    if (ts0) ts0.textContent = '$' + fmtUsd(0);
+                    if (tr0) tr0.textContent = '0';
+                    if (tt0) tt0.textContent = '0';
+                    ['aiActivityCanvasSpend', 'aiActivityCanvasReq', 'aiActivityCanvasTok'].forEach(function (id) {
+                        var c = document.getElementById(id);
+                        if (c && c.getContext) {
+                            var ctx = c.getContext('2d');
+                            if (ctx) ctx.clearRect(0, 0, c.width, c.height);
+                        }
+                    });
+                    var emptyMsg = '<span class="text-muted">OpenRouter trả <code>data</code> rỗng cho bộ lọc này.</span>';
+                    ['aiActivityLegendSpend', 'aiActivityLegendReq', 'aiActivityLegendTok'].forEach(function (id) {
+                        var e = document.getElementById(id);
+                        if (e) e.innerHTML = emptyMsg;
+                    });
+                    return;
+                }
+                var agg = aggregateActivityRows(items);
+                var filtered = filterActivityByRange(agg, rangeDays);
+                var wrap = document.getElementById('aiActivityWrap');
+                var ts = document.getElementById('aiActivityTotalSpend');
+                var tr = document.getElementById('aiActivityTotalReq');
+                var tt = document.getElementById('aiActivityTotalTok');
+                if (!filtered.length) {
+                    if (wrap) wrap.classList.remove('d-none');
+                    if (ts) ts.textContent = '—';
+                    if (tr) tr.textContent = '—';
+                    if (tt) tt.textContent = '—';
+                    ['aiActivityCanvasSpend', 'aiActivityCanvasReq', 'aiActivityCanvasTok'].forEach(function (id) {
+                        var c = document.getElementById(id);
+                        if (c && c.getContext) {
+                            var ctx = c.getContext('2d');
+                            if (ctx) ctx.clearRect(0, 0, c.width, c.height);
+                        }
+                    });
+                    ['aiActivityLegendSpend', 'aiActivityLegendReq', 'aiActivityLegendTok'].forEach(function (id) {
+                        var e = document.getElementById(id);
+                        if (e) e.innerHTML = '<span class="text-muted">Không có dòng trong khoảng đã chọn.</span>';
+                    });
+                    return;
+                }
+                var sUsage = buildActivitySeries(filtered, 'usage');
+                var sReq = buildActivitySeries(filtered, 'requests');
+                var sTok = buildActivitySeries(filtered, 'tokens');
+                if (ts) ts.textContent = '$' + fmtUsd(sUsage.grand);
+                if (tr) tr.textContent = fmtCompactCount(sReq.grand);
+                if (tt) tt.textContent = fmtCompactCount(sTok.grand);
+                drawActivityStackedChart('aiActivityCanvasSpend', sUsage);
+                drawActivityStackedChart('aiActivityCanvasReq', sReq);
+                drawActivityStackedChart('aiActivityCanvasTok', sTok);
+                renderActivityLegend('aiActivityLegendSpend', sUsage, 'usage', 6);
+                renderActivityLegend('aiActivityLegendReq', sReq, 'requests', 6);
+                renderActivityLegend('aiActivityLegendTok', sTok, 'tokens', 6);
+                if (wrap) wrap.classList.remove('d-none');
+            }
+
+            function populateAiActivityKeyFromKeys(rk) {
+                var sel = document.getElementById('aiActivityKeyHash');
+                if (!sel) return;
+                var cur = sel.value;
+                sel.innerHTML = '<option value="">Toàn bộ account</option>';
+                if (!rk || rk.available === false || !rk.keys || !rk.keys.length) return;
+                rk.keys.forEach(function (k) {
+                    var hash = k.hash != null ? k.hash : k.Hash;
+                    if (!hash) return;
+                    var lab = k.label != null ? k.label : k.Label;
+                    var name = k.name != null ? k.name : k.Name;
+                    var text = (lab || name || String(hash)).toString();
+                    var opt = document.createElement('option');
+                    opt.value = String(hash);
+                    opt.textContent = text.length > 44 ? text.substring(0, 44) + '…' : text;
+                    sel.appendChild(opt);
+                });
+                if (cur) {
+                    for (var i = 0; i < sel.options.length; i++) {
+                        if (sel.options[i].value === cur) {
+                            sel.value = cur;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            async function loadAiOpenRouterActivity() {
+                var loadEl = document.getElementById('aiActivityLoading');
+                var errEl = document.getElementById('aiActivityError');
+                var wrap = document.getElementById('aiActivityWrap');
+                var keySel = document.getElementById('aiActivityKeyHash');
+                var hash = keySel && keySel.value ? keySel.value.trim() : '';
+                if (loadEl) {
+                    loadEl.style.display = '';
+                    loadEl.textContent = 'Đang tải activity…';
+                }
+                if (errEl) {
+                    errEl.classList.add('d-none');
+                    errEl.textContent = '';
+                }
+                if (wrap) wrap.classList.add('d-none');
+                try {
+                    var q = {};
+                    if (hash) q.api_key_hash = hash;
+                    var data = await ApiService.adminGetAiOpenRouterActivity(q);
+                    var items = (data && (data.data || data.Data)) ? (data.data || data.Data) : [];
+                    if (!Array.isArray(items)) items = [];
+                    aiActivityCache.items = items;
+                    aiActivityCache.apiKeyHash = hash || null;
+                    if (loadEl) loadEl.style.display = 'none';
+                    renderAiActivityDashboard();
+                } catch (e) {
+                    if (loadEl) loadEl.style.display = 'none';
+                    aiActivityCache.items = null;
+                    if (errEl) {
+                        errEl.classList.remove('d-none');
+                        errEl.textContent = e.message || String(e);
+                    }
+                }
+            }
+
+            function renderAiKeysListTable(rk) {
+                var listErr = document.getElementById('aiKeysListError');
+                var listLoad = document.getElementById('aiKeysListLoading');
+                var tbody = document.getElementById('aiKeysListBody');
+                if (listLoad) listLoad.style.display = 'none';
+                if (listErr) { listErr.classList.add('d-none'); listErr.textContent = ''; }
+                if (!tbody) {
+                    populateAiActivityKeyFromKeys(rk || {});
+                    return;
+                }
+                if (!rk || rk.available === false) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted small">—</td></tr>';
+                    populateAiActivityKeyFromKeys(rk || {});
+                    return;
+                }
+                if (rk.message && (!rk.keys || !rk.keys.length)) {
+                    if (listErr) {
+                        listErr.classList.remove('d-none');
+                        listErr.textContent = rk.message;
+                    }
+                    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted small">Không tải được /keys.</td></tr>';
+                    populateAiActivityKeyFromKeys(rk || {});
+                    return;
+                }
+                var keys = rk.keys || [];
+                if (!keys.length) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted small">Danh sách rỗng.</td></tr>';
+                    populateAiActivityKeyFromKeys(rk || {});
+                    return;
+                }
+                tbody.innerHTML = keys.map(function (k) {
+                    var label = k.label != null ? k.label : k.Label;
+                    var name = k.name != null ? k.name : k.Name;
+                    var lab = (label || name || '—');
+                    var hash = k.hash != null ? k.hash : k.Hash;
+                    var hashCell = hash
+                        ? '<button type="button" class="btn btn-link btn-sm p-0 text-break ai-orkey-hash" data-hash="' + escapeHtml(String(hash)) + '">' + escapeHtml(String(hash).length > 20 ? String(hash).substring(0, 20) + '…' : String(hash)) + '</button>'
+                        : '—';
+                    var u = k.usage != null ? k.usage : k.Usage;
+                    var ud = k.usageDaily != null ? k.usageDaily : k.UsageDaily;
+                    var uw = k.usageWeekly != null ? k.usageWeekly : k.UsageWeekly;
+                    var um = k.usageMonthly != null ? k.usageMonthly : k.UsageMonthly;
+                    var lim = k.limit != null ? k.limit : k.Limit;
+                    var lr = k.limitRemaining != null ? k.limitRemaining : k.LimitRemaining;
+                    return '<tr>' +
+                        '<td class="small text-break">' + escapeHtml(String(lab)) + '</td>' +
+                        '<td class="small">' + hashCell + '</td>' +
+                        '<td class="text-end small">' + escapeHtml(fmtUsd(u)) + '</td>' +
+                        '<td class="text-end small">' + escapeHtml(fmtUsd(ud)) + '</td>' +
+                        '<td class="text-end small">' + escapeHtml(fmtUsd(uw)) + '</td>' +
+                        '<td class="text-end small">' + escapeHtml(fmtUsd(um)) + '</td>' +
+                        '<td class="text-end small">' + (lim != null ? escapeHtml(fmtUsd(lim)) : '—') + '</td>' +
+                        '<td class="text-end small">' + (lr != null ? escapeHtml(fmtUsd(lr)) : '—') + '</td>' +
+                        '</tr>';
+                }).join('');
+                tbody.querySelectorAll('.ai-orkey-hash').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        var h = btn.getAttribute('data-hash');
+                        if (h) openOpenRouterKeyDetailModal(h);
+                    });
+                });
+                populateAiActivityKeyFromKeys(rk);
+            }
+
+            async function openOpenRouterKeyDetailModal(hash) {
+                var modalEl = document.getElementById('openRouterKeyDetailModal');
+                var loadEl = document.getElementById('aiOrKeyLoading');
+                var errEl = document.getElementById('aiOrKeyError');
+                var pre = document.getElementById('aiOrKeyJson');
+                if (!modalEl) return;
+                if (loadEl) { loadEl.style.display = ''; loadEl.textContent = 'Đang tải…'; }
+                if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+                if (pre) pre.textContent = '';
+                var m = bootstrap.Modal.getOrCreateInstance(modalEl);
+                m.show();
+                try {
+                    var data = await ApiService.adminGetAiOpenRouterKeyByHash(hash);
+                    if (loadEl) loadEl.style.display = 'none';
+                    if (pre) pre.textContent = JSON.stringify(data, null, 2);
+                } catch (e) {
+                    if (loadEl) loadEl.style.display = 'none';
+                    if (errEl) {
+                        errEl.classList.remove('d-none');
+                        errEl.textContent = e.message || String(e);
+                    }
+                }
+            }
+
+            function hideAiOpenRouterCredits() {
+                var w = document.getElementById('aiCreditsWrap');
+                var e = document.getElementById('aiCreditsErr');
+                if (w) w.classList.add('d-none');
+                if (e) { e.classList.add('d-none'); e.textContent = ''; }
+            }
+
+            function renderAiOpenRouterCredits(cr) {
+                var wrap = document.getElementById('aiCreditsWrap');
+                var errEl = document.getElementById('aiCreditsErr');
+                if (errEl) {
+                    errEl.classList.add('d-none');
+                    errEl.textContent = '';
+                }
+                if (!wrap) return;
+                if (!cr || cr.available === false) {
+                    wrap.classList.add('d-none');
+                    return;
+                }
+                if (cr.message && !cr.data) {
+                    wrap.classList.remove('d-none');
+                    if (errEl) {
+                        errEl.classList.remove('d-none');
+                        errEl.textContent = cr.message;
+                    }
+                    return;
+                }
+                var c = cr.data || {};
+                function pick(a, b) {
+                    return c[a] != null ? c[a] : c[b];
+                }
+                function moneyUsd(id, v) {
+                    var el = document.getElementById(id);
+                    if (!el) return;
+                    if (v === null || v === undefined || v === '') {
+                        el.textContent = '—';
+                        return;
+                    }
+                    var n = typeof v === 'number' ? v : parseFloat(v);
+                    el.textContent = isNaN(n) ? '—' : ('$' + fmtUsd(n));
+                }
+                var dep = pick('totalCreditsPurchased', 'TotalCreditsPurchased');
+                var used = pick('totalCreditsUsed', 'TotalCreditsUsed');
+                var rem = pick('remainingCredits', 'RemainingCredits');
+                moneyUsd('aiCreditDeposited', dep);
+                moneyUsd('aiCreditUsed', used);
+                moneyUsd('aiCreditRemaining', rem);
+                wrap.classList.remove('d-none');
+            }
+
+            async function loadAiOpenRouterCreditsOnly() {
+                try {
+                    var rc = await ApiService.adminGetAiOpenRouterCredits();
+                    renderAiOpenRouterCredits(rc);
+                } catch (e) {
+                    renderAiOpenRouterCredits({ available: true, message: e.message || String(e) });
+                }
+            }
+
+            async function loadAiOpenRouterKey() {
+                var loadEl = document.getElementById('aiKeyLoading');
+                var errEl = document.getElementById('aiKeyError');
+                var unEl = document.getElementById('aiKeyUnavailable');
+                var box = document.getElementById('aiKeyStats');
+                var listLoad = document.getElementById('aiKeysListLoading');
+                if (loadEl) { loadEl.style.display = ''; loadEl.textContent = 'Đang tải…'; }
+                if (listLoad) { listLoad.style.display = ''; listLoad.textContent = 'Đang tải danh sách keys…'; }
+                if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+                if (unEl) unEl.classList.add('d-none');
+                if (box) box.classList.add('d-none');
+                hideAiOpenRouterCredits();
+                try {
+                    var r = await ApiService.adminGetAiOpenRouterKeyStats();
+                    var rk = await ApiService.adminGetAiOpenRouterKeysList().catch(function (err) {
+                        return { available: true, message: err && err.message ? err.message : String(err), keys: [] };
+                    });
+                    var rc = await ApiService.adminGetAiOpenRouterCredits().catch(function (err) {
+                        return { available: true, message: err && err.message ? err.message : String(err) };
+                    });
+                    if (loadEl) loadEl.style.display = 'none';
+                    renderAiKeysListTable(rk || { available: false });
+                    if (!r || r.available === false) {
+                        if (unEl) {
+                            unEl.classList.remove('d-none');
+                            unEl.textContent = (r && r.message) ? r.message : 'Không dùng OpenRouter trong cấu hình AI.';
+                        }
+                        return;
+                    }
+                    if (r.message && !r.data) {
+                        if (errEl) {
+                            errEl.classList.remove('d-none');
+                            errEl.textContent = r.message;
+                        }
+                        renderAiOpenRouterCredits(rc);
+                        return;
+                    }
+                    var d = r.data || {};
+                    function set(id, val) {
+                        var el = document.getElementById(id);
+                        if (el) el.textContent = val != null && val !== '' ? String(val) : '—';
+                    }
+                    set('aiKeyUsage', fmtUsd(d.usage));
+                    set('aiKeyUsageDaily', fmtUsd(d.usageDaily));
+                    set('aiKeyUsageWeekly', fmtUsd(d.usageWeekly));
+                    set('aiKeyUsageMonthly', fmtUsd(d.usageMonthly));
+                    set('aiKeyLimit', d.limit != null ? fmtUsd(d.limit) : '—');
+                    set('aiKeyLimitRemaining', d.limitRemaining != null ? fmtUsd(d.limitRemaining) : '—');
+                    set('aiKeyLimitReset', d.limitReset);
+                    set('aiKeyLabel', d.label);
+                    set('aiKeyFreeTier', d.isFreeTier === true ? 'true' : (d.isFreeTier === false ? 'false' : '—'));
+                    if (box) box.classList.remove('d-none');
+                    renderAiOpenRouterCredits(rc);
+                } catch (e) {
+                    if (loadEl) loadEl.style.display = 'none';
+                    renderAiKeysListTable({ available: false });
+                    hideAiOpenRouterCredits();
+                    if (errEl) {
+                        errEl.classList.remove('d-none');
+                        errEl.textContent = e.message || String(e);
+                    }
+                }
+            }
+
+            function aiReqUserGroupKey(x) {
+                var uid = x.userId != null ? x.userId : x.UserId;
+                if (uid !== null && uid !== undefined && String(uid).trim() !== '')
+                    return 'id:' + String(uid).trim().toLowerCase();
+                var email = x.userEmail != null ? x.userEmail : x.UserEmail;
+                return 'em:' + String(email || '').trim().toLowerCase();
+            }
+
+            function groupAiReqItemsByUser(items) {
+                var order = [];
+                var map = {};
+                (items || []).forEach(function (x) {
+                    var k = aiReqUserGroupKey(x);
+                    if (!map[k]) {
+                        map[k] = [];
+                        order.push(k);
+                    }
+                    map[k].push(x);
+                });
+                return order.map(function (k) {
+                    return { key: k, items: map[k] };
+                });
+            }
+
+            function aiReqItemTimeMs(x) {
+                var c = x.createdAtUtc || x.CreatedAtUtc;
+                if (!c) return 0;
+                var s = String(c).trim();
+                if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) && !/[zZ]$/.test(s) && !/[+-][0-9]{2}:/.test(s))
+                    s = s.replace(' ', 'T');
+                if (/^\d{4}-\d{2}-\d{2}T/.test(s) && !/[zZ]$/.test(s) && !/[+-][0-9]{2}:/.test(s))
+                    s += 'Z';
+                var t = new Date(s).getTime();
+                return isNaN(t) ? 0 : t;
+            }
+
+            function aiReqLineTokens(x) {
+                var tt = x.totalTokens != null ? x.totalTokens : x.TotalTokens;
+                if (tt != null && !isNaN(Number(tt))) return Number(tt);
+                var pt = x.promptTokens != null ? x.promptTokens : x.PromptTokens;
+                var ct = x.completionTokens != null ? x.completionTokens : x.CompletionTokens;
+                return (Number(pt) || 0) + (Number(ct) || 0);
+            }
+
+            function aiReqUserLabelHtml(x) {
+                var email = x.userEmail || x.UserEmail || '';
+                var uid = x.userId || x.UserId || '';
+                return '<div class="text-break">' + escapeHtml(email || '—') + '</div>' +
+                    (uid ? '<div class="text-muted" style="font-size:0.75rem">' + escapeHtml(String(uid)) + '</div>' : '');
+            }
+
+            function aiReqInnerRowHtml(x) {
+                var pt = x.promptTokens != null ? x.promptTokens : x.PromptTokens;
+                var ct = x.completionTokens != null ? x.completionTokens : x.CompletionTokens;
+                var tt = x.totalTokens != null ? x.totalTokens : x.TotalTokens;
+                var tok = (pt != null ? pt : '—') + ' / ' + (ct != null ? ct : '—') + ' / ' + (tt != null ? tt : '—');
+                var gid = x.generationId || x.GenerationId || '';
+                var genCell = gid
+                    ? '<button type="button" class="btn btn-link btn-sm p-0 ai-gen-btn text-break" data-gen-id="' + escapeHtml(gid) + '">' + escapeHtml(gid.length > 28 ? gid.substring(0, 28) + '…' : gid) + '</button>'
+                    : '—';
+                var created = x.createdAtUtc || x.CreatedAtUtc;
+                return '<tr>' +
+                    '<td class="text-nowrap small">' + escapeHtml(formatDate(created)) + '</td>' +
+                    '<td class="small text-break">' + escapeHtml(x.actionType || x.ActionType || '—') + '</td>' +
+                    '<td class="small text-break">' + escapeHtml(x.modelName || x.ModelName || '—') + '</td>' +
+                    '<td class="text-end small">' + escapeHtml(tok) + '</td>' +
+                    '<td class="small">' + genCell + '</td>' +
+                    '<td class="small text-break">' + escapeHtml(x.status || x.Status || '—') + '</td>' +
+                    '</tr>';
+            }
+
+            function aiReqBuildGroupedRows(groups) {
+                var parts = [];
+                groups.forEach(function (g) {
+                    var arr = g.items;
+                    var first = arr[0];
+                    var tms = arr.map(aiReqItemTimeMs).filter(function (t) {
+                        return t > 0;
+                    });
+                    var tMin = tms.length ? Math.min.apply(null, tms) : 0;
+                    var tMax = tms.length ? Math.max.apply(null, tms) : 0;
+                    var timeLabel = tMin && tMax
+                        ? escapeHtml(formatDate(new Date(tMin).toISOString())) + ' → ' + escapeHtml(formatDate(new Date(tMax).toISOString()))
+                        : '—';
+                    var sumTok = 0;
+                    arr.forEach(function (x) {
+                        sumTok += aiReqLineTokens(x);
+                    });
+                    var models = [];
+                    var seen = {};
+                    arr.forEach(function (x) {
+                        var m = x.modelName || x.ModelName || '';
+                        if (m && !seen[m]) {
+                            seen[m] = true;
+                            models.push(m);
+                        }
+                    });
+                    var modelLabel = models.length ? escapeHtml(models.slice(0, 2).join(', ') + (models.length > 2 ? '…' : '')) : '—';
+                    parts.push(
+                        '<tr class="ai-req-sum table-light" style="cursor:pointer" title="Bấm để xem / ẩn chi tiết">' +
+                        '<td class="text-center text-muted small"><i class="bi bi-chevron-right ai-req-chev"></i></td>' +
+                        '<td class="small">' + aiReqUserLabelHtml(first) + '</td>' +
+                        '<td class="text-end small fw-medium">' + arr.length + '</td>' +
+                        '<td class="small text-nowrap">' + timeLabel + '</td>' +
+                        '<td class="text-end small">' + escapeHtml(sumTok.toLocaleString('vi-VN')) + '</td>' +
+                        '<td class="small text-break">' + modelLabel + '</td>' +
+                        '<td class="small text-muted">Bấm để mở</td>' +
+                        '</tr>'
+                    );
+                    var innerBody = arr.map(aiReqInnerRowHtml).join('');
+                    parts.push(
+                        '<tr class="ai-req-detail d-none">' +
+                        '<td colspan="7" class="p-0 border-top-0">' +
+                        '<div class="p-2 bg-light bg-opacity-50">' +
+                        '<table class="table table-sm table-bordered mb-0 bg-white">' +
+                        '<thead class="table-light"><tr>' +
+                        '<th>Thời gian</th><th>action</th><th>model</th><th class="text-end">tokens (p/c/t)</th><th>generation</th><th>status</th>' +
+                        '</tr></thead><tbody>' + innerBody + '</tbody></table></div></td></tr>'
+                    );
+                });
+                return parts.join('');
+            }
+
+            function aiReqBindExpandRows(body) {
+                if (!body) return;
+                body.querySelectorAll('tr.ai-req-sum').forEach(function (sumTr) {
+                    sumTr.addEventListener('click', function (ev) {
+                        if (ev.target.closest('.ai-gen-btn')) return;
+                        var det = sumTr.nextElementSibling;
+                        if (!det || !det.classList.contains('ai-req-detail')) return;
+                        det.classList.toggle('d-none');
+                        var closed = det.classList.contains('d-none');
+                        var chev = sumTr.querySelector('.ai-req-chev');
+                        if (chev) chev.className = (closed ? 'bi bi-chevron-right' : 'bi bi-chevron-down') + ' ai-req-chev';
+                        sumTr.classList.toggle('table-light', closed);
+                        sumTr.setAttribute('aria-expanded', closed ? 'false' : 'true');
+                    });
+                });
+            }
+
+            async function loadAiUsageRequests(optPage) {
+                if (typeof optPage === 'number' && optPage >= 1) aiUsagePage = optPage;
+                var body = document.getElementById('aiReqBody');
+                var loadEl = document.getElementById('aiReqLoading');
+                var errEl = document.getElementById('aiReqError');
+                var info = document.getElementById('aiReqPageInfo');
+                var prev = document.getElementById('btnAiReqPrev');
+                var next = document.getElementById('btnAiReqNext');
+                if (body) body.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Đang tải…</td></tr>';
+                if (loadEl) loadEl.classList.remove('d-none');
+                if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+                try {
+                    var q = { page: aiUsagePage, pageSize: 20 };
+                    var ps = document.getElementById('aiReqPageSize');
+                    if (ps) q.pageSize = parseInt(ps.value, 10) || 20;
+                    var fromEl = document.getElementById('aiReqFrom');
+                    var toEl = document.getElementById('aiReqTo');
+                    if (fromEl && fromEl.value) {
+                        var fiso = adminDatetimeLocalToIsoUtc(fromEl.value);
+                        if (fiso) q.fromUtc = fiso;
+                    }
+                    if (toEl && toEl.value) {
+                        var tiso = adminDatetimeLocalToIsoUtc(toEl.value);
+                        if (tiso) q.toUtc = tiso;
+                    }
+                    var act = document.getElementById('aiReqAction');
+                    if (act && act.value.trim()) q.actionType = act.value.trim();
+                    var r = await ApiService.adminGetAiUsageRequests(q);
+                    if (loadEl) loadEl.classList.add('d-none');
+                    var items = (r && r.items) ? r.items : [];
+                    var total = (r && r.totalCount !== undefined) ? r.totalCount : 0;
+                    var pageNum = (r && r.page) ? r.page : aiUsagePage;
+                    var pageSize = (r && r.pageSize) ? r.pageSize : q.pageSize;
+                    aiUsagePage = pageNum;
+                    var totalPages = Math.max(1, Math.ceil(total / (pageSize || 20)));
+                    if (info) info.textContent = 'Trang ' + pageNum + ' / ' + totalPages + ' · ' + total + ' dòng';
+                    if (prev) prev.disabled = pageNum <= 1;
+                    if (next) next.disabled = pageNum >= totalPages;
+                    if (!items.length) {
+                        body.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Không có dữ liệu.</td></tr>';
+                        return;
+                    }
+                    var groups = groupAiReqItemsByUser(items);
+                    body.innerHTML = aiReqBuildGroupedRows(groups);
+                    aiReqBindExpandRows(body);
+                    body.querySelectorAll('.ai-gen-btn').forEach(function (btn) {
+                        btn.addEventListener('click', function (ev) {
+                            ev.stopPropagation();
+                            var id = btn.getAttribute('data-gen-id');
+                            if (id) openAiGenerationModal(id);
+                        });
+                    });
+                } catch (e) {
+                    if (loadEl) loadEl.classList.add('d-none');
+                    if (errEl) {
+                        errEl.classList.remove('d-none');
+                        errEl.textContent = e.message || String(e);
+                    }
+                    if (body) body.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Lỗi tải.</td></tr>';
+                }
+            }
+
+            async function openAiGenerationModal(generationId) {
+                var modalEl = document.getElementById('aiGenerationModal');
+                var loadEl = document.getElementById('aiGenModalLoading');
+                var errEl = document.getElementById('aiGenModalError');
+                var pre = document.getElementById('aiGenModalJson');
+                if (!modalEl) return;
+                if (loadEl) { loadEl.style.display = ''; loadEl.textContent = 'Đang tải…'; }
+                if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+                if (pre) pre.textContent = '';
+                var m = bootstrap.Modal.getOrCreateInstance(modalEl);
+                m.show();
+                try {
+                    var data = await ApiService.adminGetAiOpenRouterGeneration(generationId);
+                    if (loadEl) loadEl.style.display = 'none';
+                    if (pre) pre.textContent = JSON.stringify(data, null, 2);
+                } catch (e) {
+                    if (loadEl) loadEl.style.display = 'none';
+                    if (errEl) {
+                        errEl.classList.remove('d-none');
+                        errEl.textContent = e.message || String(e);
+                    }
+                }
+            }
+
+            var aiGenPage = 1;
+
+            function ensureAiGenDefaultDates() {
+                var from = document.getElementById('aiGenFrom');
+                var to = document.getElementById('aiGenTo');
+                if (!from || !to) return;
+                function pad(n) { return String(n).padStart(2, '0'); }
+                function toInput(d) {
+                    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+                }
+                if (!to.value) to.value = toInput(new Date());
+                if (!from.value) {
+                    var ago = new Date(Date.now() - 7 * 86400000);
+                    from.value = toInput(ago);
+                }
+            }
+
+            function buildAiGenFilterQuery() {
+                var q = {};
+                ensureAiGenDefaultDates();
+                var fromEl = document.getElementById('aiGenFrom');
+                var toEl = document.getElementById('aiGenTo');
+                if (fromEl && fromEl.value) {
+                    var fiso = adminDatetimeLocalToIsoUtc(fromEl.value);
+                    if (fiso) q.fromUtc = fiso;
+                }
+                if (toEl && toEl.value) {
+                    var tiso = adminDatetimeLocalToIsoUtc(toEl.value);
+                    if (tiso) q.toUtc = tiso;
+                }
+                var modelEl = document.getElementById('aiGenModel');
+                if (modelEl && modelEl.value.trim()) q.modelName = modelEl.value.trim();
+                var stEl = document.getElementById('aiGenStatus');
+                if (stEl && stEl.value.trim()) q.status = stEl.value.trim();
+                var actEl = document.getElementById('aiGenAction');
+                if (actEl && actEl.value.trim()) q.actionType = actEl.value.trim();
+                return q;
+            }
+
+            function ymdUtcFromIso(iso) {
+                if (!iso) return null;
+                var d = new Date(iso);
+                if (isNaN(d.getTime())) return null;
+                return d.toISOString().slice(0, 10);
+            }
+
+            function enumerateYmdInclusive(fromYmd, toYmd) {
+                var out = [];
+                var cur = fromYmd;
+                var guard = 0;
+                while (cur <= toYmd && guard++ < 400) {
+                    out.push(cur);
+                    var p = cur.split('-').map(function (x) { return parseInt(x, 10); });
+                    var t = Date.UTC(p[0], p[1] - 1, p[2] + 1);
+                    cur = new Date(t).toISOString().slice(0, 10);
+                }
+                return out;
+            }
+
+            function drawGenVolumeChart(dayRows, fromIso, toIso) {
+                var el = document.getElementById('aiGenVolCanvas');
+                if (!el || !el.getContext) return;
+                var fromY = ymdUtcFromIso(fromIso);
+                var toY = ymdUtcFromIso(toIso);
+                if (!fromY || !toY || fromY > toY) {
+                    var tmp = fromY;
+                    fromY = toY;
+                    toY = tmp;
+                }
+                var map = {};
+                (dayRows || []).forEach(function (d) {
+                    var k = d.day != null ? d.day : d.Day;
+                    if (k) map[k] = d.count != null ? d.count : d.Count;
+                });
+                var dates = enumerateYmdInclusive(fromY, toY);
+                var counts = dates.map(function (dt) { return map[dt] || 0; });
+                var maxC = Math.max(1, Math.max.apply(null, counts));
+                var dpr = window.devicePixelRatio || 1;
+                var wCss = el.parentElement ? el.parentElement.clientWidth : 600;
+                if (wCss < 200) wCss = 600;
+                var hCss = 120;
+                el.width = Math.floor(wCss * dpr);
+                el.height = Math.floor(hCss * dpr);
+                el.style.width = wCss + 'px';
+                el.style.height = hCss + 'px';
+                var ctx = el.getContext('2d');
+                if (!ctx) return;
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.scale(dpr, dpr);
+                ctx.clearRect(0, 0, wCss, hCss);
+                var padL = 8, padR = 8, padB = 16, padT = 6;
+                var cw = wCss - padL - padR;
+                var ch = hCss - padT - padB;
+                var n = dates.length;
+                var gap = n > 60 ? 0 : (n > 30 ? 1 : 2);
+                var barW = Math.max(1, (cw - gap * Math.max(0, n - 1)) / Math.max(1, n));
+                ctx.fillStyle = '#6366f1';
+                for (var i = 0; i < n; i++) {
+                    var h = (counts[i] / maxC) * ch;
+                    var x = padL + i * (barW + gap);
+                    var y = padT + ch - h;
+                    ctx.fillRect(x, y, barW, h);
+                }
+                ctx.fillStyle = '#64748b';
+                ctx.font = '9px system-ui,sans-serif';
+                ctx.textAlign = 'center';
+                var step = n > 20 ? Math.ceil(n / 10) : (n > 12 ? 2 : 1);
+                for (var j = 0; j < n; j += step) {
+                    ctx.fillText(dates[j].slice(5), padL + j * (barW + gap) + barW / 2, hCss - 3);
+                }
+            }
+
+            async function loadAiGenerations(optPage) {
+                if (typeof optPage === 'number' && optPage >= 1) aiGenPage = optPage;
+                var body = document.getElementById('aiGenBody');
+                var loadEl = document.getElementById('aiGenLoading');
+                var errEl = document.getElementById('aiGenError');
+                var info = document.getElementById('aiGenPageInfo');
+                var prev = document.getElementById('btnAiGenPrev');
+                var next = document.getElementById('btnAiGenNext');
+                if (body) body.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Đang tải…</td></tr>';
+                if (loadEl) loadEl.classList.remove('d-none');
+                if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+                try {
+                    var fq = buildAiGenFilterQuery();
+                    var q = Object.assign({}, fq, { page: aiGenPage, pageSize: 25 });
+                    var ps = document.getElementById('aiGenPageSize');
+                    if (ps) q.pageSize = parseInt(ps.value, 10) || 25;
+                    var daily = await ApiService.adminGetAiGenerationsDaily(fq);
+                    var r = await ApiService.adminGetAiUsageRequests(q);
+                    if (loadEl) loadEl.classList.add('d-none');
+                    var days = (daily && (daily.days || daily.Days)) ? (daily.days || daily.Days) : [];
+                    var fromIso = q.fromUtc || new Date(Date.now() - 7 * 86400000).toISOString();
+                    var toIso = q.toUtc || new Date().toISOString();
+                    drawGenVolumeChart(days, fromIso, toIso);
+                    var items = (r && r.items) ? r.items : [];
+                    var total = (r && r.totalCount !== undefined) ? r.totalCount : 0;
+                    var pageNum = (r && r.page) ? r.page : aiGenPage;
+                    var pageSize = (r && r.pageSize) ? r.pageSize : q.pageSize;
+                    aiGenPage = pageNum;
+                    var totalPages = Math.max(1, Math.ceil(total / (pageSize || 25)));
+                    if (info) info.textContent = 'Trang ' + pageNum + ' / ' + totalPages + ' · ' + total + ' request';
+                    if (prev) prev.disabled = pageNum <= 1;
+                    if (next) next.disabled = pageNum >= totalPages;
+                    function fmtTokCell(pt, ct) {
+                        var a = pt != null ? Number(pt).toLocaleString('vi-VN') : '—';
+                        var b = ct != null ? Number(ct).toLocaleString('vi-VN') : '—';
+                        return a + ' → ' + b;
+                    }
+                    function fmtCost(c) {
+                        if (c === null || c === undefined || c === '') return '—';
+                        var x = typeof c === 'number' ? c : parseFloat(c);
+                        if (isNaN(x)) return '—';
+                        return '$' + fmtUsd(x);
+                    }
+                    if (!items.length) {
+                        body.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Không có dòng trong khoảng / bộ lọc.</td></tr>';
+                        return;
+                    }
+                    body.innerHTML = items.map(function (x) {
+                        var created = x.createdAtUtc || x.CreatedAtUtc;
+                        var model = x.modelName || x.ModelName || '—';
+                        var act = x.actionType || x.ActionType || '—';
+                        var pt = x.promptTokens != null ? x.promptTokens : x.PromptTokens;
+                        var ct = x.completionTokens != null ? x.completionTokens : x.CompletionTokens;
+                        var cost = x.costUsd != null ? x.costUsd
+                            : (x.CostUsd != null ? x.CostUsd
+                                : (x.cost_usd != null ? x.cost_usd : x.Cost_USD));
+                        var st = x.status || x.Status || '—';
+                        var email = x.userEmail || x.UserEmail || '—';
+                        var gid = x.generationId || x.GenerationId || '';
+                        var detailBtn = gid
+                            ? '<button type="button" class="btn btn-sm btn-outline-secondary ai-gen-detail-btn" data-gen-id="' + escapeHtml(gid) + '" title="OpenRouter generation"><i class="bi bi-chevron-right"></i></button>'
+                            : '<span class="text-muted">—</span>';
+                        return '<tr>' +
+                            '<td class="text-nowrap small">' + escapeHtml(formatDate(created)) + '</td>' +
+                            '<td class="small text-break">' + escapeHtml(String(model)) + '</td>' +
+                            '<td class="small text-break">' + escapeHtml(String(act)) + '</td>' +
+                            '<td class="text-end small text-nowrap">' + escapeHtml(fmtTokCell(pt, ct)) + '</td>' +
+                            '<td class="text-end small">' + escapeHtml(fmtCost(cost)) + '</td>' +
+                            '<td class="small text-break">' + escapeHtml(String(st)) + '</td>' +
+                            '<td class="small text-break">' + escapeHtml(String(email)) + '</td>' +
+                            '<td class="text-end">' + detailBtn + '</td>' +
+                            '</tr>';
+                    }).join('');
+                    body.querySelectorAll('.ai-gen-detail-btn').forEach(function (btn) {
+                        btn.addEventListener('click', function () {
+                            var id = btn.getAttribute('data-gen-id');
+                            if (id) openAiGenerationModal(id);
+                        });
+                    });
+                } catch (e) {
+                    if (loadEl) loadEl.classList.add('d-none');
+                    if (errEl) {
+                        errEl.classList.remove('d-none');
+                        errEl.textContent = e.message || String(e);
+                    }
+                    if (body) body.innerHTML = '<tr><td colspan="8" class="text-center text-danger">Lỗi tải.</td></tr>';
+                    drawGenVolumeChart([], new Date().toISOString(), new Date().toISOString());
+                }
+            }
+
+            function fmtTokCell(n) {
+                if (n == null || !Number.isFinite(n)) return '—';
+                return Number(n).toLocaleString('vi-VN');
+            }
+
+            function parseBudgetLimitInput(raw) {
+                var s = String(raw || '').trim().replace(/\s/g, '');
+                if (s === '') return { value: null };
+                if (!/^\d+$/.test(s)) return { err: 'Chỉ nhập chữ số (số nguyên không âm) hoặc để trống.' };
+                var n = parseInt(s, 10);
+                if (!Number.isFinite(n) || n < 0 || n > 9007199254740991) return { err: 'Giá trị hạn mức không hợp lệ.' };
+                return { value: n };
+            }
+
+            function _defaultsInputToUi(v) {
+                if (v == null) return '';
+                try { return String(v); } catch { return ''; }
+            }
+
+            async function loadAuthorAiTokenDefaultsPanel() {
+                var errEl = document.getElementById('aiAuthorDefaultsErr');
+                var okEl = document.getElementById('aiAuthorDefaultsOk');
+                var iLife = document.getElementById('aiAuthorDefaultsLifetime');
+                var curLife = document.getElementById('aiAuthorDefaultsLifetimeCurrent');
+                if (okEl) {
+                    okEl.classList.add('d-none');
+                    okEl.textContent = '';
+                }
+                if (errEl) {
+                    errEl.classList.add('d-none');
+                    errEl.textContent = '';
+                }
+                try {
+                    var dto = await ApiService.adminGetAuthorAiTokenDefaultsOnBecomeAuthor();
+                    var life = dto && dto.lifetime;
+                    if (iLife) iLife.value = _defaultsInputToUi(life);
+                    if (curLife) curLife.textContent = (life == null) ? '∞ (không giới hạn)' : (fmtTokCell(life) + ' token');
+                } catch (e) {
+                    if (errEl) {
+                        errEl.classList.remove('d-none');
+                        errEl.textContent = e.message || String(e);
+                    }
+                }
+            }
+
+            async function saveAuthorAiTokenDefaultsPanel() {
+                var errEl = document.getElementById('aiAuthorDefaultsErr');
+                var okEl = document.getElementById('aiAuthorDefaultsOk');
+                var iLife = document.getElementById('aiAuthorDefaultsLifetime');
+                if (okEl) {
+                    okEl.classList.add('d-none');
+                    okEl.textContent = '';
+                }
+                var pLife = parseBudgetLimitInput(iLife ? iLife.value : '');
+                var firstErr = pLife.err;
+                if (firstErr) {
+                    if (errEl) {
+                        errEl.classList.remove('d-none');
+                        errEl.textContent = firstErr;
+                    }
+                    return;
+                }
+                if (errEl) {
+                    errEl.classList.add('d-none');
+                    errEl.textContent = '';
+                }
+                try {
+                    await ApiService.adminPutAuthorAiTokenDefaultsOnBecomeAuthor({
+                        lifetime: pLife.value,
+                        perDay: null,
+                        perWeek: null,
+                        perMonth: null
+                    });
+                    if (okEl) {
+                        okEl.classList.remove('d-none');
+                        okEl.textContent = 'Đã lưu cấu hình mặc định.';
+                    }
+                    await loadAuthorAiTokenDefaultsPanel();
+                } catch (e) {
+                    if (errEl) {
+                        errEl.classList.remove('d-none');
+                        errEl.textContent = e.message || String(e);
+                    }
+                }
+            }
+
+            function loadAiUsageStatsTab() {
+                loadAiOpenRouterKey();
+                loadAiOpenRouterActivity();
+                loadAiGenerations();
+                loadAiUsageRequests();
+                loadAuthorAiTokenDefaultsPanel();
+                loadAuthorAiTokenAutoGrantPanel();
+            }
+
+            var aiAutoGrantInitDone = false;
+            var aiAutoGrantCurrentRuleId = null;
+            var aiAutoGrantUsersPage = 1;
+            var aiAutoGrantSelectedUserIds = [];
+
+            function aiAutoGrantSetMsg(kind, msg) {
+                var err = document.getElementById('aiAutoGrantErr');
+                var ok = document.getElementById('aiAutoGrantOk');
+                if (err) { err.classList.add('d-none'); err.textContent = ''; }
+                if (ok) { ok.classList.add('d-none'); ok.textContent = ''; }
+                if (!msg) return;
+                if (kind === 'ok' && ok) { ok.classList.remove('d-none'); ok.textContent = msg; }
+                if (kind === 'err' && err) { err.classList.remove('d-none'); err.textContent = msg; }
+            }
+
+            function aiAutoGrantReadFormSimple() {
+                var am = document.getElementById('aiAutoGrantAmount');
+                var amount = am ? parseInt(am.value, 10) : 0;
+                if (isNaN(amount) || amount <= 0) throw new Error('Số token phải là số nguyên > 0.');
+                return {
+                    isEnabled: true,
+                    displayName: null,
+                    periodKind: 'monthly_utc',
+                    grantLimitField: 'lifetime',
+                    grantAmount: amount,
+                    applyToAllAuthors: true,
+                    selectedUserIds: []
+                };
+            }
+
+            function renderAiAutoGrantSingleton(r) {
+                var body = document.getElementById('aiAutoGrantBody');
+                var nextEl = document.getElementById('aiAutoGrantNextRenewal');
+                var btnOn = document.getElementById('btnAiAutoGrantEnable');
+                var btnOff = document.getElementById('btnAiAutoGrantDisable');
+                var selCountEl = document.getElementById('aiAutoGrantSelectedCount');
+                if (!body) return;
+                if (!r) {
+                    if (nextEl) nextEl.value = '—';
+                    if (btnOn) btnOn.disabled = false;
+                    if (btnOff) btnOff.disabled = true;
+                    aiAutoGrantSelectedUserIds = [];
+                    if (selCountEl) selCountEl.textContent = '0';
+                    body.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có cấu hình.</td></tr>';
+                    return;
+                }
+                aiAutoGrantCurrentRuleId = r.id || r.Id || null;
+                var isEnabled = !!(r.isEnabled ?? r.IsEnabled);
+                var enabled = isEnabled ? '<span class="badge bg-success">ON</span>' : '<span class="badge bg-secondary">OFF</span>';
+                var amt = (r.grantAmount ?? r.GrantAmount ?? 0);
+                var sel = r.selectedUserIds ?? r.SelectedUserIds ?? [];
+                aiAutoGrantSelectedUserIds = Array.isArray(sel) ? sel.slice() : [];
+                if (selCountEl) selCountEl.textContent = String(aiAutoGrantSelectedUserIds.length || 0);
+                var next = r.lastRunAtUtc ?? r.LastRunAtUtc ?? null;
+                if (nextEl) nextEl.value = next ? formatDate(next) : '—';
+                if (btnOn) btnOn.disabled = isEnabled;
+                if (btnOff) btnOff.disabled = !isEnabled;
+                body.innerHTML =
+                    '<tr data-rule-id="' + escapeHtml(aiAutoGrantCurrentRuleId || '') + '">' +
+                    '<td>' + enabled + '</td>' +
+                    '<td class="text-end fw-semibold">' + Number(amt || 0).toLocaleString('vi-VN') + '</td>' +
+                    '<td>' + (next ? escapeHtml(formatDate(next)) : '—') + '</td>' +
+                    '<td class="text-end"><button type="button" class="btn btn-sm btn-outline-warning" data-act="run">Chạy ngay</button></td>' +
+                    '</tr>';
+            }
+
+            async function loadAuthorAiTokenAutoGrantPanel() {
+                // init handlers once
+                if (!aiAutoGrantInitDone) {
+                    aiAutoGrantInitDone = true;
+                    var btnRefresh = document.getElementById('btnAiAutoGrantRefresh');
+                    if (btnRefresh) btnRefresh.addEventListener('click', function () { loadAuthorAiTokenAutoGrantPanel(); });
+
+                    var btnUsersRefresh = document.getElementById('btnAiAutoGrantUsersRefresh');
+                    if (btnUsersRefresh) btnUsersRefresh.addEventListener('click', function () { aiAutoGrantUsersPage = 1; loadAutoGrantUsers(); });
+                    var usersSearch = document.getElementById('aiAutoGrantUsersSearch');
+                    if (usersSearch) usersSearch.addEventListener('input', function () { aiAutoGrantUsersPage = 1; loadAutoGrantUsers(); });
+                    var usersPageSize = document.getElementById('aiAutoGrantUsersPageSize');
+                    if (usersPageSize) usersPageSize.addEventListener('change', function () { aiAutoGrantUsersPage = 1; loadAutoGrantUsers(); });
+                    var btnPrev = document.getElementById('btnAiAutoGrantUsersPrev');
+                    if (btnPrev) btnPrev.addEventListener('click', function () { if (aiAutoGrantUsersPage > 1) { aiAutoGrantUsersPage -= 1; loadAutoGrantUsers(); } });
+                    var btnNext = document.getElementById('btnAiAutoGrantUsersNext');
+                    if (btnNext) btnNext.addEventListener('click', function () { aiAutoGrantUsersPage += 1; loadAutoGrantUsers(); });
+
+                    var btnOn = document.getElementById('btnAiAutoGrantEnable');
+                    if (btnOn) btnOn.addEventListener('click', async function () {
+                        aiAutoGrantSetMsg(null, null);
+                        try {
+                            var payload = aiAutoGrantReadFormSimple();
+                            payload.isEnabled = true;
+                            var saved = await ApiService.adminCreateAuthorAiTokenAutoGrantRule(payload);
+                            var rid = saved?.id ?? saved?.Id ?? aiAutoGrantCurrentRuleId;
+                            if (!rid) throw new Error('Chưa có rule để chạy.');
+                            aiAutoGrantCurrentRuleId = String(rid);
+                            var rrun = await ApiService.adminRunAuthorAiTokenAutoGrantRuleNow(aiAutoGrantCurrentRuleId);
+                            var usersUpdated = (rrun && (rrun.usersUpdated ?? rrun.UsersUpdated)) || 0;
+                            aiAutoGrantSetMsg('ok', 'Đã bật và chạy gia hạn. Users updated: ' + usersUpdated + '.');
+                            await loadAuthorAiTokenAutoGrantPanel();
+                        } catch (e) {
+                            aiAutoGrantSetMsg('err', e && e.message ? e.message : String(e));
+                        }
+                    });
+
+                    var btnOff = document.getElementById('btnAiAutoGrantDisable');
+                    if (btnOff) btnOff.addEventListener('click', async function () {
+                        aiAutoGrantSetMsg(null, null);
+                        try {
+                            var payload = aiAutoGrantReadFormSimple();
+                            payload.isEnabled = false;
+                            await ApiService.adminCreateAuthorAiTokenAutoGrantRule(payload);
+                            aiAutoGrantSetMsg('ok', 'Đã tắt gia hạn tự động.');
+                            await loadAuthorAiTokenAutoGrantPanel();
+                        } catch (e) {
+                            aiAutoGrantSetMsg('err', e && e.message ? e.message : String(e));
+                        }
+                    });
+
+                    var body = document.getElementById('aiAutoGrantBody');
+                    if (body) body.addEventListener('click', async function (evt) {
+                        var btn = evt.target && evt.target.closest ? evt.target.closest('button[data-act]') : null;
+                        if (!btn) return;
+                        var act = btn.getAttribute('data-act');
+                        if (act !== 'run') return;
+                        if (!aiAutoGrantCurrentRuleId) return;
+                        aiAutoGrantSetMsg(null, null);
+                        try {
+                            var rr = await ApiService.adminRunAuthorAiTokenAutoGrantRuleNow(aiAutoGrantCurrentRuleId);
+                            var usersUpdated = (rr && (rr.usersUpdated ?? rr.UsersUpdated)) || 0;
+                            aiAutoGrantSetMsg('ok', 'Đã chạy. Users updated: ' + usersUpdated + '.');
+                            await loadAuthorAiTokenAutoGrantPanel();
+                        } catch (e) {
+                            aiAutoGrantSetMsg('err', e && e.message ? e.message : String(e));
+                        }
+                    });
+                }
+
+                try {
+                    var list = await ApiService.adminListAuthorAiTokenAutoGrantRules();
+                    var arr = Array.isArray(list) ? list : [];
+                    var first = arr.length ? arr[0] : null;
+                    // sync form
+                    var am = document.getElementById('aiAutoGrantAmount');
+                    if (first) {
+                        var amt = first.grantAmount ?? first.GrantAmount ?? 0;
+                        if (am) am.value = String(amt || 0);
+                    }
+                    renderAiAutoGrantSingleton(first);
+                } catch (e) {
+                    aiAutoGrantSetMsg('err', e && e.message ? e.message : String(e));
+                    var body = document.getElementById('aiAutoGrantBody');
+                    if (body) body.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Không tải được cấu hình.</td></tr>';
+                }
+
+                // load user list (best-effort)
+                try { await loadAutoGrantUsers(); } catch (_) { /* ignore */ }
+            }
+
+            async function loadAutoGrantUsers() {
+                var loading = document.getElementById('aiAutoGrantUsersLoading');
+                var err = document.getElementById('aiAutoGrantUsersErr');
+                var body = document.getElementById('aiAutoGrantUsersBody');
+                var info = document.getElementById('aiAutoGrantUsersPageInfo');
+                var prev = document.getElementById('btnAiAutoGrantUsersPrev');
+                var next = document.getElementById('btnAiAutoGrantUsersNext');
+                if (err) { err.classList.add('d-none'); err.textContent = ''; }
+                if (loading) loading.classList.remove('d-none');
+                if (body) body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Đang tải…</td></tr>';
+
+                var qEl = document.getElementById('aiAutoGrantUsersSearch');
+                var psEl = document.getElementById('aiAutoGrantUsersPageSize');
+                var q = qEl ? String(qEl.value || '').trim().toLowerCase() : '';
+                var pageSize = psEl ? (parseInt(psEl.value, 10) || 50) : 50;
+                var page = aiAutoGrantUsersPage || 1;
+                if (page < 1) page = 1;
+
+                try {
+                    var r = await ApiService.adminGetUsers({ page: page, pageSize: pageSize, role: 'author', search: q });
+                    var items = (r && r.items) ? r.items : ((r && r.Items) ? r.Items : []);
+                    var total = (r && r.totalCount !== undefined) ? r.totalCount : ((r && r.TotalCount !== undefined) ? r.TotalCount : 0);
+                    var totalPages = Math.max(1, Math.ceil((total || 0) / (pageSize || 50)));
+                    if (page > totalPages) { aiAutoGrantUsersPage = totalPages; page = totalPages; }
+
+                    if (info) info.textContent = 'Trang ' + page + ' / ' + totalPages + ' · Tổng ' + (total || 0) + ' AUTHOR';
+                    if (prev) prev.disabled = page <= 1;
+                    if (next) next.disabled = page >= totalPages;
+
+                    if (!items || items.length === 0) {
+                        if (body) body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Không có author.</td></tr>';
+                        return;
+                    }
+
+                    function pick(x, a, b) { var v = x[a]; if (v === undefined || v === null) v = x[b]; return v; }
+                    body.innerHTML = items.map(function (u) {
+                        var id = String(pick(u, 'id', 'Id') || '');
+                        var email = String(pick(u, 'email', 'Email') || '');
+                        var nick = String(pick(u, 'nickname', 'Nickname') || '');
+                        var role = String(pick(u, 'role', 'Role') || '');
+                        var status = String(pick(u, 'status', 'Status') || '');
+                        var tok = pick(u, 'aiTokenLimit', 'AiTokenLimit');
+                        if (tok === undefined || tok === null) tok = pick(u, 'ai_token_limit', 'ai_token_limit');
+                        var tokN = Number(tok || 0);
+                        var label = nick && nick.trim() ? nick.trim() : (email || id);
+                        return '' +
+                            '<tr>' +
+                            '<td class="text-break">' + escapeHtml(label) + (email ? ('<div class="text-muted small">' + escapeHtml(email) + '</div>') : '') + '</td>' +
+                            '<td><code>' + escapeHtml(String(role || '—').toUpperCase()) + '</code></td>' +
+                            '<td><code>' + escapeHtml(String(status || '—').toUpperCase()) + '</code></td>' +
+                            '<td class="text-end fw-semibold">' + (Number.isFinite(tokN) ? tokN.toLocaleString('vi-VN') : '—') + '</td>' +
+                            '<td class="text-muted small"><code>' + escapeHtml(id) + '</code></td>' +
+                            '</tr>';
+                    }).join('');
+                } catch (e) {
+                    if (err) { err.classList.remove('d-none'); err.textContent = e && e.message ? e.message : String(e); }
+                    if (body) body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Không tải được.</td></tr>';
+                    if (info) info.textContent = '—';
+                } finally {
+                    if (loading) loading.classList.add('d-none');
+                }
             }
 
             var perfPage = 1;
@@ -2380,6 +4106,39 @@
                     loadSysLedger(true);
                 });
             }
+
+            var tabAiUsage = document.getElementById('tab-ai-usage-stats');
+            if (tabAiUsage) {
+                tabAiUsage.addEventListener('shown.bs.tab', function () {
+                    loadAiUsageStatsTab();
+                });
+            }
+            var btnAiKeyRefresh = document.getElementById('btnAiKeyRefresh');
+            if (btnAiKeyRefresh) btnAiKeyRefresh.addEventListener('click', loadAiOpenRouterKey);
+            var btnAiCreditsRefresh = document.getElementById('btnAiCreditsRefresh');
+            if (btnAiCreditsRefresh) btnAiCreditsRefresh.addEventListener('click', loadAiOpenRouterCreditsOnly);
+            var btnAiAuthorDefaultsRefresh = document.getElementById('btnAiAuthorDefaultsRefresh');
+            if (btnAiAuthorDefaultsRefresh) btnAiAuthorDefaultsRefresh.addEventListener('click', loadAuthorAiTokenDefaultsPanel);
+            var btnAiAuthorDefaultsSave = document.getElementById('btnAiAuthorDefaultsSave');
+            if (btnAiAuthorDefaultsSave) btnAiAuthorDefaultsSave.addEventListener('click', saveAuthorAiTokenDefaultsPanel);
+            var btnAiActivityRefresh = document.getElementById('btnAiActivityRefresh');
+            if (btnAiActivityRefresh) btnAiActivityRefresh.addEventListener('click', loadAiOpenRouterActivity);
+            var aiActivityRangeEl = document.getElementById('aiActivityRange');
+            if (aiActivityRangeEl) aiActivityRangeEl.addEventListener('change', renderAiActivityDashboard);
+            var aiActivityKeyHashEl = document.getElementById('aiActivityKeyHash');
+            if (aiActivityKeyHashEl) aiActivityKeyHashEl.addEventListener('change', loadAiOpenRouterActivity);
+            var btnAiGenApply = document.getElementById('btnAiGenApply');
+            if (btnAiGenApply) btnAiGenApply.addEventListener('click', function () { aiGenPage = 1; loadAiGenerations(1); });
+            var btnAiGenPrev = document.getElementById('btnAiGenPrev');
+            if (btnAiGenPrev) btnAiGenPrev.addEventListener('click', function () { loadAiGenerations(aiGenPage - 1); });
+            var btnAiGenNext = document.getElementById('btnAiGenNext');
+            if (btnAiGenNext) btnAiGenNext.addEventListener('click', function () { loadAiGenerations(aiGenPage + 1); });
+            var btnAiReqApply = document.getElementById('btnAiReqApply');
+            if (btnAiReqApply) btnAiReqApply.addEventListener('click', function () { aiUsagePage = 1; loadAiUsageRequests(1); });
+            var btnAiReqPrev = document.getElementById('btnAiReqPrev');
+            if (btnAiReqPrev) btnAiReqPrev.addEventListener('click', function () { if (btnAiReqPrev.disabled) return; loadAiUsageRequests(aiUsagePage - 1); });
+            var btnAiReqNext = document.getElementById('btnAiReqNext');
+            if (btnAiReqNext) btnAiReqNext.addEventListener('click', function () { if (btnAiReqNext.disabled) return; loadAiUsageRequests(aiUsagePage + 1); });
 
             var btnPlatformWalletFilterClear = document.getElementById('btnPlatformWalletFilterClear');
             if (btnPlatformWalletFilterClear) {

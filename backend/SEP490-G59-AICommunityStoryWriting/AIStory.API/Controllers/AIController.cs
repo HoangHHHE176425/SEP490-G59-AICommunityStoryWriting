@@ -9,8 +9,11 @@ using AIStory.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using System.Text.Json.Serialization;
 using Repositories;
+using Services;
+using Services.DTOs.Admin;
 using Services.DTOs.AI;
 using Services.Interfaces;
 
@@ -44,6 +47,14 @@ namespace AIStory.API.Controllers
         public int Remaining { get; set; }
         [JsonPropertyName("resetsAtUtc")]
         public DateTime? ResetsAtUtc { get; set; }
+
+        /// <summary>Chi tiết token AI đã dùng so với hạn (ngày/tuần/tháng/tích lũy). Null nếu không lấy được.</summary>
+        [JsonPropertyName("authorTokenBudget")]
+        public AuthorAiTokenBudgetDto? AuthorTokenBudget { get; set; }
+
+        /// <summary>True khi số dư token AI đã cạn (khớp logic <see cref="IAuthorAiTokenBudgetService.EnsureWithinBudgetAsync"/>).</summary>
+        [JsonPropertyName("authorTokenBudgetBlocked")]
+        public bool AuthorTokenBudgetBlocked { get; set; }
     }
 
     /// <summary>API AI: gợi ý chương tiếp theo, đồng sáng tác (dàn ý + viết + guardrail).</summary>
@@ -60,6 +71,8 @@ namespace AIStory.API.Controllers
         private readonly IStoryRagService _ragService;
         private readonly IStoryRepository _storyRepository;
         private readonly IAISuggestRateLimitService _rateLimitService;
+        private readonly IAuthorAiTokenBudgetService _authorAiTokenBudget;
+        private readonly IConfiguration _configuration;
         private readonly IWebHostEnvironment _env;
         private readonly ILogger<AIController> _logger;
 
@@ -72,6 +85,8 @@ namespace AIStory.API.Controllers
             IStoryRagService ragService,
             IStoryRepository storyRepository,
             IAISuggestRateLimitService rateLimitService,
+            IAuthorAiTokenBudgetService authorAiTokenBudget,
+            IConfiguration configuration,
             IWebHostEnvironment env,
             ILogger<AIController> logger)
         {
@@ -83,19 +98,81 @@ namespace AIStory.API.Controllers
             _ragService = ragService;
             _storyRepository = storyRepository;
             _rateLimitService = rateLimitService;
+            _authorAiTokenBudget = authorAiTokenBudget;
+            _configuration = configuration;
             _env = env;
             _logger = logger;
         }
 
+        private static object BuildTokenBudgetExceededPayload(AuthorAiTokenBudgetExceededException ex) => new
+        {
+            message = string.IsNullOrWhiteSpace(ex.Message) ? "Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo." : ex.Message,
+            tokensUsed = ex.UsedTokens,
+            tokenLimit = ex.LimitTokens,
+            period = ex.Period.ToString()
+        };
+
+        private async Task<(bool Ok, AuthorAiTokenBudgetExceededException? Error)> TryEnsureAuthorTokenBudgetAsync(
+            Guid authorUserId,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                await _authorAiTokenBudget.EnsureWithinBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+                return (true, null);
+            }
+            catch (AuthorAiTokenBudgetExceededException ex)
+            {
+                return (false, ex);
+            }
+        }
+
+        private async Task<IActionResult?> TryRejectOverTokenBudgetAsync(Guid authorUserId, CancellationToken cancellationToken)
+        {
+            var (ok, ex) = await TryEnsureAuthorTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+            if (ok) return null;
+            return StatusCode(403, BuildTokenBudgetExceededPayload(ex!));
+        }
+
+        private async Task<IActionResult?> TryRejectInsufficientEstimatedTokensAsync(
+            Guid authorUserId,
+            int requiredTokens,
+            CancellationToken cancellationToken)
+        {
+            if (requiredTokens <= 0) return null;
+            var budget = await _authorAiTokenBudget.GetBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+            var remaining = budget?.TokensRemaining;
+            if ((remaining ?? long.MaxValue) >= requiredTokens) return null;
+            return StatusCode(403, new
+            {
+                message = $"Số token AI còn lại không đủ để thực hiện yêu cầu này (cần tối thiểu {requiredTokens:N0} token). Vui lòng đợi đến kỳ cấp token tiếp theo.",
+                tokensRemaining = remaining,
+                minRequiredTokens = requiredTokens
+            });
+        }
+
+        private static bool IsAuthorTokenBudgetBlocked(AuthorAiTokenBudgetDto b)
+            => (b.TokensRemaining ?? 0) <= 0;
+
         /// <summary>Xem giới hạn sử dụng AI (mặc định 3 lần/24h mỗi loại). Hai bộ đếm tách: suggest-next-chapter và co-create.</summary>
         [HttpGet("usage-limit")]
-        public IActionResult GetUsageLimit()
+        public async Task<IActionResult> GetUsageLimit(CancellationToken cancellationToken)
         {
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
                 return Unauthorized(new { message = "Vui lòng đăng nhập." });
             var suggest = _rateLimitService.GetDailyLimitInfo(userId, AiRateLimitKind.SuggestNextChapter);
             var coCreate = _rateLimitService.GetDailyLimitInfo(userId, AiRateLimitKind.CoCreate);
+
+            AuthorAiTokenBudgetDto? authorBudget = null;
+            try
+            {
+                authorBudget = await _authorAiTokenBudget.GetBudgetAsync(userId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "GetBudgetAsync failed for UserId={UserId}", userId);
+            }
 
             var payload = new AiUsageLimitResponse
             {
@@ -116,13 +193,15 @@ namespace AIStory.API.Controllers
                 LimitPerDay = suggest.LimitPerDay,
                 UsedInWindow = suggest.UsedInWindow,
                 Remaining = suggest.Remaining,
-                ResetsAtUtc = suggest.ResetsAtUtc
+                ResetsAtUtc = suggest.ResetsAtUtc,
+                AuthorTokenBudget = authorBudget,
+                AuthorTokenBudgetBlocked = authorBudget != null && IsAuthorTokenBudgetBlocked(authorBudget)
             };
 
             return Ok(payload);
         }
 
-        /// <summary>Gợi ý 3 hướng đi khác nhau cho chương tiếp theo. Chỉ tác giả của truyện được gọi. Có giới hạn số lần gọi theo user (tránh 429).</summary>
+        /// <summary>Gợi ý 3 hướng đi khác nhau cho chương tiếp theo. Chỉ tác giả của truyện được gọi. Kiểm soát bằng token budget của tác giả.</summary>
         [HttpPost("suggest-next-chapter")]
         public async Task<IActionResult> SuggestNextChapter([FromBody] SuggestNextChapterRequest request, CancellationToken cancellationToken)
         {
@@ -133,16 +212,14 @@ namespace AIStory.API.Controllers
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))
                 return Unauthorized(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." });
 
-            if (!_rateLimitService.TryAcquire(authorUserId, AiRateLimitKind.SuggestNextChapter, out var retryAfterSeconds))
-            {
-                Response.Headers.RetryAfter = retryAfterSeconds.ToString();
-                return StatusCode(429, new
-                {
-                    message = "Bạn đã đạt giới hạn gợi ý chương (suggest-next-chapter) trong cửa sổ 24h. Vui lòng thử lại sau.",
-                    retryAfterSeconds,
-                    kind = "suggestNextChapter"
-                });
-            }
+            var tokenCap = await TryRejectOverTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+            if (tokenCap != null)
+                return tokenCap;
+            // Default theo observed usage thực tế: suggest-next-chapter thường ~3.6k-3.7k token/lần.
+            var minSuggestTokens = _configuration.GetValue("AI:SuggestMinRequiredTokens", 3800);
+            var insufficientTokens = await TryRejectInsufficientEstimatedTokensAsync(authorUserId, minSuggestTokens, cancellationToken).ConfigureAwait(false);
+            if (insufficientTokens != null)
+                return insufficientTokens;
 
             try
             {
@@ -193,15 +270,22 @@ namespace AIStory.API.Controllers
                 return;
             }
 
-            if (!_rateLimitService.TryAcquire(authorUserId, AiRateLimitKind.CoCreate, out var retryAfterSeconds))
+            var (budgetOk, budgetEx) = await TryEnsureAuthorTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+            if (!budgetOk)
             {
-                Response.StatusCode = 429;
-                Response.Headers.RetryAfter = retryAfterSeconds.ToString();
-                await Response.WriteAsJsonAsync(new
+                Response.StatusCode = 403;
+                await Response.WriteAsJsonAsync(BuildTokenBudgetExceededPayload(budgetEx!), cancellationToken);
+                return;
+            }
+            // Default theo observed usage thực tế: co-create (outline + write) thường >13k token/lần.
+            var minCoCreateTokens = _configuration.GetValue("AI:CoCreateMinRequiredTokens", 14000);
+            var coCreateInsufficient = await TryRejectInsufficientEstimatedTokensAsync(authorUserId, minCoCreateTokens, cancellationToken).ConfigureAwait(false);
+            if (coCreateInsufficient != null)
+            {
+                Response.StatusCode = 403;
+                await Response.WriteAsJsonAsync(coCreateInsufficient is ObjectResult o ? o.Value : new
                 {
-                    message = "Bạn đã đạt giới hạn đồng sáng tác (co-create) trong cửa sổ 24h. Vui lòng thử lại sau.",
-                    retryAfterSeconds,
-                    kind = "coCreate"
+                    message = "Số token AI còn lại không đủ để thực hiện đồng sáng tác. Vui lòng đợi đến kỳ cấp token tiếp theo."
                 }, cancellationToken);
                 return;
             }

@@ -51,6 +51,16 @@ public static class AIClientHelper
         return (provider, model, apiKey!, baseUrl);
     }
 
+    /// <summary>JSON thường có <c>""</c> cho key tùy chọn; <see cref="string.IsNullOrWhiteSpace"/> phải fallback giống null (không dùng <c>??</c> vì <c>""</c> không null).</summary>
+    private static string? FirstNonWhiteApiKey(params string?[] candidates)
+    {
+        foreach (var c in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(c)) return c;
+        }
+        return null;
+    }
+
     private static (string provider, string? apiKey, string? baseUrl) NormalizeProviderConfig(string provider, string? apiKey, string? baseUrl)
     {
         if (provider.Equals("Ollama", StringComparison.OrdinalIgnoreCase))
@@ -91,13 +101,13 @@ public static class AIClientHelper
         if (agentName == AgentWriter)
         {
             provider = configuration["AI:WritingProvider"] ?? configuration["AI:Provider"] ?? "Ollama";
-            apiKey = configuration["AI:WritingApiKey"] ?? configuration["AI:ApiKey"];
+            apiKey = FirstNonWhiteApiKey(configuration["AI:WritingApiKey"], configuration["AI:ApiKey"]);
             baseUrl = configuration["AI:WritingBaseUrl"] ?? configuration["AI:BaseUrl"];
         }
         else
         {
             provider = configuration["AI:AnalysisProvider"] ?? configuration["AI:Provider"] ?? "Ollama";
-            apiKey = configuration["AI:AnalysisApiKey"] ?? configuration["AI:ApiKey"];
+            apiKey = FirstNonWhiteApiKey(configuration["AI:AnalysisApiKey"], configuration["AI:ApiKey"]);
             baseUrl = configuration["AI:AnalysisBaseUrl"] ?? configuration["AI:BaseUrl"];
         }
 
@@ -126,7 +136,8 @@ public static class AIClientHelper
 
     /// <summary>Options cho chat completion. Khi dùng OpenAI/Azure/Groq nên set MaxOutputTokenCount (vd. Writer 8192) để không bị cắt output.</summary>
     /// <param name="agentName">AgentPlanner, AgentWriter, AgentConsistencyChecker hoặc null → dùng AI:MaxOutputTokens.</param>
-    public static ChatCompletionOptions? GetCompletionOptions(IConfiguration configuration, string? agentName)
+    /// <param name="maxOutputTokensCap">Giới hạn trần runtime theo số dư token còn lại (nếu có).</param>
+    public static ChatCompletionOptions? GetCompletionOptions(IConfiguration configuration, string? agentName, int? maxOutputTokensCap = null)
     {
         int maxTokens;
         if (agentName == AgentWriter)
@@ -139,6 +150,8 @@ public static class AIClientHelper
             maxTokens = configuration.GetValue("AI:MaxOutputTokens", 4096);
             if (maxTokens < 256) maxTokens = 4096;
         }
+        if (maxOutputTokensCap is > 0)
+            maxTokens = Math.Max(64, Math.Min(maxTokens, maxOutputTokensCap.Value));
         return new ChatCompletionOptions { MaxOutputTokenCount = maxTokens };
     }
 }

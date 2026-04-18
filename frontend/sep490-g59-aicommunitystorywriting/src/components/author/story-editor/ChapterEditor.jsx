@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Sparkles, Settings, X, Lock, Unlock, Coins, Copy, Check } from 'lucide-react';
 import { useToast } from './Toast';
-import { indexRag, suggestNextChapter, coCreate, getAiUsageLimit, pickAiContextWarning } from '../../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, pickAiContextWarning } from '../../../api/ai/aiApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { translateCoCreateOutlineLabels } from '../../../utils/coCreateOutlineLabelsVi';
 import { RichTextEditor } from '../../common/RichTextEditor';
@@ -12,6 +12,9 @@ const countWords = (text) => {
     if (!plain) return 0;
     return plain.split(/\s+/).filter(word => word.length > 0).length;
 };
+
+const MIN_PAID_COIN_PRICE = 10;
+const MAX_PAID_COIN_PRICE = 100;
 
 function extractOutlineJson(raw) {
     if (!raw || !raw.trim()) return raw;
@@ -173,9 +176,9 @@ export function ChapterEditor({
     const [showCoCreateResultPopup, setShowCoCreateResultPopup] = useState(false);
     const [coCreateIdea, setCoCreateIdea] = useState('');
     const [coCreateLoading, setCoCreateLoading] = useState(false);
+    const [coCreateError, setCoCreateError] = useState(null);
     const [coCreateResult, setCoCreateResult] = useState(null);
     const [coCreateContextWarning, setCoCreateContextWarning] = useState(null);
-    const [aiUsageLimit, setAiUsageLimit] = useState(null);
 
     const storyId = story?.id ?? story?.Id ?? null;
     const chapterIdRaw = chapter?.id ?? chapter?.Id ?? null;
@@ -231,49 +234,6 @@ export function ChapterEditor({
     const storyTotalViews = Number(story?.totalViews ?? story?.TotalViews ?? 0) || 0;
     const canEnablePaidMode = storyTotalViews >= 500;
 
-    const loadAiUsageLimit = async () => {
-        try {
-            const data = await getAiUsageLimit();
-            setAiUsageLimit({
-                suggestNextChapter: {
-                    limitPerDay: Number(data?.suggestNextChapter?.limitPerDay ?? 0) || 0,
-                    usedInWindow: Number(data?.suggestNextChapter?.usedInWindow ?? 0) || 0,
-                    remaining: Number(data?.suggestNextChapter?.remaining ?? 0) || 0,
-                    resetsAtUtc: data?.suggestNextChapter?.resetsAtUtc ?? null,
-                },
-                coCreate: {
-                    limitPerDay: Number(data?.coCreate?.limitPerDay ?? 0) || 0,
-                    usedInWindow: Number(data?.coCreate?.usedInWindow ?? 0) || 0,
-                    remaining: Number(data?.coCreate?.remaining ?? 0) || 0,
-                    resetsAtUtc: data?.coCreate?.resetsAtUtc ?? null,
-                },
-                coCreateAvailable: Boolean(data?.coCreateAvailable),
-            });
-        } catch {
-            setAiUsageLimit(null);
-        }
-    };
-
-    const decrementCoCreateUsageOptimistic = () => {
-        setAiUsageLimit((prev) => {
-            if (!prev || !prev.coCreate) return prev;
-            const currentRemaining = Number(prev.coCreate.remaining ?? 0) || 0;
-            const currentUsed = Number(prev.coCreate.usedInWindow ?? 0) || 0;
-            return {
-                ...prev,
-                coCreate: {
-                    ...prev.coCreate,
-                    remaining: Math.max(0, currentRemaining - 1),
-                    usedInWindow: currentUsed + 1,
-                },
-            };
-        });
-    };
-
-    useEffect(() => {
-        if (storyId) loadAiUsageLimit();
-    }, [storyId]);
-
     useEffect(() => {
         if (!showSuggestPopup) {
             setCopiedSuggestionIndex(null);
@@ -326,12 +286,10 @@ export function ChapterEditor({
                         ? 'Lưu ý: Chương liền trước hiện vẫn ở trạng thái bản nháp. AI có thể chưa bám sát đầy đủ mạch mới nhất, bạn nên dùng gợi ý này để tham khảo và chỉnh sửa thêm.'
                         : null
                 );
-                loadAiUsageLimit();
             } catch (err) {
                 const status = err?.response?.status;
                 const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi gợi ý AI.';
-                if (status === 429) showToast('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.', 'error');
-                else if (status === 403) showToast(msg || 'Chỉ tác giả mới được sử dụng tính năng này.', 'error');
+                if (status === 403) showToast(msg || 'Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo.', 'error');
                 else showToast(msg, 'error');
                 setSuggestWarning(null);
                 setSuggestions([]);
@@ -340,6 +298,7 @@ export function ChapterEditor({
             }
         } else {
             setCoCreateIdea('');
+            setCoCreateError(null);
             setCoCreateResult(null);
             setShowCoCreateResultPopup(false);
             setShowCoCreateIdeaPopup(true);
@@ -363,13 +322,12 @@ export function ChapterEditor({
             showToast('Vui lòng nhập ý tưởng của bạn.', 'error');
             return;
         }
+        setCoCreateError(null);
         setCoCreateContextWarning(null);
         setCoCreateLoading(true);
         try {
             const chapterOrderIndex = (Number(chapter?.number) || 1) - 1;
             const data = await coCreate(storyId, idea, { chapterOrderIndex, chapterId: chapterIdForAi });
-            // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
-            decrementCoCreateUsageOptimistic();
             const ctxWarnCo = pickAiContextWarning(data);
             setCoCreateContextWarning(
                 ctxWarnCo
@@ -379,14 +337,14 @@ export function ChapterEditor({
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);
-            // Đồng bộ lại với BE (không chặn UI).
-            loadAiUsageLimit();
         } catch (err) {
             const status = err?.response?.status;
             const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi AI hỗ trợ.';
-            if (status === 429) showToast('Bạn đã gọi AI quá nhiều lần. Vui lòng thử lại sau.', 'error');
-            else if (status === 403) showToast(msg || 'Chỉ tác giả mới được sử dụng.', 'error');
-            else showToast(msg, 'error');
+            const errorText = status === 403
+                ? (msg || 'Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo.')
+                : msg;
+            setCoCreateError(errorText);
+            showToast(errorText, 'error');
         } finally {
             setCoCreateLoading(false);
         }
@@ -532,17 +490,18 @@ export function ChapterEditor({
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb' }}>
                             <button
                                 type="button"
-                                onClick={() => setShowSuggestPopup(false)}
+                                onClick={() => !suggestLoading && setShowSuggestPopup(false)}
+                                disabled={suggestLoading}
                                 style={{
                                     width: '100%',
                                     padding: '0.625rem 1rem',
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
                                     color: '#ffffff',
-                                    backgroundColor: '#13ec5b',
+                                    backgroundColor: suggestLoading ? '#9ca3af' : '#13ec5b',
                                     border: 'none',
                                     borderRadius: '8px',
-                                    cursor: 'pointer',
+                                    cursor: suggestLoading ? 'not-allowed' : 'pointer',
                                 }}
                             >
                                 ĐÓNG
@@ -564,7 +523,12 @@ export function ChapterEditor({
                         justifyContent: 'center',
                         backgroundColor: 'rgba(0,0,0,0.5)',
                     }}
-                    onClick={() => !coCreateLoading && setShowCoCreateIdeaPopup(false)}
+                    onClick={() => {
+                        if (!coCreateLoading) {
+                            setCoCreateError(null);
+                            setShowCoCreateIdeaPopup(false);
+                        }
+                    }}
                 >
                     <div
                         style={{
@@ -606,11 +570,21 @@ export function ChapterEditor({
                                     resize: 'vertical',
                                 }}
                             />
+                            {coCreateError ? (
+                                <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', fontSize: '0.8125rem', color: '#b91c1c' }}>
+                                    {coCreateError}
+                                </div>
+                            ) : null}
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                             <button
                                 type="button"
-                                onClick={() => !coCreateLoading && setShowCoCreateIdeaPopup(false)}
+                                onClick={() => {
+                                    if (!coCreateLoading) {
+                                        setCoCreateError(null);
+                                        setShowCoCreateIdeaPopup(false);
+                                    }
+                                }}
                                 style={{
                                     padding: '0.5rem 1rem',
                                     fontSize: '0.875rem',
@@ -877,6 +851,9 @@ export function ChapterEditor({
                                     const paidBlocked = !canEnablePaidMode && chapter.accessType !== 'paid';
                                     if (paidBlocked) return;
                                     onChange('accessType', 'paid');
+                                    if (!chapter.price || Number(chapter.price) < MIN_PAID_COIN_PRICE) {
+                                        onChange('price', MIN_PAID_COIN_PRICE);
+                                    }
                                 }}
                                 disabled={!canEnablePaidMode && chapter.accessType !== 'paid'}
                                 title={!canEnablePaidMode && chapter.accessType !== 'paid'
@@ -925,11 +902,14 @@ export function ChapterEditor({
                                     </label>
                                     <div style={{ position: 'relative' }}>
                                         <input
-                                            type="number"
-                                            value={chapter.price || 0}
-                                            onChange={(e) => onChange('price', Number(e.target.value) || 0)}
-                                            min="1"
-                                            placeholder="0"
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={chapter.price || ''}
+                                            onChange={(e) => {
+                                                const digitsOnly = String(e.target.value || '').replace(/\D/g, '');
+                                                onChange('price', digitsOnly === '' ? 0 : Number(digitsOnly));
+                                            }}
+                                            placeholder={`${MIN_PAID_COIN_PRICE}-${MAX_PAID_COIN_PRICE}`}
                                             style={{
                                                 width: '100%',
                                                 padding: '0.75rem 0.75rem 0.75rem 2.5rem',
@@ -952,7 +932,14 @@ export function ChapterEditor({
                                             color: '#f59e0b',
                                         }} />
                                     </div>
-                                    <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem', margin: 0 }}>Đơn vị: Xu</p>
+                                    <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem', margin: 0 }}>
+                                        Đơn vị: Coin (tối thiểu {MIN_PAID_COIN_PRICE}, tối đa {MAX_PAID_COIN_PRICE})
+                                    </p>
+                                    {(Number(chapter.price) < MIN_PAID_COIN_PRICE || Number(chapter.price) > MAX_PAID_COIN_PRICE) && (
+                                        <p style={{ fontSize: '0.625rem', color: '#dc2626', marginTop: '0.25rem', margin: 0 }}>
+                                            Giá phải trong khoảng {MIN_PAID_COIN_PRICE} đến {MAX_PAID_COIN_PRICE} coin.
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -1031,7 +1018,6 @@ export function ChapterEditor({
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
                                             AI gợi ý
-                                            {aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                         </button>
                                         <button
                                             type="button"
@@ -1042,11 +1028,6 @@ export function ChapterEditor({
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
                                             AI gợi ý chương
-                                            {aiUsageLimit
-                                                ? (aiUsageLimit.coCreateAvailable
-                                                    ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
-                                                    : ' (—/—)')
-                                                : ''}
                                         </button>
                                         <button
                                             type="button"

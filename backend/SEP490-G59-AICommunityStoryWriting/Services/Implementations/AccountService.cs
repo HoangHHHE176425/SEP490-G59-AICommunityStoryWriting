@@ -1,6 +1,8 @@
 using AIStory.Services.Helpers;
+using BusinessObjects;
 using BusinessObjects.Account;
 using BusinessObjects.Entities;
+using Microsoft.Extensions.Configuration;
 using Repositories.Interfaces;
 using Services.DTOs.Account;
 using Services.Interfaces;
@@ -18,17 +20,26 @@ namespace Services.Implementations
         private readonly IPolicyRepository _policyRepo;
         private readonly IAuthorPolicyAcceptanceRepository _authorPolicyAcceptanceRepo;
         private readonly JwtHelper _jwtHelper;
+        private readonly StoryPlatformDbContext _db;
+        private readonly IConfiguration _config;
+        private readonly IAuthorAiTokenAutoGrantService _authorAiTokenAutoGrant;
 
         public AccountService(
             IUserRepository userRepo,
             IPolicyRepository policyRepo,
             IAuthorPolicyAcceptanceRepository authorPolicyAcceptanceRepo,
-            JwtHelper jwtHelper)
+            JwtHelper jwtHelper,
+            StoryPlatformDbContext db,
+            IConfiguration config,
+            IAuthorAiTokenAutoGrantService authorAiTokenAutoGrant)
         {
             _userRepo = userRepo;
             _policyRepo = policyRepo;
             _authorPolicyAcceptanceRepo = authorPolicyAcceptanceRepo;
             _jwtHelper = jwtHelper;
+            _db = db;
+            _config = config;
+            _authorAiTokenAutoGrant = authorAiTokenAutoGrant;
         }
         public async Task DeleteAccountAsync(Guid userId)
         {
@@ -143,11 +154,7 @@ namespace Services.Implementations
                 IsVerified = user.status == "ACTIVE",
 
                 Role = (user.role ?? "USER").Trim().ToUpperInvariant(),
-                AuthorWritingSuspendedUntilUtc = user.author_writing_suspended_until.HasValue
-                    ? (user.author_writing_suspended_until.Value.Kind == DateTimeKind.Unspecified
-                        ? DateTime.SpecifyKind(user.author_writing_suspended_until.Value, DateTimeKind.Utc)
-                        : user.author_writing_suspended_until.Value.ToUniversalTime())
-                    : null,
+                AuthorWritingSuspendedUntilUtc = null,
 
                 Tags = tags,
 
@@ -258,6 +265,14 @@ namespace Services.Implementations
                 user.must_resign_policy = false;
                 user.updated_at = DateTime.UtcNow;
                 await _userRepo.UpdateUser(user);
+
+                // Khi user lần đầu trở thành AUTHOR: add vào selected_user_ids của rule mặc định
+                // và cộng ngay grant_amount vào users.ai_token_limit.
+                try
+                {
+                    await _authorAiTokenAutoGrant.OnAuthorBecameAuthorAsync(user.id).ConfigureAwait(false);
+                }
+                catch { /* best-effort */ }
             }
 
             return new BecomeAuthorResponse
@@ -314,5 +329,8 @@ namespace Services.Implementations
             var effectiveFrom = policy.activated_at ?? policy.created_at ?? DateTime.MinValue;
             return acceptance.accepted_at >= effectiveFrom;
         }
+
+        // NOTE: Cơ chế cấp token cho tác giả mới đã chuyển sang singleton rule trong author_ai_token_auto_grant_rules
+        // (bảng author_ai_token_auto_grant_rules) và xử lý trong IAuthorAiTokenAutoGrantService.OnAuthorBecameAuthorAsync.
     }
 }

@@ -17,6 +17,8 @@ namespace Services.Implementations
     {
         /// <summary>Gắn vào <see cref="InvalidOperationException.Data"/> khi cần client xác nhận xóa kèm version (409).</summary>
         internal const string DeleteRequiresVersionsConfirmationCode = "CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED";
+        private const int MinPaidCoinPrice = 10;
+        private const int MaxPaidCoinPrice = 100;
 
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
@@ -113,9 +115,9 @@ namespace Services.Implementations
 
             // Validate coin price based on access type
             var coinPrice = request.CoinPrice ?? 0;
-            if (accessType == "PAID" && coinPrice <= 0)
+            if (accessType == "PAID" && (coinPrice < MinPaidCoinPrice || coinPrice > MaxPaidCoinPrice))
             {
-                throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                throw new ArgumentException($"Giá chương trả phí phải trong khoảng {MinPaidCoinPrice}-{MaxPaidCoinPrice} xu.");
             }
             if (accessType == "PAID" && (story.total_views ?? 0) < 500)
             {
@@ -344,6 +346,8 @@ namespace Services.Implementations
                 return dto;
             }).ToList();
 
+            EnrichAiSimilarityFromChapterVersions(items);
+
             ApplyChapterCommentCounts(items, chapterList.Select(c => c.id));
 
             EnrichChapterListItemsWithReviewSla(chapterList, items);
@@ -363,6 +367,12 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null) return null;
             var dto = MapToResponseDto(chapter);
+            if (!(dto.AiSimilarityPercent > 0) && !(dto.AiContributionRatio > 0))
+            {
+                var aiFallback = ChapterVersionDAO.GetLatestAiSimilarityPercentByChapterIds(new List<Guid> { id });
+                if (aiFallback.TryGetValue(id, out var ai) && ai > 0)
+                    dto.AiSimilarityPercent = ai;
+            }
             if (chapter.status == "REJECTED")
             {
                 var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", id);
@@ -395,6 +405,7 @@ namespace Services.Implementations
                 }
                 return dto;
             }).ToList();
+            EnrichAiSimilarityFromChapterVersions(items);
             ApplyChapterCommentCounts(items, chapterList.Select(c => c.id));
             EnrichChapterListItemsWithReviewSla(chapterList, items);
             EnrichModeratorRejectionHistoryForChapterList(chapterList, items);
@@ -460,9 +471,9 @@ namespace Services.Implementations
 
                 // Validate coin price based on access type
                 var coinPrice = request.CoinPrice ?? chapter.coin_price ?? 0;
-                if (accessType == "PAID" && coinPrice <= 0)
+                if (accessType == "PAID" && (coinPrice < MinPaidCoinPrice || coinPrice > MaxPaidCoinPrice))
                 {
-                    throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                    throw new ArgumentException($"Giá chương trả phí phải trong khoảng {MinPaidCoinPrice}-{MaxPaidCoinPrice} xu.");
                 }
                 if (accessType == "PAID" && !string.Equals(chapter.access_type, "PAID", StringComparison.OrdinalIgnoreCase))
                 {
@@ -483,9 +494,9 @@ namespace Services.Implementations
                 // If only coin price is updated, validate based on current access type
                 var currentAccessType = chapter.access_type?.ToUpper() ?? "FREE";
                 var coinPrice = request.CoinPrice.Value;
-                if (currentAccessType == "PAID" && coinPrice <= 0)
+                if (currentAccessType == "PAID" && (coinPrice < MinPaidCoinPrice || coinPrice > MaxPaidCoinPrice))
                 {
-                    throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                    throw new ArgumentException($"Giá chương trả phí phải trong khoảng {MinPaidCoinPrice}-{MaxPaidCoinPrice} xu.");
                 }
                 if (currentAccessType == "FREE" && coinPrice > 0)
                 {
@@ -949,6 +960,26 @@ namespace Services.Implementations
                 CreatedAt = chapter.created_at,
                 UpdatedAt = chapter.updated_at
             };
+        }
+
+        private static void EnrichAiSimilarityFromChapterVersions(List<ChapterListItemDto> items)
+        {
+            if (items.Count == 0) return;
+            var needFallbackIds = items
+                .Where(i => !(i.AiSimilarityPercent > 0) && !(i.AiContributionRatio > 0))
+                .Select(i => i.Id)
+                .Distinct()
+                .ToList();
+            if (needFallbackIds.Count == 0) return;
+
+            var aiByChapterId = ChapterVersionDAO.GetLatestAiSimilarityPercentByChapterIds(needFallbackIds);
+            foreach (var item in items)
+            {
+                if ((item.AiSimilarityPercent > 0) || (item.AiContributionRatio > 0))
+                    continue;
+                if (aiByChapterId.TryGetValue(item.Id, out var ai) && ai > 0)
+                    item.AiSimilarityPercent = ai;
+            }
         }
 
         /// <summary>

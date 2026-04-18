@@ -192,5 +192,52 @@ namespace DataAccessObjects.DAOs
                 .Distinct()
                 .ToList();
         }
+
+        /// <summary>
+        /// Lấy AI similarity mới nhất (>0) cho mỗi chapter từ bảng chapter_versions.
+        /// Dùng fallback khi cột ai_similarity_percent của bảng chapters chưa được đồng bộ.
+        /// </summary>
+        public static Dictionary<Guid, decimal> GetLatestAiSimilarityPercentByChapterIds(IReadOnlyList<Guid> chapterIds)
+        {
+            var result = new Dictionary<Guid, decimal>();
+            if (chapterIds == null || chapterIds.Count == 0)
+                return result;
+
+            var idSet = chapterIds.ToHashSet();
+            try
+            {
+                using var context = new StoryPlatformDbContext();
+                var rows = context.chapter_versions
+                    .AsNoTracking()
+                    .Where(v => v.chapter_id != null &&
+                                idSet.Contains(v.chapter_id.Value) &&
+                                v.ai_similarity_percent != null &&
+                                v.ai_similarity_percent > 0)
+                    .Select(v => new
+                    {
+                        ChapterId = v.chapter_id!.Value,
+                        Ai = v.ai_similarity_percent!.Value,
+                        CreatedAt = v.created_at,
+                        ReviewedAt = v.reviewed_at
+                    })
+                    .ToList();
+
+                foreach (var g in rows.GroupBy(x => x.ChapterId))
+                {
+                    var latest = g
+                        .OrderByDescending(x => x.ReviewedAt ?? x.CreatedAt ?? DateTime.MinValue)
+                        .FirstOrDefault();
+                    if (latest != null && latest.Ai > 0)
+                        result[g.Key] = latest.Ai;
+                }
+            }
+            catch
+            {
+                // Không làm fail API chapter list nếu môi trường DB/model chưa map cột ai_similarity_percent.
+                return result;
+            }
+
+            return result;
+        }
     }
 }

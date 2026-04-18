@@ -70,12 +70,43 @@ export async function getUsers(params = {}) {
         },
     });
     const data = res.data ?? {};
-    const totalCount = data.totalCount ?? data.total ?? 0;
+    const nestedData = (data.data && typeof data.data === 'object') ? data.data : null;
+    const nestedDataPascal = (data.Data && typeof data.Data === 'object') ? data.Data : null;
+    const itemsRaw =
+        data.items ??
+        data.Items ??
+        data.rows ??
+        data.Rows ??
+        (Array.isArray(data.data) ? data.data : null) ??
+        (Array.isArray(data.Data) ? data.Data : null) ??
+        nestedData?.items ??
+        nestedData?.Items ??
+        nestedData?.rows ??
+        nestedData?.Rows ??
+        nestedDataPascal?.items ??
+        nestedDataPascal?.Items ??
+        nestedDataPascal?.rows ??
+        nestedDataPascal?.Rows ??
+        [];
+    const totalCount =
+        data.totalCount ??
+        data.TotalCount ??
+        data.total ??
+        data.Total ??
+        nestedData?.totalCount ??
+        nestedData?.TotalCount ??
+        nestedData?.total ??
+        nestedData?.Total ??
+        nestedDataPascal?.totalCount ??
+        nestedDataPascal?.TotalCount ??
+        nestedDataPascal?.total ??
+        nestedDataPascal?.Total ??
+        (Array.isArray(itemsRaw) ? itemsRaw.length : 0);
     const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
     return {
-        items: (data.items ?? data.data ?? []).map(normalizeUser),
-        totalCount,
-        page: data.page ?? page,
+        items: (Array.isArray(itemsRaw) ? itemsRaw : []).map(normalizeUser),
+        totalCount: Number(totalCount) || 0,
+        page: data.page ?? data.Page ?? page,
         totalPages,
     };
 }

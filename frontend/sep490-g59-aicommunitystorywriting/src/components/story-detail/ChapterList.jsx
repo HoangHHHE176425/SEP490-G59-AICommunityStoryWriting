@@ -66,6 +66,11 @@ export function ChapterList({ chapters, storyId, lastReadChapterId }) {
                                                 MỚI
                                             </span>
                                         )}
+                                        {chapter.isAiAssisted && (
+                                            <span className="px-2 py-0.5 bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300 text-xs font-semibold rounded shrink-0">
+                                                Chương sử dụng AI{chapter.aiContributionRatio > 0 ? `: ${Number(chapter.aiContributionRatio).toFixed(1)}%` : ''}
+                                            </span>
+                                        )}
                                         {chapter.isLocked && (chapter.coinPrice ?? 0) > 0 && (
                                             <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-xs font-semibold rounded shrink-0">
                                                 {chapter.coinPrice} xu
