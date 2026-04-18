@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.ClientModel;
 using BusinessObjects.Entities;
+using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Configuration;
 using OpenAI.Chat;
 using Repositories;
@@ -101,7 +102,11 @@ namespace Services.Implementations
                 new UserChatMessage(userPrompt)
             };
 
-            var options = AIClientHelper.GetCompletionOptions(_configuration, null);
+            var balanceNow = Math.Max(0L, UserDAO.GetAiTokenLimit(authorUserId));
+            // Prompt/input thực tế đang quanh ~2.5k token, reserve mặc định cao hơn để tránh vượt số dư.
+            var reservedInputTokens = _configuration.GetValue("AI:SuggestReservedInputTokens", 2600);
+            var cappedOutputTokens = (int)Math.Max(64, balanceNow - reservedInputTokens);
+            var options = AIClientHelper.GetCompletionOptions(_configuration, null, cappedOutputTokens);
             ChatCompletion completion;
             try
             {
@@ -177,6 +182,9 @@ namespace Services.Implementations
                 status = "SUCCESS",
                 created_at = DateTime.UtcNow
             });
+
+            // Debit token balance (clamp >= 0).
+            try { UserDAO.DebitAiTokenLimit(authorUserId, promptTokens + completionTokens); } catch { /* best-effort */ }
 
             return new SuggestNextChapterResponse
             {

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using BusinessObjects.Entities;
+using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Configuration;
 using OpenAI.Chat;
 using Repositories;
@@ -1174,5 +1175,8 @@ Chỉ trả về nội dung truyện (draft).
             status = "SUCCESS",
             created_at = DateTime.UtcNow
         });
+
+        // Debit token balance (clamp >= 0).
+        try { UserDAO.DebitAiTokenLimit(userId, totalTokens); } catch { /* best-effort */ }
     }
 }

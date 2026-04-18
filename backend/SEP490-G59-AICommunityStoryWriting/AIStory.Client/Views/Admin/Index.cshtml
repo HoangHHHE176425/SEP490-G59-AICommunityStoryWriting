@@ -993,111 +993,6 @@
                 </div>
                 <div class="row g-3 mb-1">
                     <div class="col-12">
-                        <div class="card border-info border-opacity-25">
-                            <div class="card-body py-3">
-                                <h5 class="mb-1"><i class="bi bi-person-badge me-1"></i> Giới hạn token AI (tác giả)</h5>
-                                <p class="text-muted small mb-3">
-                                    So khớp <code>total_tokens</code> trong <code>ai_usage_logs</code> với các cột trên <code>users</code>:
-                                    <strong>tích lũy</strong>, <strong>theo ngày</strong>, <strong>theo tuần</strong>, <strong>theo tháng</strong> (để trống ô = không giới hạn cột đó).
-                                    Ngày / tuần / tháng tính theo <strong>UTC</strong> (từ 00:00 ngày; tuần bắt đầu Thứ Hai UTC).
-                                    Chọn tác giả (role <strong>AUTHOR</strong>), xem bảng rồi chỉnh các ô và bấm Lưu.
-                                </p>
-                                <div class="row g-3 mb-2">
-                                    <div class="col-lg-5">
-                                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-1">
-                                            <label class="form-label small mb-0">Tác giả</label>
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiAuthorBudgetRefreshAuthors" title="Tải lại danh sách từ server">
-                                                <i class="bi bi-arrow-clockwise"></i> Làm mới danh sách
-                                            </button>
-                                        </div>
-                                        <div id="aiAuthorBudgetListLoading" class="text-muted small py-1 d-none">Đang tải danh sách tác giả…</div>
-                                        <div id="aiAuthorBudgetAuthorsErr" class="alert alert-danger py-1 small d-none mb-2"></div>
-                                        <select class="form-select form-select-sm" id="aiAuthorBudgetSelect" size="12" aria-label="Chọn tác giả">
-                                            <option value="">— Mở tab hoặc bấm Làm mới danh sách —</option>
-                                        </select>
-                                        <p class="text-muted small mt-1 mb-0" id="aiAuthorBudgetListMeta">Chưa tải danh sách.</p>
-                                    </div>
-                                    <div class="col-lg-7">
-                                        <label class="form-label small mb-0">Lọc nhanh (email / biệt danh / GUID)</label>
-                                        <input type="search" class="form-control form-control-sm mb-2" id="aiAuthorBudgetFilter" placeholder="Gõ để thu hẹp danh sách bên trái" autocomplete="off" />
-                                        <div class="d-flex flex-wrap gap-2 mb-2">
-                                            <button type="button" class="btn btn-sm btn-outline-info" id="btnAiAuthorBudgetReloadBudget">
-                                                <i class="bi bi-arrow-down-circle"></i> Tải lại số liệu token
-                                            </button>
-                                        </div>
-                                        <p class="text-muted small mb-0">Khi chọn một dòng trong danh sách, số liệu token tải tự động. Nút <strong>Tải lại số liệu token</strong> dùng khi đã chỉnh hạn ở nơi khác.</p>
-                                    </div>
-                                </div>
-                                <div id="aiAuthorBudgetErr" class="alert alert-warning py-2 small d-none mb-2"></div>
-                                <div id="aiAuthorBudgetOk" class="alert alert-success py-2 small d-none mb-2"></div>
-                                <div id="aiAuthorBudgetWrap" class="d-none border rounded p-3 bg-light bg-opacity-50 mb-0">
-                                    <p class="text-muted small mb-2">Cột <strong>Còn lại</strong> chỉ hiển thị khi có hạn mức tương ứng.</p>
-                                    <div class="table-responsive mb-3">
-                                        <table class="table table-sm table-bordered align-middle small mb-0">
-                                            <thead class="table-light">
-                                                <tr>
-                                                    <th>Phạm vi</th>
-                                                    <th class="text-end">Đã dùng</th>
-                                                    <th class="text-end">Hạn mức</th>
-                                                    <th class="text-end">Còn lại</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <tr>
-                                                    <td>Tích lũy (toàn thời gian)</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetUsedLife">—</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetLimitLife">—</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetRemLife">—</td>
-                                                </tr>
-                                                <tr>
-                                                    <td>Theo ngày (UTC)</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetUsedDay">—</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetLimitDay">—</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetRemDay">—</td>
-                                                </tr>
-                                                <tr>
-                                                    <td>Theo tuần (UTC, từ T2)</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetUsedWeek">—</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetLimitWeek">—</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetRemWeek">—</td>
-                                                </tr>
-                                                <tr>
-                                                    <td>Theo tháng (UTC)</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetUsedMonth">—</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetLimitMonth">—</td>
-                                                    <td class="text-end font-monospace" id="aiAuthorBudgetRemMonth">—</td>
-                                                </tr>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                    <div class="row g-2 align-items-end">
-                                        <div class="col-6 col-md-3">
-                                            <label class="form-label small mb-0">Hạn tích lũy</label>
-                                            <input type="text" class="form-control form-control-sm font-monospace" id="aiAuthorBudgetLimitInput" placeholder="Trống = ∞" autocomplete="off" />
-                                        </div>
-                                        <div class="col-6 col-md-3">
-                                            <label class="form-label small mb-0">Hạn / ngày (UTC)</label>
-                                            <input type="text" class="form-control form-control-sm font-monospace" id="aiAuthorBudgetLimitInputDay" placeholder="Trống = ∞" autocomplete="off" />
-                                        </div>
-                                        <div class="col-6 col-md-3">
-                                            <label class="form-label small mb-0">Hạn / tuần (UTC)</label>
-                                            <input type="text" class="form-control form-control-sm font-monospace" id="aiAuthorBudgetLimitInputWeek" placeholder="Trống = ∞" autocomplete="off" />
-                                        </div>
-                                        <div class="col-6 col-md-3">
-                                            <label class="form-label small mb-0">Hạn / tháng (UTC)</label>
-                                            <input type="text" class="form-control form-control-sm font-monospace" id="aiAuthorBudgetLimitInputMonth" placeholder="Trống = ∞" autocomplete="off" />
-                                        </div>
-                                        <div class="col-12 col-md-auto d-grid d-md-inline-grid">
-                                            <button type="button" class="btn btn-sm btn-info text-white" id="btnAiAuthorBudgetSave"><i class="bi bi-check2"></i> Lưu tất cả hạn mức</button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="row g-3 mb-1">
-                    <div class="col-12">
                         <div class="card border-primary border-opacity-25">
                             <div class="card-body py-3">
                                 <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-1">
@@ -1154,56 +1049,27 @@
 
                                 <div class="border rounded p-3 bg-light bg-opacity-50 mb-3">
                                     <div class="row g-2 align-items-end">
-                                        <div class="col-md-4">
-                                            <label class="form-label small mb-0">Tên rule (tuỳ chọn)</label>
-                                            <input type="text" class="form-control form-control-sm" id="aiAutoGrantDisplayName" placeholder="vd. Gia hạn tháng cho tác giả" />
-                                        </div>
-                                        <div class="col-md-2">
-                                            <label class="form-label small mb-0">Chu kỳ (UTC)</label>
-                                            <select class="form-select form-select-sm" id="aiAutoGrantPeriodKind">
-                                                <option value="daily_utc">Ngày (UTC)</option>
-                                                <option value="weekly_utc">Tuần (UTC)</option>
-                                                <option value="monthly_utc" selected>Tháng (UTC)</option>
-                                            </select>
-                                        </div>
-                                        <div class="col-md-2">
-                                            <label class="form-label small mb-0">Cộng vào cột</label>
-                                            <input type="text" class="form-control form-control-sm font-monospace" id="aiAutoGrantLimitFieldReadonly" value="per_month" readonly />
-                                            <div class="text-muted small mt-1">Tự động theo chu kỳ (ngày→per_day, tuần→per_week, tháng→per_month).</div>
-                                        </div>
-                                        <div class="col-md-2">
-                                            <label class="form-label small mb-0">Số token cộng</label>
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0">Số token mỗi kỳ (set số dư)</label>
                                             <input type="number" class="form-control form-control-sm" id="aiAutoGrantAmount" min="1" step="1" value="100000" />
+                                            <div class="text-muted small mt-1">Khi đến hạn, hệ thống sẽ <strong>set</strong> <code>users.ai_token_limit</code> = số này (không cộng dồn).</div>
                                         </div>
-                                        <div class="col-md-2">
-                                            <div class="form-check">
-                                                <input class="form-check-input" type="checkbox" id="aiAutoGrantEnabled" checked />
-                                                <label class="form-check-label small" for="aiAutoGrantEnabled">Bật rule</label>
-                                            </div>
-                                            <div class="form-check">
-                                                <input class="form-check-input" type="checkbox" id="aiAutoGrantAllAuthors" />
-                                                <label class="form-check-label small" for="aiAutoGrantAllAuthors">Tất cả tác giả</label>
-                                            </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0">Chu kỳ</label>
+                                            <input type="text" class="form-control form-control-sm font-monospace" value="monthly_utc" readonly />
+                                            <div class="text-muted small mt-1">Áp dụng tự động cho <strong>tất cả AUTHOR</strong>.</div>
                                         </div>
-                                        <div class="col-12">
-                                            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
-                                                <label class="form-label small mb-0">Chọn tác giả (khi không chọn “Tất cả tác giả”)</label>
-                                                <div class="btn-group btn-group-sm" role="group" aria-label="Chọn tác giả nhanh">
-                                                    <button type="button" class="btn btn-outline-secondary" id="btnAiAutoGrantSelectAllAuthors">Chọn tất cả</button>
-                                                    <button type="button" class="btn btn-outline-secondary" id="btnAiAutoGrantUnselectAllAuthors">Bỏ chọn</button>
-                                                </div>
-                                            </div>
-                                            <input type="search" class="form-control form-control-sm mt-1" id="aiAutoGrantAuthorFilter" placeholder="Lọc nhanh (email / biệt danh / GUID)" autocomplete="off" />
-                                            <div id="aiAutoGrantAuthorsLoading" class="text-muted small py-1 d-none">Đang tải danh sách tác giả…</div>
-                                            <div id="aiAutoGrantAuthorsErr" class="alert alert-danger py-1 small d-none mb-2 mt-2"></div>
-                                            <div class="border rounded p-2 mt-2 bg-white" style="max-height: 220px; overflow-y: auto;" id="aiAutoGrantAuthorList" aria-label="Danh sách tác giả">
-                                                <div class="text-muted small">Mở tab để tải.</div>
-                                            </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0">Gia hạn kế tiếp (UTC)</label>
+                                            <input type="text" class="form-control form-control-sm font-monospace" id="aiAutoGrantNextRenewal" value="—" readonly />
                                         </div>
-                                        <div class="col-12 d-flex flex-wrap gap-2 mt-2">
-                                            <button type="button" class="btn btn-sm btn-warning" id="btnAiAutoGrantCreate"><i class="bi bi-plus-circle"></i> Tạo rule</button>
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiAutoGrantResetForm">Reset form</button>
-                                            <span class="text-muted small align-self-center" id="aiAutoGrantEditingHint" style="display:none;">Đang sửa rule: <code id="aiAutoGrantEditingId">—</code></span>
+                                        <div class="col-md-3">
+                                            <label class="form-label small mb-0 d-block">Trạng thái</label>
+                                            <div class="d-flex flex-wrap gap-2 mt-1">
+                                                <button type="button" class="btn btn-sm btn-success" id="btnAiAutoGrantEnable"><i class="bi bi-toggle-on"></i> Bật (chạy ngay)</button>
+                                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiAutoGrantDisable"><i class="bi bi-toggle-off"></i> Tắt</button>
+                                            </div>
+                                            <div class="text-muted small mt-1">Bật sẽ chạy gia hạn ngay lập tức; tắt sẽ ngừng chạy tự động.</div>
                                         </div>
                                     </div>
                                 </div>
@@ -1212,20 +1078,63 @@
                                     <table class="table table-sm table-bordered align-middle small mb-0">
                                         <thead class="table-light">
                                             <tr>
-                                                <th>Tên</th>
                                                 <th>Bật</th>
-                                                <th>Chu kỳ</th>
-                                                <th>Cột</th>
-                                                <th class="text-end">+ Token</th>
-                                                <th>Phạm vi</th>
-                                                <th>Đã chạy</th>
+                                                <th class="text-end">Token mỗi kỳ</th>
+                                                <th>Gia hạn kế tiếp (UTC)</th>
                                                 <th class="text-end">Hành động</th>
                                             </tr>
                                         </thead>
                                         <tbody id="aiAutoGrantBody">
-                                            <tr><td colspan="8" class="text-center text-muted">Mở tab để tải.</td></tr>
+                                            <tr><td colspan="4" class="text-center text-muted">Mở tab để tải.</td></tr>
                                         </tbody>
                                     </table>
+                                </div>
+
+                                <div class="border rounded p-3 bg-light bg-opacity-50 mt-3">
+                                    <div class="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-2">
+                                        <div>
+                                            <div class="fw-semibold">Danh sách user</div>
+                                            <div class="text-muted small">Dữ liệu từ <code>GET /api/admin/users</code> (lọc role = <code>AUTHOR</code>). Ghi chú: <code>selected_user_ids</code> hiện có <span id="aiAutoGrantSelectedCount">0</span> user.</div>
+                                        </div>
+                                        <div class="d-flex flex-wrap gap-2 align-items-end">
+                                            <div>
+                                                <label class="form-label small mb-0">Tìm</label>
+                                                <input type="search" class="form-control form-control-sm" id="aiAutoGrantUsersSearch" placeholder="email / nickname / GUID" autocomplete="off" />
+                                            </div>
+                                            <div>
+                                                <label class="form-label small mb-0">/trang</label>
+                                                <select class="form-select form-select-sm" id="aiAutoGrantUsersPageSize">
+                                                    <option value="20">20</option>
+                                                    <option value="50" selected>50</option>
+                                                    <option value="100">100</option>
+                                                </select>
+                                            </div>
+                                            <button type="button" class="btn btn-sm btn-outline-warning" id="btnAiAutoGrantUsersRefresh"><i class="bi bi-arrow-clockwise"></i> Tải</button>
+                                        </div>
+                                    </div>
+                                    <div id="aiAutoGrantUsersLoading" class="text-muted small py-1 d-none">Đang tải…</div>
+                                    <div id="aiAutoGrantUsersErr" class="alert alert-danger py-1 small d-none mb-2"></div>
+                                    <div class="table-responsive" style="max-height: 320px; overflow-y:auto;">
+                                        <table class="table table-sm table-bordered align-middle small mb-0">
+                                            <thead class="table-light sticky-top">
+                                                <tr>
+                                                    <th>User</th>
+                                                    <th>Role</th>
+                                                    <th>Status</th>
+                                                    <th class="text-end">AI token (ai_token_limit)</th>
+                                                    <th class="text-muted small">UserId</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="aiAutoGrantUsersBody">
+                                                <tr><td colspan="5" class="text-center text-muted">—</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiAutoGrantUsersPrev"><i class="bi bi-arrow-left"></i> Trước</button>
+                                        <span class="text-muted small" id="aiAutoGrantUsersPageInfo">—</span>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAiAutoGrantUsersNext">Sau <i class="bi bi-arrow-right"></i></button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2694,188 +2603,9 @@
                 }
             }
 
-            var aiAuthorsBudgetCache = [];
-            var _aiAuthorBudgetPanelLoadTimer = null;
-            function scheduleLoadAuthorAiTokenBudgetPanel() {
-                if (_aiAuthorBudgetPanelLoadTimer) clearTimeout(_aiAuthorBudgetPanelLoadTimer);
-                _aiAuthorBudgetPanelLoadTimer = setTimeout(function () {
-                    _aiAuthorBudgetPanelLoadTimer = null;
-                    loadAuthorAiTokenBudgetPanel();
-                }, 280);
-            }
-
-            function getSelectedAuthorBudgetUserId() {
-                var sel = document.getElementById('aiAuthorBudgetSelect');
-                if (!sel || !sel.value) return null;
-                var v = String(sel.value).trim();
-                return v ? v : null;
-            }
-
-            function renderAuthorBudgetSelectFiltered() {
-                var sel = document.getElementById('aiAuthorBudgetSelect');
-                var filterEl = document.getElementById('aiAuthorBudgetFilter');
-                if (!sel) return;
-                var q = filterEl ? String(filterEl.value || '').trim().toLowerCase() : '';
-                var cur = sel.value;
-                sel.innerHTML = '';
-                var ph = document.createElement('option');
-                ph.value = '';
-                ph.textContent = aiAuthorsBudgetCache.length
-                    ? '— Chọn tác giả —'
-                    : '— Chưa có tác giả (tải danh sách hoặc kiểm tra role AUTHOR) —';
-                sel.appendChild(ph);
-                aiAuthorsBudgetCache.forEach(function (u) {
-                    if (q) {
-                        var hay = (u.id + ' ' + u.email + ' ' + u.nickname).toLowerCase();
-                        if (hay.indexOf(q) === -1) return;
-                    }
-                    var opt = document.createElement('option');
-                    opt.value = u.id;
-                    var label = (u.nickname && String(u.nickname).trim()) ? String(u.nickname).trim() : u.email;
-                    if (!label) label = u.id;
-                    opt.textContent = label + ' · ' + u.email;
-                    sel.appendChild(opt);
-                });
-                var hasCur = false;
-                for (var i = 0; i < sel.options.length; i++) {
-                    if (sel.options[i].value === cur) {
-                        hasCur = true;
-                        break;
-                    }
-                }
-                if (hasCur) sel.value = cur;
-                else {
-                    sel.value = '';
-                    var wrapF = document.getElementById('aiAuthorBudgetWrap');
-                    var errF = document.getElementById('aiAuthorBudgetErr');
-                    if (wrapF) wrapF.classList.add('d-none');
-                    if (errF) {
-                        errF.classList.add('d-none');
-                        errF.textContent = '';
-                    }
-                }
-            }
-
-            async function loadAuthorsForBudgetPanel() {
-                var loadEl = document.getElementById('aiAuthorBudgetListLoading');
-                var authErr = document.getElementById('aiAuthorBudgetAuthorsErr');
-                var meta = document.getElementById('aiAuthorBudgetListMeta');
-                var sel = document.getElementById('aiAuthorBudgetSelect');
-                if (authErr) {
-                    authErr.classList.add('d-none');
-                    authErr.textContent = '';
-                }
-                if (loadEl) loadEl.classList.remove('d-none');
-                try {
-                    var all = [];
-                    var page = 1;
-                    var pageSize = 200;
-                    var total = 0;
-                    while (true) {
-                        var r = await ApiService.adminGetUsers({ role: 'AUTHOR', page: page, pageSize: pageSize });
-                        var items = (r && r.items) ? r.items : ((r && r.Items) ? r.Items : []);
-                        total = (r && r.totalCount !== undefined) ? r.totalCount : ((r && r.TotalCount !== undefined) ? r.TotalCount : 0);
-                        if (items && items.length) {
-                            for (var i = 0; i < items.length; i++) all.push(items[i]);
-                        }
-                        if (!items || items.length === 0 || all.length >= total) break;
-                        page += 1;
-                        if (page > 500) break;
-                    }
-                    aiAuthorsBudgetCache = all.map(function (x) {
-                        var id = String(x.id != null ? x.id : x.Id || '').trim();
-                        return {
-                            id: id,
-                            email: String(x.email != null ? x.email : x.Email || '').trim(),
-                            nickname: String(x.nickname != null ? x.nickname : x.Nickname || '').trim()
-                        };
-                    }).filter(function (u) { return u.id.length > 0; });
-                    renderAuthorBudgetSelectFiltered();
-                    if (meta) meta.textContent = 'Tổng ' + aiAuthorsBudgetCache.length + ' tác giả (role AUTHOR).';
-                    if (sel && sel.value) await loadAuthorAiTokenBudgetPanel();
-                    else {
-                        var wrap = document.getElementById('aiAuthorBudgetWrap');
-                        if (wrap) wrap.classList.add('d-none');
-                    }
-                } catch (e) {
-                    aiAuthorsBudgetCache = [];
-                    renderAuthorBudgetSelectFiltered();
-                    if (meta) meta.textContent = 'Không tải được danh sách.';
-                    if (authErr) {
-                        authErr.classList.remove('d-none');
-                        authErr.textContent = e.message || String(e);
-                    }
-                } finally {
-                    if (loadEl) loadEl.classList.add('d-none');
-                }
-            }
-
-            function pickNum(r, camel, pascal) {
-                var v = r[camel];
-                if (v === undefined || v === null || v === '') v = r[pascal];
-                if (v === undefined || v === null || v === '') return null;
-                var n = Number(v);
-                return Number.isFinite(n) ? n : null;
-            }
-
-            function parseAuthorBudgetDto(r) {
-                if (!r) return null;
-                var ul = !!(r.unlimited || r.Unlimited);
-                var tu = pickNum(r, 'tokensUsed', 'TokensUsed') ?? 0;
-                var tl = r.tokenLimit !== undefined && r.tokenLimit !== null && r.tokenLimit !== ''
-                    ? r.tokenLimit
-                    : (r.TokenLimit !== undefined && r.TokenLimit !== null && r.TokenLimit !== '' ? r.TokenLimit : null);
-                var tr = r.tokensRemaining !== undefined && r.tokensRemaining !== null && r.tokensRemaining !== ''
-                    ? r.tokensRemaining
-                    : (r.TokensRemaining !== undefined && r.TokensRemaining !== null && r.TokensRemaining !== '' ? r.TokensRemaining : null);
-                var uld = !!(r.unlimitedPerDay || r.UnlimitedPerDay);
-                var ulw = !!(r.unlimitedPerWeek || r.UnlimitedPerWeek);
-                var ulm = !!(r.unlimitedPerMonth || r.UnlimitedPerMonth);
-                function limPair(cLim, pLim, cRem, pRem, u) {
-                    var l = r[cLim] !== undefined && r[cLim] !== null && r[cLim] !== '' ? r[cLim] : (r[pLim] !== undefined && r[pLim] !== null && r[pLim] !== '' ? r[pLim] : null);
-                    var rem = r[cRem] !== undefined && r[cRem] !== null && r[cRem] !== '' ? r[cRem] : (r[pRem] !== undefined && r[pRem] !== null && r[pRem] !== '' ? r[pRem] : null);
-                    return {
-                        limit: u || l === null || l === '' ? null : Number(l),
-                        remaining: u || rem === null || rem === '' ? null : Number(rem)
-                    };
-                }
-                var day = limPair('tokenLimitPerDay', 'TokenLimitPerDay', 'tokensRemainingPerDay', 'TokensRemainingPerDay', uld);
-                var week = limPair('tokenLimitPerWeek', 'TokenLimitPerWeek', 'tokensRemainingPerWeek', 'TokensRemainingPerWeek', ulw);
-                var month = limPair('tokenLimitPerMonth', 'TokenLimitPerMonth', 'tokensRemainingPerMonth', 'TokensRemainingPerMonth', ulm);
-                return {
-                    tokensUsed: tu,
-                    tokenLimit: ul || tl === null || tl === '' ? null : Number(tl),
-                    tokensRemaining: ul || tr === null || tr === '' ? null : Number(tr),
-                    unlimited: ul,
-                    tokensUsedTodayUtc: pickNum(r, 'tokensUsedTodayUtc', 'TokensUsedTodayUtc') ?? 0,
-                    tokenLimitPerDay: day.limit,
-                    tokensRemainingPerDay: day.remaining,
-                    unlimitedPerDay: uld,
-                    tokensUsedThisWeekUtc: pickNum(r, 'tokensUsedThisWeekUtc', 'TokensUsedThisWeekUtc') ?? 0,
-                    tokenLimitPerWeek: week.limit,
-                    tokensRemainingPerWeek: week.remaining,
-                    unlimitedPerWeek: ulw,
-                    tokensUsedThisMonthUtc: pickNum(r, 'tokensUsedThisMonthUtc', 'TokensUsedThisMonthUtc') ?? 0,
-                    tokenLimitPerMonth: month.limit,
-                    tokensRemainingPerMonth: month.remaining,
-                    unlimitedPerMonth: ulm
-                };
-            }
-
             function fmtTokCell(n) {
                 if (n == null || !Number.isFinite(n)) return '—';
                 return Number(n).toLocaleString('vi-VN');
-            }
-
-            function fmtLimitCell(unlimited, limit) {
-                if (unlimited || limit == null) return 'Không giới hạn';
-                return fmtTokCell(limit);
-            }
-
-            function fmtRemCell(unlimited, rem) {
-                if (unlimited) return '—';
-                if (rem == null || !Number.isFinite(rem)) return '—';
-                return fmtTokCell(rem);
             }
 
             function parseBudgetLimitInput(raw) {
@@ -2885,128 +2615,6 @@
                 var n = parseInt(s, 10);
                 if (!Number.isFinite(n) || n < 0 || n > 9007199254740991) return { err: 'Giá trị hạn mức không hợp lệ.' };
                 return { value: n };
-            }
-
-            async function loadAuthorAiTokenBudgetPanel() {
-                var errEl = document.getElementById('aiAuthorBudgetErr');
-                var okEl = document.getElementById('aiAuthorBudgetOk');
-                var wrap = document.getElementById('aiAuthorBudgetWrap');
-                var limInput = document.getElementById('aiAuthorBudgetLimitInput');
-                var limDay = document.getElementById('aiAuthorBudgetLimitInputDay');
-                var limWeek = document.getElementById('aiAuthorBudgetLimitInputWeek');
-                var limMonth = document.getElementById('aiAuthorBudgetLimitInputMonth');
-                if (okEl) {
-                    okEl.classList.add('d-none');
-                    okEl.textContent = '';
-                }
-                var uid = getSelectedAuthorBudgetUserId();
-                if (!uid) {
-                    if (errEl) {
-                        errEl.classList.remove('d-none');
-                        errEl.textContent = 'Chọn một tác giả trong danh sách bên trái (hoặc tải lại danh sách).';
-                    }
-                    if (wrap) wrap.classList.add('d-none');
-                    return;
-                }
-                if (errEl) {
-                    errEl.classList.add('d-none');
-                    errEl.textContent = '';
-                }
-                try {
-                    var r = await ApiService.adminGetAuthorAiTokenBudget(uid);
-                    var d = parseAuthorBudgetDto(r);
-                    if (!d) throw new Error('Phản hồi rỗng.');
-                    var uLife = document.getElementById('aiAuthorBudgetUsedLife');
-                    var lLife = document.getElementById('aiAuthorBudgetLimitLife');
-                    var rLife = document.getElementById('aiAuthorBudgetRemLife');
-                    if (uLife) uLife.textContent = fmtTokCell(d.tokensUsed);
-                    if (lLife) lLife.textContent = fmtLimitCell(d.unlimited, d.tokenLimit);
-                    if (rLife) rLife.textContent = fmtRemCell(d.unlimited, d.tokensRemaining);
-                    var uDay = document.getElementById('aiAuthorBudgetUsedDay');
-                    var lDay = document.getElementById('aiAuthorBudgetLimitDay');
-                    var rDay = document.getElementById('aiAuthorBudgetRemDay');
-                    if (uDay) uDay.textContent = fmtTokCell(d.tokensUsedTodayUtc);
-                    if (lDay) lDay.textContent = fmtLimitCell(d.unlimitedPerDay, d.tokenLimitPerDay);
-                    if (rDay) rDay.textContent = fmtRemCell(d.unlimitedPerDay, d.tokensRemainingPerDay);
-                    var uWeek = document.getElementById('aiAuthorBudgetUsedWeek');
-                    var lWeek = document.getElementById('aiAuthorBudgetLimitWeek');
-                    var rWeek = document.getElementById('aiAuthorBudgetRemWeek');
-                    if (uWeek) uWeek.textContent = fmtTokCell(d.tokensUsedThisWeekUtc);
-                    if (lWeek) lWeek.textContent = fmtLimitCell(d.unlimitedPerWeek, d.tokenLimitPerWeek);
-                    if (rWeek) rWeek.textContent = fmtRemCell(d.unlimitedPerWeek, d.tokensRemainingPerWeek);
-                    var uMonth = document.getElementById('aiAuthorBudgetUsedMonth');
-                    var lMonth = document.getElementById('aiAuthorBudgetLimitMonth');
-                    var rMonth = document.getElementById('aiAuthorBudgetRemMonth');
-                    if (uMonth) uMonth.textContent = fmtTokCell(d.tokensUsedThisMonthUtc);
-                    if (lMonth) lMonth.textContent = fmtLimitCell(d.unlimitedPerMonth, d.tokenLimitPerMonth);
-                    if (rMonth) rMonth.textContent = fmtRemCell(d.unlimitedPerMonth, d.tokensRemainingPerMonth);
-                    if (limInput) limInput.value = d.unlimited || d.tokenLimit == null ? '' : String(d.tokenLimit);
-                    if (limDay) limDay.value = d.unlimitedPerDay || d.tokenLimitPerDay == null ? '' : String(d.tokenLimitPerDay);
-                    if (limWeek) limWeek.value = d.unlimitedPerWeek || d.tokenLimitPerWeek == null ? '' : String(d.tokenLimitPerWeek);
-                    if (limMonth) limMonth.value = d.unlimitedPerMonth || d.tokenLimitPerMonth == null ? '' : String(d.tokenLimitPerMonth);
-                    if (wrap) wrap.classList.remove('d-none');
-                } catch (e) {
-                    if (wrap) wrap.classList.add('d-none');
-                    if (errEl) {
-                        errEl.classList.remove('d-none');
-                        errEl.textContent = (e && e.status === 404) ? 'Không tìm thấy user.' : (e.message || String(e));
-                    }
-                }
-            }
-
-            async function saveAuthorAiTokenBudgetPanel() {
-                var errEl = document.getElementById('aiAuthorBudgetErr');
-                var okEl = document.getElementById('aiAuthorBudgetOk');
-                var limInput = document.getElementById('aiAuthorBudgetLimitInput');
-                var limDay = document.getElementById('aiAuthorBudgetLimitInputDay');
-                var limWeek = document.getElementById('aiAuthorBudgetLimitInputWeek');
-                var limMonth = document.getElementById('aiAuthorBudgetLimitInputMonth');
-                if (okEl) {
-                    okEl.classList.add('d-none');
-                    okEl.textContent = '';
-                }
-                var uid = getSelectedAuthorBudgetUserId();
-                if (!uid) {
-                    if (errEl) {
-                        errEl.classList.remove('d-none');
-                        errEl.textContent = 'Chọn một tác giả trước khi lưu hạn mức.';
-                    }
-                    return;
-                }
-                var pLife = parseBudgetLimitInput(limInput ? limInput.value : '');
-                var pDay = parseBudgetLimitInput(limDay ? limDay.value : '');
-                var pWeek = parseBudgetLimitInput(limWeek ? limWeek.value : '');
-                var pMonth = parseBudgetLimitInput(limMonth ? limMonth.value : '');
-                var firstErr = pLife.err || pDay.err || pWeek.err || pMonth.err;
-                if (firstErr) {
-                    if (errEl) {
-                        errEl.classList.remove('d-none');
-                        errEl.textContent = firstErr;
-                    }
-                    return;
-                }
-                if (errEl) {
-                    errEl.classList.add('d-none');
-                    errEl.textContent = '';
-                }
-                try {
-                    await ApiService.adminPutAuthorAiTokenBudget(uid, {
-                        tokenLimit: pLife.value,
-                        tokenLimitPerDay: pDay.value,
-                        tokenLimitPerWeek: pWeek.value,
-                        tokenLimitPerMonth: pMonth.value
-                    });
-                    if (okEl) {
-                        okEl.classList.remove('d-none');
-                        okEl.textContent = 'Đã lưu hạn mức.';
-                    }
-                    await loadAuthorAiTokenBudgetPanel();
-                } catch (e) {
-                    if (errEl) {
-                        errEl.classList.remove('d-none');
-                        errEl.textContent = e.message || String(e);
-                    }
-                }
             }
 
             function _defaultsInputToUi(v) {
@@ -3086,86 +2694,14 @@
                 loadAiOpenRouterActivity();
                 loadAiGenerations();
                 loadAiUsageRequests();
-                loadAuthorsForBudgetPanel();
                 loadAuthorAiTokenDefaultsPanel();
                 loadAuthorAiTokenAutoGrantPanel();
             }
 
-            var aiAutoGrantEditingRuleId = null;
             var aiAutoGrantInitDone = false;
-            var aiAutoGrantAuthorsCache = [];
-            var aiAutoGrantAuthorFilterText = '';
-
-            function autoGrantLimitFieldFromPeriodKind(periodKind) {
-                var s = String(periodKind || '').trim().toLowerCase();
-                if (s === 'daily_utc') return 'per_day';
-                if (s === 'weekly_utc') return 'per_week';
-                return 'per_month';
-            }
-
-            function updateAutoGrantLimitFieldReadonly() {
-                var pk = document.getElementById('aiAutoGrantPeriodKind');
-                var ro = document.getElementById('aiAutoGrantLimitFieldReadonly');
-                if (!ro) return;
-                ro.value = autoGrantLimitFieldFromPeriodKind(pk ? pk.value : 'monthly_utc');
-            }
-
-            function _autoGrantPickAuthorLabel(u) {
-                var nick = (u.nickname || '').trim();
-                var email = (u.email || '').trim();
-                if (nick && email) return nick + ' · ' + email;
-                return nick || email || u.id;
-            }
-
-            function renderAiAutoGrantAuthorList() {
-                var listEl = document.getElementById('aiAutoGrantAuthorList');
-                if (!listEl) return;
-                var all = document.getElementById('aiAutoGrantAllAuthors');
-                var disabled = all ? !!all.checked : false;
-
-                var q = (aiAutoGrantAuthorFilterText || '').toLowerCase();
-                var items = aiAutoGrantAuthorsCache || [];
-                var filtered = !q ? items : items.filter(function (u) {
-                    var hay = (u.id + ' ' + (u.nickname || '') + ' ' + (u.email || '')).toLowerCase();
-                    return hay.indexOf(q) >= 0;
-                });
-
-                if (!filtered.length) {
-                    listEl.innerHTML = '<div class="text-muted small">Không có tác giả khớp bộ lọc.</div>';
-                    return;
-                }
-
-                listEl.innerHTML = filtered.map(function (u) {
-                    var id = escapeHtml(u.id);
-                    var label = escapeHtml(_autoGrantPickAuthorLabel(u));
-                    return '' +
-                        '<label class="d-flex align-items-start gap-2 py-1 small" style="cursor:pointer;">' +
-                        '<input type="checkbox" class="form-check-input mt-0" data-autogrant-author="1" value="' + id + '"' + (disabled ? ' disabled' : '') + ' />' +
-                        '<span class="text-break">' + label + '<div class="text-muted" style="font-size: 11px;"><code>' + id + '</code></div></span>' +
-                        '</label>';
-                }).join('');
-            }
-
-            function setAiAutoGrantSelectedAuthors(ids) {
-                var want = {};
-                (ids || []).forEach(function (x) { if (x) want[String(x).toLowerCase()] = true; });
-                var inputs = document.querySelectorAll('#aiAutoGrantAuthorList input[type="checkbox"][data-autogrant-author="1"]');
-                for (var i = 0; i < inputs.length; i++) {
-                    var v = (inputs[i].value || '').toLowerCase();
-                    inputs[i].checked = !!want[v];
-                }
-            }
-
-            function getAiAutoGrantSelectedAuthors() {
-                var inputs = document.querySelectorAll('#aiAutoGrantAuthorList input[type="checkbox"][data-autogrant-author="1"]:checked');
-                var ids = [];
-                for (var i = 0; i < inputs.length; i++) {
-                    if (inputs[i].value) ids.push(inputs[i].value);
-                }
-                // distinct
-                var seen = {};
-                return ids.filter(function (x) { var k = x.toLowerCase(); if (seen[k]) return false; seen[k] = true; return true; });
-            }
+            var aiAutoGrantCurrentRuleId = null;
+            var aiAutoGrantUsersPage = 1;
+            var aiAutoGrantSelectedUserIds = [];
 
             function aiAutoGrantSetMsg(kind, msg) {
                 var err = document.getElementById('aiAutoGrantErr');
@@ -3177,136 +2713,102 @@
                 if (kind === 'err' && err) { err.classList.remove('d-none'); err.textContent = msg; }
             }
 
-            function aiAutoGrantResetForm() {
-                aiAutoGrantEditingRuleId = null;
-                var hint = document.getElementById('aiAutoGrantEditingHint');
-                if (hint) hint.style.display = 'none';
-                var hid = document.getElementById('aiAutoGrantEditingId');
-                if (hid) hid.textContent = '—';
-                var dn = document.getElementById('aiAutoGrantDisplayName'); if (dn) dn.value = '';
-                var pk = document.getElementById('aiAutoGrantPeriodKind'); if (pk) pk.value = 'monthly_utc';
-                var am = document.getElementById('aiAutoGrantAmount'); if (am) am.value = '100000';
-                var en = document.getElementById('aiAutoGrantEnabled'); if (en) en.checked = true;
-                var all = document.getElementById('aiAutoGrantAllAuthors'); if (all) all.checked = false;
-                var filter = document.getElementById('aiAutoGrantAuthorFilter'); if (filter) filter.value = '';
-                aiAutoGrantAuthorFilterText = '';
-                updateAutoGrantLimitFieldReadonly();
-                renderAiAutoGrantAuthorList();
-                setAiAutoGrantSelectedAuthors([]);
-            }
-
-            function aiAutoGrantReadForm() {
-                var dn = document.getElementById('aiAutoGrantDisplayName');
-                var pk = document.getElementById('aiAutoGrantPeriodKind');
+            function aiAutoGrantReadFormSimple() {
                 var am = document.getElementById('aiAutoGrantAmount');
-                var en = document.getElementById('aiAutoGrantEnabled');
-                var all = document.getElementById('aiAutoGrantAllAuthors');
-
                 var amount = am ? parseInt(am.value, 10) : 0;
-                if (isNaN(amount) || amount <= 0) throw new Error('Số token cộng phải là số nguyên > 0.');
-
-                var applyAll = all ? !!all.checked : false;
-                var ids = applyAll ? [] : getAiAutoGrantSelectedAuthors();
-                if (!applyAll && ids.length === 0) throw new Error('Cần chọn ít nhất một tác giả hoặc chọn “Tất cả tác giả”.');
-
+                if (isNaN(amount) || amount <= 0) throw new Error('Số token phải là số nguyên > 0.');
                 return {
-                    isEnabled: en ? !!en.checked : true,
-                    displayName: dn && dn.value.trim() ? dn.value.trim() : null,
-                    periodKind: pk ? pk.value : 'monthly_utc',
-                    grantLimitField: autoGrantLimitFieldFromPeriodKind(pk ? pk.value : 'monthly_utc'),
+                    isEnabled: true,
+                    displayName: null,
+                    periodKind: 'monthly_utc',
+                    grantLimitField: 'lifetime',
                     grantAmount: amount,
-                    applyToAllAuthors: applyAll,
-                    selectedUserIds: ids
+                    applyToAllAuthors: true,
+                    selectedUserIds: []
                 };
             }
 
-            function renderAiAutoGrantRules(list) {
+            function renderAiAutoGrantSingleton(r) {
                 var body = document.getElementById('aiAutoGrantBody');
+                var nextEl = document.getElementById('aiAutoGrantNextRenewal');
+                var btnOn = document.getElementById('btnAiAutoGrantEnable');
+                var btnOff = document.getElementById('btnAiAutoGrantDisable');
+                var selCountEl = document.getElementById('aiAutoGrantSelectedCount');
                 if (!body) return;
-                if (!list || list.length === 0) {
-                    body.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Chưa có rule nào.</td></tr>';
+                if (!r) {
+                    if (nextEl) nextEl.value = '—';
+                    if (btnOn) btnOn.disabled = false;
+                    if (btnOff) btnOff.disabled = true;
+                    aiAutoGrantSelectedUserIds = [];
+                    if (selCountEl) selCountEl.textContent = '0';
+                    body.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có cấu hình.</td></tr>';
                     return;
                 }
-                body.innerHTML = list.map(function (r) {
-                    var scopeText = r.applyToAllAuthors ? 'Tất cả AUTHOR' : (Array.isArray(r.selectedUserIds) ? (r.selectedUserIds.length + ' user') : '—');
-                    var lastRun = r.lastRunAtUtc ? formatDate(r.lastRunAtUtc) : '—';
-                    var enabled = r.isEnabled ? '<span class="badge bg-success">ON</span>' : '<span class="badge bg-secondary">OFF</span>';
-                    var name = r.displayName ? escapeHtml(r.displayName) : '<span class="text-muted">—</span>';
-                    var pk = escapeHtml(r.periodKind || '—');
-                    var lf = escapeHtml(r.grantLimitField || '—');
-                    var amt = (r.grantAmount != null ? r.grantAmount : 0);
-                    return '' +
-                        '<tr data-rule-id="' + escapeHtml(r.id) + '">' +
-                        '<td class="text-break">' + name + '<div class="text-muted small"><code>' + escapeHtml(r.id) + '</code></div></td>' +
-                        '<td>' + enabled + '</td>' +
-                        '<td><code>' + pk + '</code></td>' +
-                        '<td><code>' + lf + '</code></td>' +
-                        '<td class="text-end fw-semibold">' + amt.toLocaleString('en-US') + '</td>' +
-                        '<td>' + scopeText + '</td>' +
-                        '<td>' + lastRun + '</td>' +
-                        '<td class="text-end">' +
-                        '<div class="btn-group btn-group-sm" role="group">' +
-                        '<button type="button" class="btn btn-outline-primary" data-act="edit">Sửa</button>' +
-                        '<button type="button" class="btn btn-outline-warning" data-act="run">Chạy ngay</button>' +
-                        '<button type="button" class="btn btn-outline-danger" data-act="del">Xóa</button>' +
-                        '</div>' +
-                        '</td>' +
-                        '</tr>';
-                }).join('');
+                aiAutoGrantCurrentRuleId = r.id || r.Id || null;
+                var isEnabled = !!(r.isEnabled ?? r.IsEnabled);
+                var enabled = isEnabled ? '<span class="badge bg-success">ON</span>' : '<span class="badge bg-secondary">OFF</span>';
+                var amt = (r.grantAmount ?? r.GrantAmount ?? 0);
+                var sel = r.selectedUserIds ?? r.SelectedUserIds ?? [];
+                aiAutoGrantSelectedUserIds = Array.isArray(sel) ? sel.slice() : [];
+                if (selCountEl) selCountEl.textContent = String(aiAutoGrantSelectedUserIds.length || 0);
+                var next = r.lastRunAtUtc ?? r.LastRunAtUtc ?? null;
+                if (nextEl) nextEl.value = next ? formatDate(next) : '—';
+                if (btnOn) btnOn.disabled = isEnabled;
+                if (btnOff) btnOff.disabled = !isEnabled;
+                body.innerHTML =
+                    '<tr data-rule-id="' + escapeHtml(aiAutoGrantCurrentRuleId || '') + '">' +
+                    '<td>' + enabled + '</td>' +
+                    '<td class="text-end fw-semibold">' + Number(amt || 0).toLocaleString('vi-VN') + '</td>' +
+                    '<td>' + (next ? escapeHtml(formatDate(next)) : '—') + '</td>' +
+                    '<td class="text-end"><button type="button" class="btn btn-sm btn-outline-warning" data-act="run">Chạy ngay</button></td>' +
+                    '</tr>';
             }
 
             async function loadAuthorAiTokenAutoGrantPanel() {
                 // init handlers once
                 if (!aiAutoGrantInitDone) {
                     aiAutoGrantInitDone = true;
-
                     var btnRefresh = document.getElementById('btnAiAutoGrantRefresh');
                     if (btnRefresh) btnRefresh.addEventListener('click', function () { loadAuthorAiTokenAutoGrantPanel(); });
 
-                    var btnReset = document.getElementById('btnAiAutoGrantResetForm');
-                    if (btnReset) btnReset.addEventListener('click', function () { aiAutoGrantSetMsg(null, null); aiAutoGrantResetForm(); });
+                    var btnUsersRefresh = document.getElementById('btnAiAutoGrantUsersRefresh');
+                    if (btnUsersRefresh) btnUsersRefresh.addEventListener('click', function () { aiAutoGrantUsersPage = 1; loadAutoGrantUsers(); });
+                    var usersSearch = document.getElementById('aiAutoGrantUsersSearch');
+                    if (usersSearch) usersSearch.addEventListener('input', function () { aiAutoGrantUsersPage = 1; loadAutoGrantUsers(); });
+                    var usersPageSize = document.getElementById('aiAutoGrantUsersPageSize');
+                    if (usersPageSize) usersPageSize.addEventListener('change', function () { aiAutoGrantUsersPage = 1; loadAutoGrantUsers(); });
+                    var btnPrev = document.getElementById('btnAiAutoGrantUsersPrev');
+                    if (btnPrev) btnPrev.addEventListener('click', function () { if (aiAutoGrantUsersPage > 1) { aiAutoGrantUsersPage -= 1; loadAutoGrantUsers(); } });
+                    var btnNext = document.getElementById('btnAiAutoGrantUsersNext');
+                    if (btnNext) btnNext.addEventListener('click', function () { aiAutoGrantUsersPage += 1; loadAutoGrantUsers(); });
 
-                    var filter = document.getElementById('aiAutoGrantAuthorFilter');
-                    if (filter) filter.addEventListener('input', function () {
-                        aiAutoGrantAuthorFilterText = String(filter.value || '').trim();
-                        renderAiAutoGrantAuthorList();
-                    });
-
-                    var allChk = document.getElementById('aiAutoGrantAllAuthors');
-                    if (allChk) allChk.addEventListener('change', function () {
-                        renderAiAutoGrantAuthorList();
-                    });
-
-                    var pk = document.getElementById('aiAutoGrantPeriodKind');
-                    if (pk) pk.addEventListener('change', function () { updateAutoGrantLimitFieldReadonly(); });
-
-                    var btnSelAll = document.getElementById('btnAiAutoGrantSelectAllAuthors');
-                    if (btnSelAll) btnSelAll.addEventListener('click', function () {
-                        var all = document.getElementById('aiAutoGrantAllAuthors');
-                        if (all && all.checked) return;
-                        var inputs = document.querySelectorAll('#aiAutoGrantAuthorList input[type=\"checkbox\"][data-autogrant-author=\"1\"]');
-                        for (var i = 0; i < inputs.length; i++) inputs[i].checked = true;
-                    });
-
-                    var btnUnselAll = document.getElementById('btnAiAutoGrantUnselectAllAuthors');
-                    if (btnUnselAll) btnUnselAll.addEventListener('click', function () {
-                        var inputs = document.querySelectorAll('#aiAutoGrantAuthorList input[type=\"checkbox\"][data-autogrant-author=\"1\"]');
-                        for (var i = 0; i < inputs.length; i++) inputs[i].checked = false;
-                    });
-
-                    var btnCreate = document.getElementById('btnAiAutoGrantCreate');
-                    if (btnCreate) btnCreate.addEventListener('click', async function () {
+                    var btnOn = document.getElementById('btnAiAutoGrantEnable');
+                    if (btnOn) btnOn.addEventListener('click', async function () {
                         aiAutoGrantSetMsg(null, null);
                         try {
-                            var payload = aiAutoGrantReadForm();
-                            if (aiAutoGrantEditingRuleId) {
-                                await ApiService.adminUpdateAuthorAiTokenAutoGrantRule(aiAutoGrantEditingRuleId, payload);
-                                aiAutoGrantSetMsg('ok', 'Đã cập nhật rule.');
-                            } else {
-                                await ApiService.adminCreateAuthorAiTokenAutoGrantRule(payload);
-                                aiAutoGrantSetMsg('ok', 'Đã tạo rule.');
-                            }
-                            aiAutoGrantResetForm();
+                            var payload = aiAutoGrantReadFormSimple();
+                            payload.isEnabled = true;
+                            var saved = await ApiService.adminCreateAuthorAiTokenAutoGrantRule(payload);
+                            var rid = saved?.id ?? saved?.Id ?? aiAutoGrantCurrentRuleId;
+                            if (!rid) throw new Error('Chưa có rule để chạy.');
+                            aiAutoGrantCurrentRuleId = String(rid);
+                            var rrun = await ApiService.adminRunAuthorAiTokenAutoGrantRuleNow(aiAutoGrantCurrentRuleId);
+                            var usersUpdated = (rrun && (rrun.usersUpdated ?? rrun.UsersUpdated)) || 0;
+                            aiAutoGrantSetMsg('ok', 'Đã bật và chạy gia hạn. Users updated: ' + usersUpdated + '.');
+                            await loadAuthorAiTokenAutoGrantPanel();
+                        } catch (e) {
+                            aiAutoGrantSetMsg('err', e && e.message ? e.message : String(e));
+                        }
+                    });
+
+                    var btnOff = document.getElementById('btnAiAutoGrantDisable');
+                    if (btnOff) btnOff.addEventListener('click', async function () {
+                        aiAutoGrantSetMsg(null, null);
+                        try {
+                            var payload = aiAutoGrantReadFormSimple();
+                            payload.isEnabled = false;
+                            await ApiService.adminCreateAuthorAiTokenAutoGrantRule(payload);
+                            aiAutoGrantSetMsg('ok', 'Đã tắt gia hạn tự động.');
                             await loadAuthorAiTokenAutoGrantPanel();
                         } catch (e) {
                             aiAutoGrantSetMsg('err', e && e.message ? e.message : String(e));
@@ -3318,130 +2820,101 @@
                         var btn = evt.target && evt.target.closest ? evt.target.closest('button[data-act]') : null;
                         if (!btn) return;
                         var act = btn.getAttribute('data-act');
-                        var tr = btn.closest('tr[data-rule-id]');
-                        if (!tr) return;
-                        var id = tr.getAttribute('data-rule-id');
-                        if (!id) return;
+                        if (act !== 'run') return;
+                        if (!aiAutoGrantCurrentRuleId) return;
                         aiAutoGrantSetMsg(null, null);
                         try {
-                            if (act === 'del') {
-                                if (!confirm('Xóa rule này?')) return;
-                                await ApiService.adminDeleteAuthorAiTokenAutoGrantRule(id);
-                                aiAutoGrantSetMsg('ok', 'Đã xóa rule.');
-                                await loadAuthorAiTokenAutoGrantPanel();
-                                return;
-                            }
-                            if (act === 'run') {
-                                var r = await ApiService.adminRunAuthorAiTokenAutoGrantRuleNow(id);
-                                var usersUpdated = (r && (r.usersUpdated ?? r.UsersUpdated)) || 0;
-                                aiAutoGrantSetMsg('ok', 'Đã chạy rule. Users updated: ' + usersUpdated + '.');
-                                await loadAuthorAiTokenAutoGrantPanel();
-                                return;
-                            }
-                            if (act === 'edit') {
-                                var list = await ApiService.adminListAuthorAiTokenAutoGrantRules();
-                                var arr = Array.isArray(list) ? list : [];
-                                var found = arr.find(function (x) { return (x.id || x.Id) === id; });
-                                if (!found) throw new Error('Không tìm thấy rule.');
-                                // Normalize
-                                var rule = {
-                                    id: found.id ?? found.Id,
-                                    isEnabled: !!(found.isEnabled ?? found.IsEnabled),
-                                    displayName: found.displayName ?? found.DisplayName ?? null,
-                                    periodKind: (found.periodKind ?? found.PeriodKind ?? 'monthly_utc'),
-                                    grantLimitField: (found.grantLimitField ?? found.GrantLimitField ?? 'lifetime'),
-                                    grantAmount: (found.grantAmount ?? found.GrantAmount ?? 0),
-                                    applyToAllAuthors: !!(found.applyToAllAuthors ?? found.ApplyToAllAuthors),
-                                    selectedUserIds: found.selectedUserIds ?? found.SelectedUserIds ?? []
-                                };
-                                aiAutoGrantEditingRuleId = rule.id;
-                                var hint = document.getElementById('aiAutoGrantEditingHint');
-                                if (hint) hint.style.display = '';
-                                var hid = document.getElementById('aiAutoGrantEditingId');
-                                if (hid) hid.textContent = rule.id;
-                                var dn = document.getElementById('aiAutoGrantDisplayName'); if (dn) dn.value = rule.displayName || '';
-                                var pk = document.getElementById('aiAutoGrantPeriodKind'); if (pk) pk.value = String(rule.periodKind).toLowerCase();
-                                updateAutoGrantLimitFieldReadonly();
-                                var am = document.getElementById('aiAutoGrantAmount'); if (am) am.value = String(rule.grantAmount || 0);
-                                var en = document.getElementById('aiAutoGrantEnabled'); if (en) en.checked = !!rule.isEnabled;
-                                var all = document.getElementById('aiAutoGrantAllAuthors'); if (all) all.checked = !!rule.applyToAllAuthors;
-                                // Author list checkboxes
-                                setAiAutoGrantSelectedAuthors(Array.isArray(rule.selectedUserIds) ? rule.selectedUserIds : []);
-                                aiAutoGrantSetMsg('ok', 'Đang sửa rule. Bấm “Tạo rule” để lưu (sẽ cập nhật).');
-                                return;
-                            }
+                            var rr = await ApiService.adminRunAuthorAiTokenAutoGrantRuleNow(aiAutoGrantCurrentRuleId);
+                            var usersUpdated = (rr && (rr.usersUpdated ?? rr.UsersUpdated)) || 0;
+                            aiAutoGrantSetMsg('ok', 'Đã chạy. Users updated: ' + usersUpdated + '.');
+                            await loadAuthorAiTokenAutoGrantPanel();
                         } catch (e) {
                             aiAutoGrantSetMsg('err', e && e.message ? e.message : String(e));
                         }
                     });
-
-                    // Default
-                    aiAutoGrantResetForm();
                 }
-
-                // Ensure authors loaded for checkbox list (reuse cache from budget panel if available)
-                var loadEl = document.getElementById('aiAutoGrantAuthorsLoading');
-                var errEl = document.getElementById('aiAutoGrantAuthorsErr');
-                if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
-                try {
-                    if ((!aiAutoGrantAuthorsCache || aiAutoGrantAuthorsCache.length === 0) && Array.isArray(aiAuthorsBudgetCache) && aiAuthorsBudgetCache.length > 0) {
-                        aiAutoGrantAuthorsCache = aiAuthorsBudgetCache.slice();
-                    }
-                    if (!aiAutoGrantAuthorsCache || aiAutoGrantAuthorsCache.length === 0) {
-                        if (loadEl) loadEl.classList.remove('d-none');
-                        // best-effort: load all authors (same loop as budget panel, but one shot with paging)
-                        var allAuthors = [];
-                        var page = 1;
-                        var pageSize = 200;
-                        var total = 0;
-                        while (true) {
-                            var rUsers = await ApiService.adminGetUsers({ role: 'AUTHOR', page: page, pageSize: pageSize });
-                            var items = (rUsers && rUsers.items) ? rUsers.items : ((rUsers && rUsers.Items) ? rUsers.Items : []);
-                            total = (rUsers && rUsers.totalCount !== undefined) ? rUsers.totalCount : ((rUsers && rUsers.TotalCount !== undefined) ? rUsers.TotalCount : 0);
-                            if (items && items.length) for (var i = 0; i < items.length; i++) allAuthors.push(items[i]);
-                            if (!items || items.length === 0 || allAuthors.length >= total) break;
-                            page += 1;
-                            if (page > 500) break;
-                        }
-                        aiAutoGrantAuthorsCache = allAuthors.map(function (x) {
-                            var id = String(x.id != null ? x.id : x.Id || '').trim();
-                            return {
-                                id: id,
-                                email: String(x.email != null ? x.email : x.Email || '').trim(),
-                                nickname: String(x.nickname != null ? x.nickname : x.Nickname || '').trim()
-                            };
-                        }).filter(function (u) { return u.id.length > 0; });
-                    }
-                } catch (e) {
-                    if (errEl) { errEl.classList.remove('d-none'); errEl.textContent = e && e.message ? e.message : String(e); }
-                } finally {
-                    if (loadEl) loadEl.classList.add('d-none');
-                }
-                renderAiAutoGrantAuthorList();
 
                 try {
                     var list = await ApiService.adminListAuthorAiTokenAutoGrantRules();
                     var arr = Array.isArray(list) ? list : [];
-                    // normalize for renderer (keep casing flexible)
-                    var normalized = arr.map(function (x) {
-                        var sel = x.selectedUserIds ?? x.SelectedUserIds ?? [];
-                        return {
-                            id: x.id ?? x.Id,
-                            isEnabled: !!(x.isEnabled ?? x.IsEnabled),
-                            displayName: x.displayName ?? x.DisplayName ?? null,
-                            periodKind: (x.periodKind ?? x.PeriodKind ?? '').toString(),
-                            grantLimitField: (x.grantLimitField ?? x.GrantLimitField ?? '').toString(),
-                            grantAmount: (x.grantAmount ?? x.GrantAmount ?? 0),
-                            applyToAllAuthors: !!(x.applyToAllAuthors ?? x.ApplyToAllAuthors),
-                            selectedUserIds: Array.isArray(sel) ? sel : [],
-                            lastRunAtUtc: x.lastRunAtUtc ?? x.LastRunAtUtc ?? null
-                        };
-                    });
-                    renderAiAutoGrantRules(normalized);
+                    var first = arr.length ? arr[0] : null;
+                    // sync form
+                    var am = document.getElementById('aiAutoGrantAmount');
+                    if (first) {
+                        var amt = first.grantAmount ?? first.GrantAmount ?? 0;
+                        if (am) am.value = String(amt || 0);
+                    }
+                    renderAiAutoGrantSingleton(first);
                 } catch (e) {
                     aiAutoGrantSetMsg('err', e && e.message ? e.message : String(e));
                     var body = document.getElementById('aiAutoGrantBody');
-                    if (body) body.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Không tải được danh sách.</td></tr>';
+                    if (body) body.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Không tải được cấu hình.</td></tr>';
+                }
+
+                // load user list (best-effort)
+                try { await loadAutoGrantUsers(); } catch (_) { /* ignore */ }
+            }
+
+            async function loadAutoGrantUsers() {
+                var loading = document.getElementById('aiAutoGrantUsersLoading');
+                var err = document.getElementById('aiAutoGrantUsersErr');
+                var body = document.getElementById('aiAutoGrantUsersBody');
+                var info = document.getElementById('aiAutoGrantUsersPageInfo');
+                var prev = document.getElementById('btnAiAutoGrantUsersPrev');
+                var next = document.getElementById('btnAiAutoGrantUsersNext');
+                if (err) { err.classList.add('d-none'); err.textContent = ''; }
+                if (loading) loading.classList.remove('d-none');
+                if (body) body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Đang tải…</td></tr>';
+
+                var qEl = document.getElementById('aiAutoGrantUsersSearch');
+                var psEl = document.getElementById('aiAutoGrantUsersPageSize');
+                var q = qEl ? String(qEl.value || '').trim().toLowerCase() : '';
+                var pageSize = psEl ? (parseInt(psEl.value, 10) || 50) : 50;
+                var page = aiAutoGrantUsersPage || 1;
+                if (page < 1) page = 1;
+
+                try {
+                    var r = await ApiService.adminGetUsers({ page: page, pageSize: pageSize, role: 'author', search: q });
+                    var items = (r && r.items) ? r.items : ((r && r.Items) ? r.Items : []);
+                    var total = (r && r.totalCount !== undefined) ? r.totalCount : ((r && r.TotalCount !== undefined) ? r.TotalCount : 0);
+                    var totalPages = Math.max(1, Math.ceil((total || 0) / (pageSize || 50)));
+                    if (page > totalPages) { aiAutoGrantUsersPage = totalPages; page = totalPages; }
+
+                    if (info) info.textContent = 'Trang ' + page + ' / ' + totalPages + ' · Tổng ' + (total || 0) + ' AUTHOR';
+                    if (prev) prev.disabled = page <= 1;
+                    if (next) next.disabled = page >= totalPages;
+
+                    if (!items || items.length === 0) {
+                        if (body) body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Không có author.</td></tr>';
+                        return;
+                    }
+
+                    function pick(x, a, b) { var v = x[a]; if (v === undefined || v === null) v = x[b]; return v; }
+                    body.innerHTML = items.map(function (u) {
+                        var id = String(pick(u, 'id', 'Id') || '');
+                        var email = String(pick(u, 'email', 'Email') || '');
+                        var nick = String(pick(u, 'nickname', 'Nickname') || '');
+                        var role = String(pick(u, 'role', 'Role') || '');
+                        var status = String(pick(u, 'status', 'Status') || '');
+                        var tok = pick(u, 'aiTokenLimit', 'AiTokenLimit');
+                        if (tok === undefined || tok === null) tok = pick(u, 'ai_token_limit', 'ai_token_limit');
+                        var tokN = Number(tok || 0);
+                        var label = nick && nick.trim() ? nick.trim() : (email || id);
+                        return '' +
+                            '<tr>' +
+                            '<td class="text-break">' + escapeHtml(label) + (email ? ('<div class="text-muted small">' + escapeHtml(email) + '</div>') : '') + '</td>' +
+                            '<td><code>' + escapeHtml(String(role || '—').toUpperCase()) + '</code></td>' +
+                            '<td><code>' + escapeHtml(String(status || '—').toUpperCase()) + '</code></td>' +
+                            '<td class="text-end fw-semibold">' + (Number.isFinite(tokN) ? tokN.toLocaleString('vi-VN') : '—') + '</td>' +
+                            '<td class="text-muted small"><code>' + escapeHtml(id) + '</code></td>' +
+                            '</tr>';
+                    }).join('');
+                } catch (e) {
+                    if (err) { err.classList.remove('d-none'); err.textContent = e && e.message ? e.message : String(e); }
+                    if (body) body.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Không tải được.</td></tr>';
+                    if (info) info.textContent = '—';
+                } finally {
+                    if (loading) loading.classList.add('d-none');
                 }
             }
 
@@ -4644,29 +4117,10 @@
             if (btnAiKeyRefresh) btnAiKeyRefresh.addEventListener('click', loadAiOpenRouterKey);
             var btnAiCreditsRefresh = document.getElementById('btnAiCreditsRefresh');
             if (btnAiCreditsRefresh) btnAiCreditsRefresh.addEventListener('click', loadAiOpenRouterCreditsOnly);
-            var btnAiAuthorBudgetRefreshAuthors = document.getElementById('btnAiAuthorBudgetRefreshAuthors');
-            if (btnAiAuthorBudgetRefreshAuthors) btnAiAuthorBudgetRefreshAuthors.addEventListener('click', loadAuthorsForBudgetPanel);
-            var btnAiAuthorBudgetReloadBudget = document.getElementById('btnAiAuthorBudgetReloadBudget');
-            if (btnAiAuthorBudgetReloadBudget) btnAiAuthorBudgetReloadBudget.addEventListener('click', loadAuthorAiTokenBudgetPanel);
-            var btnAiAuthorBudgetSave = document.getElementById('btnAiAuthorBudgetSave');
-            if (btnAiAuthorBudgetSave) btnAiAuthorBudgetSave.addEventListener('click', saveAuthorAiTokenBudgetPanel);
             var btnAiAuthorDefaultsRefresh = document.getElementById('btnAiAuthorDefaultsRefresh');
             if (btnAiAuthorDefaultsRefresh) btnAiAuthorDefaultsRefresh.addEventListener('click', loadAuthorAiTokenDefaultsPanel);
             var btnAiAuthorDefaultsSave = document.getElementById('btnAiAuthorDefaultsSave');
             if (btnAiAuthorDefaultsSave) btnAiAuthorDefaultsSave.addEventListener('click', saveAuthorAiTokenDefaultsPanel);
-            var aiAuthorBudgetSelect = document.getElementById('aiAuthorBudgetSelect');
-            if (aiAuthorBudgetSelect) {
-                aiAuthorBudgetSelect.addEventListener('change', function () {
-                    loadAuthorAiTokenBudgetPanel();
-                });
-            }
-            var aiAuthorBudgetFilter = document.getElementById('aiAuthorBudgetFilter');
-            if (aiAuthorBudgetFilter) {
-                aiAuthorBudgetFilter.addEventListener('input', function () {
-                    renderAuthorBudgetSelectFiltered();
-                    if (getSelectedAuthorBudgetUserId()) scheduleLoadAuthorAiTokenBudgetPanel();
-                });
-            }
             var btnAiActivityRefresh = document.getElementById('btnAiActivityRefresh');
             if (btnAiActivityRefresh) btnAiActivityRefresh.addEventListener('click', loadAiOpenRouterActivity);
             var aiActivityRangeEl = document.getElementById('aiActivityRange');

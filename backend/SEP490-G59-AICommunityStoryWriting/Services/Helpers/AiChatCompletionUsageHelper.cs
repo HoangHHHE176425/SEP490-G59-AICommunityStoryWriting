@@ -38,9 +38,16 @@ public static class AiChatCompletionUsageHelper
 
                 foreach (DictionaryEntry entry in dict)
                 {
-                    if (entry.Key is not string key || !key.Equals("cost", StringComparison.OrdinalIgnoreCase))
+                    if (entry.Key is not string key)
                         continue;
-                    return ParseCostUsd(entry.Value);
+
+                    // OpenRouter/adapter có thể trả cost theo nhiều key khác nhau.
+                    if (!IsCostLikeKey(key))
+                        continue;
+
+                    var parsed = ParseCostUsd(entry.Value);
+                    if (parsed.HasValue)
+                        return parsed.Value;
                 }
             }
         }
@@ -51,6 +58,13 @@ public static class AiChatCompletionUsageHelper
 
         return null;
     }
+
+    private static bool IsCostLikeKey(string key) =>
+        key.Equals("cost", StringComparison.OrdinalIgnoreCase)
+        || key.Equals("total_cost", StringComparison.OrdinalIgnoreCase)
+        || key.Equals("totalCost", StringComparison.OrdinalIgnoreCase)
+        || key.Equals("estimated_cost", StringComparison.OrdinalIgnoreCase)
+        || key.Equals("estimatedCost", StringComparison.OrdinalIgnoreCase);
 
     private static decimal? ParseCostUsd(object? value)
     {
@@ -81,6 +95,8 @@ public static class AiChatCompletionUsageHelper
                 if (root.ValueKind == JsonValueKind.String && root.GetString() is { } inner &&
                     decimal.TryParse(inner.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var innerDec))
                     return innerDec;
+                if (root.ValueKind == JsonValueKind.Object)
+                    return ParseCostFromJsonObject(root);
             }
             catch
             {
@@ -88,6 +104,32 @@ public static class AiChatCompletionUsageHelper
             }
         }
 
+        if (value is JsonElement je)
+        {
+            if (je.ValueKind == JsonValueKind.Number && je.TryGetDecimal(out var n))
+                return n;
+            if (je.ValueKind == JsonValueKind.String && je.GetString() is { } s &&
+                decimal.TryParse(s.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var sd))
+                return sd;
+            if (je.ValueKind == JsonValueKind.Object)
+                return ParseCostFromJsonObject(je);
+        }
+
+        return null;
+    }
+
+    private static decimal? ParseCostFromJsonObject(JsonElement obj)
+    {
+        foreach (var name in new[] { "cost", "total_cost", "totalCost", "estimated_cost", "estimatedCost", "amount", "value" })
+        {
+            if (!obj.TryGetProperty(name, out var prop))
+                continue;
+            if (prop.ValueKind == JsonValueKind.Number && prop.TryGetDecimal(out var n))
+                return n;
+            if (prop.ValueKind == JsonValueKind.String && prop.GetString() is { } s &&
+                decimal.TryParse(s.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var sd))
+                return sd;
+        }
         return null;
     }
 }

@@ -25,20 +25,8 @@ public partial class users
 
     public DateTime? updated_at { get; set; }
 
-    /// <summary>Đến thời điểm này (UTC) tác giả không được tạo truyện/chương mới (compliance + admin).</summary>
-    public DateTime? author_writing_suspended_until { get; set; }
-
-    /// <summary>Tổng token AI tối đa (tích lũy theo bảng ai_usage_logs) cho tài khoản tác giả; null = không giới hạn.</summary>
-    public long? author_ai_token_limit { get; set; }
-
-    /// <summary>Giới hạn token trong ngày lịch UTC (từ 00:00 UTC); null = không giới hạn.</summary>
-    public long? author_ai_token_limit_per_day { get; set; }
-
-    /// <summary>Giới hạn token trong tuần UTC (Thứ Hai 00:00 đến hết Chủ nhật); null = không giới hạn.</summary>
-    public long? author_ai_token_limit_per_week { get; set; }
-
-    /// <summary>Giới hạn token trong tháng lịch UTC; null = không giới hạn.</summary>
-    public long? author_ai_token_limit_per_month { get; set; }
+    /// <summary>Số dư token AI hiện tại của user (chỉ cộng/trừ trên cột này).</summary>
+    public long ai_token_limit { get; set; }
 
     public virtual ICollection<admin_audit_logs> admin_audit_logs { get; set; } = new List<admin_audit_logs>();
 
