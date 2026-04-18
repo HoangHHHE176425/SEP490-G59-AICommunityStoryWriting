@@ -3220,20 +3220,12 @@ export function AuthorStoryManagement({ onBack }) {
                                         marginBottom: '1.25rem',
                                     }}
                                     >
-                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-                                            <div style={{
-                                                width: '40px', height: '40px', borderRadius: '12px', backgroundColor: '#dcfce7',
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                                            }}
-                                            >
-                                                <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
-                                            </div>
-                                            <div>
-                                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 70% cho tác giả, 30% nền tảng</div>
-                                                <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
-                                                    Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>30%</b> phí.
-                                                </div>
-                                            </div>
+                                        <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 30% cho tác giả, 70% nền tảng</div>
+                                        <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
+                                            Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>70%</b> phí.
                                         </div>
                                     </div>
 

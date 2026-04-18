@@ -333,7 +333,7 @@ export async function setChapterCommentReaction(chapterId, commentId, reactionTy
 
 /**
  * POST /api/chapters/{chapterId}/unlock
- * Mở khóa chapter trả phí: trừ coin người mua, chia 30%/70% và ghi lịch sử purchases + author_income_logs.
+ * Mở khóa chapter trả phí: trừ coin người mua, chia 70% nền tảng / 30% tác giả và ghi lịch sử purchases + author_income_logs.
  * @param {string} chapterId
  * @returns {Promise<{unlocked: boolean, alreadyUnlocked?: boolean}>}
  */

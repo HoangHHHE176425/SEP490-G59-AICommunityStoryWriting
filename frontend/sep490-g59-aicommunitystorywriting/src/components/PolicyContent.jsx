@@ -456,8 +456,8 @@ export function PolicyContent() {
                                     <p className="font-semibold text-[#1A2332]">a) Chương trả phí:</p>
                                     <ul className="list-disc list-inside space-y-1 ml-4 mt-1">
                                         <li>Tác giả được đặt giá cho từng chương (tối thiểu 10 coin, tối đa 1000 coin)</li>
-                                        <li>Tác giả nhận <strong className="text-[#1A2332]">70%</strong> doanh thu từ chương trả phí
-                                            (CSW-AI giữ 30% phí dịch vụ)</li>
+                                        <li>Tác giả nhận <strong className="text-[#1A2332]">30%</strong> doanh thu từ chương trả phí
+                                            (CSW-AI giữ 70% phí dịch vụ)</li>
                                         <li>Doanh thu được cập nhật realtime sau mỗi giao dịch</li>
                                     </ul>
 
