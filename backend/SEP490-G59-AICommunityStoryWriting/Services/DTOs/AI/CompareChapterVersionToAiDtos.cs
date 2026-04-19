@@ -8,6 +8,7 @@ public class CompareChapterVersionToAiRequest
 
 public class CompareChapterVersionToAiResponse
 {
+    /// <summary>0–100%: Jaccard trên tập n-gram từ (word shingles) giữa snapshot và bản AI.</summary>
     public double SimilarityScore { get; set; }
     public bool IsSimilar { get; set; }
     public int SnapshotContentLength { get; set; }

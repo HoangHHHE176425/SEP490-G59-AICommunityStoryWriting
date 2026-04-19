@@ -2,21 +2,24 @@ using Microsoft.Extensions.Configuration;
 
 namespace Services.Helpers;
 
-/// <summary>So sánh theo % copy chữ (text-only), không dùng semantic embedding.</summary>
+/// <summary>So sánh theo mức trùng chữ: Jaccard trên tập n-gram từ (không dùng embedding).</summary>
 public static class ContentSimilarityHelper
 {
-    private const int NGramSize = 5;
-    private const int LongSpanMinWords = 12;
+    /// <summary>Số từ trong mỗi n-gram (word shingle).</summary>
+    private const int DefaultWordShingleSize = 5;
 
-    /// <returns>Điểm cao nhất 0–100 và độ dài chuỗi AI tương ứng.</returns>
+    /// <returns>Điểm cao nhất 0–100 (Jaccard × 100) và độ dài chuỗi AI tương ứng.</returns>
     public static Task<(double BestScore, int BestAiLength)> CompareAuthorToAiOutputsAsync(
         string authorContent,
         IReadOnlyList<string?> aiOutputs,
         IConfiguration configuration,
         CancellationToken cancellationToken = default)
     {
-        _ = configuration;
         _ = cancellationToken;
+        var n = configuration.GetValue("ChapterCompare:WordShingleSize", DefaultWordShingleSize);
+        if (n < 2) n = 2;
+        if (n > 12) n = 12;
+
         var trimmedAuthor = (authorContent ?? "").Trim();
         double bestScore = 0;
         int bestAiLength = 0;
@@ -25,7 +28,7 @@ public static class ContentSimilarityHelper
         {
             var aiContent = (raw ?? "").Trim();
             if (string.IsNullOrEmpty(aiContent)) continue;
-            var s = CopySimilarityPercent(trimmedAuthor, aiContent);
+            var s = WordShingleJaccardPercent(trimmedAuthor, aiContent, n);
             if (s > bestScore) { bestScore = s; bestAiLength = aiContent.Length; }
         }
 
@@ -33,72 +36,41 @@ public static class ContentSimilarityHelper
     }
 
     /// <summary>
-    /// Copy score = 0.7 * N-gram overlap + 0.3 * long matching spans.
-    /// N-gram bắt copy cụm từ; long span bắt copy đoạn dài liên tiếp.
+    /// Jaccard trên tập n-gram từ: |S(A) ∩ S(B)| / |S(A) ∪ S(B)|, nhân 100.
+    /// Nếu một bên quá ngắn (&lt; n từ), dùng n' = min(n, lenA, lenB) tối thiểu 1 để vẫn có thể so.
     /// </summary>
-    private static double CopySimilarityPercent(string authorText, string aiText)
+    private static double WordShingleJaccardPercent(string authorText, string aiText, int n)
     {
-        var authorTokens = Tokenize(authorText);
-        var aiTokens = Tokenize(aiText);
-        if (authorTokens.Length == 0 || aiTokens.Length == 0) return 0;
+        var aTokens = Tokenize(authorText);
+        var bTokens = Tokenize(aiText);
+        if (aTokens.Length == 0 || bTokens.Length == 0) return 0;
 
-        var ngram = NGramOverlapPercent(authorTokens, aiTokens, NGramSize);
-        var span = LongSpanPercent(authorTokens, aiTokens, LongSpanMinWords);
-        var score = 0.7 * ngram + 0.3 * span;
-        return Math.Clamp(score, 0, 100);
-    }
+        var effectiveN = Math.Min(n, Math.Min(aTokens.Length, bTokens.Length));
+        effectiveN = Math.Max(1, effectiveN);
 
-    private static double NGramOverlapPercent(string[] authorTokens, string[] aiTokens, int n)
-    {
-        if (authorTokens.Length < n || aiTokens.Length < n) return 0;
-        var aiNgrams = new HashSet<string>(StringComparer.Ordinal);
-        for (int i = 0; i <= aiTokens.Length - n; i++)
-            aiNgrams.Add(string.Join(' ', aiTokens, i, n));
+        var setA = BuildWordShingleSet(aTokens, effectiveN);
+        var setB = BuildWordShingleSet(bTokens, effectiveN);
+        if (setA.Count == 0 || setB.Count == 0) return 0;
 
-        int total = authorTokens.Length - n + 1;
-        int matched = 0;
-        for (int i = 0; i <= authorTokens.Length - n; i++)
+        var intersection = 0;
+        foreach (var x in setA)
         {
-            var gram = string.Join(' ', authorTokens, i, n);
-            if (aiNgrams.Contains(gram)) matched++;
-        }
-        return total <= 0 ? 0 : (matched * 100.0) / total;
-    }
-
-    private static double LongSpanPercent(string[] authorTokens, string[] aiTokens, int minSpanWords)
-    {
-        int n = authorTokens.Length;
-        int m = aiTokens.Length;
-        if (n == 0 || m == 0) return 0;
-
-        var dp = new int[n + 1, m + 1];
-        var covered = new bool[n];
-
-        for (int i = 1; i <= n; i++)
-        {
-            for (int j = 1; j <= m; j++)
-            {
-                if (authorTokens[i - 1].Equals(aiTokens[j - 1], StringComparison.Ordinal))
-                {
-                    dp[i, j] = dp[i - 1, j - 1] + 1;
-                    var len = dp[i, j];
-                    if (len >= minSpanWords)
-                    {
-                        var start = i - len;
-                        var end = i - 1;
-                        for (int k = start; k <= end; k++)
-                            covered[k] = true;
-                    }
-                }
-                else
-                {
-                    dp[i, j] = 0;
-                }
-            }
+            if (setB.Contains(x))
+                intersection++;
         }
 
-        int coveredCount = covered.Count(x => x);
-        return (coveredCount * 100.0) / n;
+        var union = setA.Count + setB.Count - intersection;
+        if (union <= 0) return 0;
+        return Math.Clamp(intersection * 100.0 / union, 0, 100);
+    }
+
+    private static HashSet<string> BuildWordShingleSet(string[] tokens, int n)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        if (tokens.Length < n) return set;
+        for (int i = 0; i <= tokens.Length - n; i++)
+            set.Add(string.Join(' ', tokens, i, n));
+        return set;
     }
 
     private static string[] Tokenize(string text)

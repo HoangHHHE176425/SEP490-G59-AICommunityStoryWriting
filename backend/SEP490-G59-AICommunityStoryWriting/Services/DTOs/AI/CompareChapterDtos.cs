@@ -12,7 +12,7 @@ public class CompareChapterRequest
 /// <summary>Kết quả so sánh: độ giống (0–100) và nhận định.</summary>
 public class CompareChapterResponse
 {
-    /// <summary>Độ giống nhau 0–100 (%).</summary>
+    /// <summary>Độ giống 0–100%: Jaccard trên tập n-gram từ (word shingles) giữa nội dung tác giả và bản AI.</summary>
     public double SimilarityScore { get; set; }
 
     /// <summary>True nếu coi là giống (vd. &gt; 85%).</summary>

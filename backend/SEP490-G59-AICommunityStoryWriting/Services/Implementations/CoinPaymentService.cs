@@ -414,9 +414,9 @@ namespace Services.Implementations
                     throw new InvalidOperationException("Số dư coin không đủ để thực hiện ủng hộ.");
                 }
 
-                // Platform fee: 30% goes to system wallet, 70% goes to author.
+                // Platform fee: 70% goes to system wallet, 30% goes to author.
                 // Use floor to avoid charging more than intended; net + fee == amount.
-                var platformFee = (int)Math.Floor(amount * 0.30m);
+                var platformFee = (int)Math.Floor(amount * 0.70m);
                 platformFee = Math.Clamp(platformFee, 0, amount);
                 var authorNet = amount - platformFee;
 

@@ -4,7 +4,6 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Threading.Channels;
 using AIStory.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
@@ -249,7 +248,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Đồng sáng tác (SSE): ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → guardrail từ cấm. Trả về stream event: progress từng bước, cuối cùng event result chứa CoCreationResponse. Client đọc response body theo chuẩn SSE (event: progress / result / error).</summary>
+        /// <summary>Đồng sáng tác (SSE): ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → guardrail từ cấm. Trả về stream: event result chứa CoCreationResponse, hoặc event error. Client đọc body theo chuẩn SSE.</summary>
         [Produces("text/event-stream")]
         [HttpPost("co-create")]
         public async Task CoCreate([FromBody] CoCreationRequest request, CancellationToken cancellationToken)
@@ -300,8 +299,6 @@ namespace AIStory.API.Controllers
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
             };
-            var channel = Channel.CreateUnbounded<(string EventType, object Data)>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
-            var progress = new Progress<CoCreateProgressEvent>(evt => channel.Writer.TryWrite(("progress", evt)));
 
             async Task WriteSseEventAsync(string eventType, object data, CancellationToken ct)
             {
@@ -312,29 +309,9 @@ namespace AIStory.API.Controllers
                 await Response.Body.FlushAsync(ct);
             }
 
-            async Task ConsumeProgressChannelAsync(CancellationToken ct)
-            {
-                try
-                {
-                    await foreach (var item in channel.Reader.ReadAllAsync(ct))
-                        await WriteSseEventAsync(item.EventType, item.Data, ct);
-                }
-                catch (OperationCanceledException) { }
-            }
-
-            var consumerTask = ConsumeProgressChannelAsync(cancellationToken);
             try
             {
-                CoCreationResponse response;
-                try
-                {
-                    response = await _aiCoCreationService.CoCreateAsync(request, authorUserId, cancellationToken, progress);
-                }
-                finally
-                {
-                    channel.Writer.Complete();
-                }
-                await consumerTask;
+                var response = await _aiCoCreationService.CoCreateAsync(request, authorUserId, cancellationToken);
                 await WriteSseEventAsync("result", response, cancellationToken);
             }
             catch (OperationCanceledException)
@@ -343,17 +320,14 @@ namespace AIStory.API.Controllers
             }
             catch (UnauthorizedAccessException ex)
             {
-                try { await consumerTask; } catch (OperationCanceledException) { }
                 try { await WriteSseEventAsync("error", new { message = ex.Message }, cancellationToken); } catch { }
             }
             catch (InvalidOperationException ex)
             {
-                try { await consumerTask; } catch (OperationCanceledException) { }
                 try { await WriteSseEventAsync("error", new { message = ex.Message }, cancellationToken); } catch { }
             }
             catch (Exception ex)
             {
-                try { await consumerTask; } catch (OperationCanceledException) { }
                 _logger.LogError(ex, "AI co-create failed for StoryId={StoryId}", request.StoryId);
                 var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi gọi dịch vụ AI. Vui lòng thử lại sau.";
                 try { await WriteSseEventAsync("error", new { message }, cancellationToken); } catch { }

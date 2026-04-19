@@ -22,7 +22,6 @@ namespace Services.Implementations
         private readonly IStoryRagService _ragService;
         private readonly IStoryMemoryEngine _memoryEngine;
         private readonly IAIUsageLogRepository _aiUsageLogRepository;
-        private readonly IAiGeneratedContentRepository _aiContentRepository;
         private readonly IConfiguration _configuration;
         private readonly IUserLookup _userLookup;
 
@@ -32,7 +31,6 @@ namespace Services.Implementations
             IStoryRagService ragService,
             IStoryMemoryEngine memoryEngine,
             IAIUsageLogRepository aiUsageLogRepository,
-            IAiGeneratedContentRepository aiContentRepository,
             IConfiguration configuration,
             IUserLookup userLookup)
         {
@@ -41,7 +39,6 @@ namespace Services.Implementations
             _ragService = ragService;
             _memoryEngine = memoryEngine;
             _aiUsageLogRepository = aiUsageLogRepository;
-            _aiContentRepository = aiContentRepository;
             _configuration = configuration;
             _userLookup = userLookup;
         }
@@ -88,8 +85,7 @@ namespace Services.Implementations
             var ragQuery = $"{story.summary ?? ""} {lastChapterContent}".Trim();
             var contextBlock = await _memoryEngine.BuildContextForSuggestAsync(request.StoryId, ragQuery, cancellationToken);
 
-            var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(contextBlock);
-            var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
+            var languageInstruction = StoryLanguageHelper.VietnameseOnlyInstruction;
 
             var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlanner);
             var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
@@ -146,22 +142,6 @@ namespace Services.Implementations
                     throw new InvalidOperationException("ChapterId không khớp truyện.");
                 if (targetChapter != null)
                     usageLogChapterId = targetChapter.id;
-                foreach (var dto in dtoList)
-                {
-                    var json = JsonSerializer.Serialize(dto);
-                    _aiContentRepository.Add(new ai_generated_content
-                    {
-                        id = Guid.NewGuid(),
-                        chapter_id = targetChapter?.id,
-                        draft_chapter_id = targetChapter == null ? request.ChapterId.Value : null,
-                        story_id = request.StoryId,
-                        user_id = authorUserId,
-                        input_prompt = ActionType,
-                        ai_output = json,
-                        chapter_index = targetChapter?.order_index,
-                        created_at = DateTime.UtcNow
-                    });
-                }
             }
 
             var promptTokens = completion.Usage?.InputTokenCount ?? 0;
@@ -288,7 +268,7 @@ Trả về DUY NHẤT một JSON hợp lệ, không markdown:
   ]
 }
 
-Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, xung đột hoặc kết cục); mỗi gợi ý phải đủ dài và cụ thể, không sơ sài; bám sát mạch truyện và đặc biệt nội dung các chương/đoạn gần nhất trong dữ liệu — chỉ gợi ý nội dung tiếp theo trên dòng thời gian, không đảo ngược hay lặp lại sự kiện đã xảy ra. Ngôn ngữ: Nội dung sinh ra (title, summary, direction, key_events, characters_involved) phải thuần theo đúng ngôn ngữ của bộ truyện; không xen từ hoặc cụm từ thuộc ngôn ngữ khác — mọi từ phải cùng một ngôn ngữ với truyện.
+Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, xung đột hoặc kết cục); mỗi gợi ý phải đủ dài và cụ thể, không sơ sài; bám sát mạch truyện và đặc biệt nội dung các chương/đoạn gần nhất trong dữ liệu — chỉ gợi ý nội dung tiếp theo trên dòng thời gian, không đảo ngược hay lặp lại sự kiện đã xảy ra. Ngôn ngữ: Toàn bộ nội dung sinh ra (title, summary, direction, key_events, characters_involved) phải bằng tiếng Việt; không xen từ hoặc cụm từ ngôn ngữ khác.
 """;
         }
 
