@@ -231,8 +231,6 @@ namespace AIStory.API.Controllers
             }
             catch (InvalidOperationException ex)
             {
-                if (ex.Message.Contains("không tồn tại"))
-                    return NotFound(new { message = ex.Message });
                 return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)
@@ -248,89 +246,65 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Đồng sáng tác (SSE): ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → guardrail từ cấm. Trả về stream: event result chứa CoCreationResponse, hoặc event error. Client đọc body theo chuẩn SSE.</summary>
-        [Produces("text/event-stream")]
+        /// <summary>Đồng sáng tác: ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → guardrail từ cấm. Trả về JSON kết quả hoặc lỗi chuẩn HTTP.</summary>
         [HttpPost("co-create")]
-        public async Task CoCreate([FromBody] CoCreationRequest request, CancellationToken cancellationToken)
+        public async Task<IActionResult> CoCreate([FromBody] CoCreationRequest request, CancellationToken cancellationToken)
         {
             if (request.StoryId == Guid.Empty)
             {
-                Response.StatusCode = 400;
-                await Response.WriteAsJsonAsync(new { message = "StoryId là bắt buộc." }, cancellationToken);
-                return;
+                return BadRequest(new { message = "StoryId là bắt buộc." });
             }
             // AuthorIdea là tùy chọn (option 1: để trống → AI tự viết theo mạch truyện).
 
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))
             {
-                Response.StatusCode = 401;
-                await Response.WriteAsJsonAsync(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." }, cancellationToken);
-                return;
+                return Unauthorized(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." });
             }
 
             var (budgetOk, budgetEx) = await TryEnsureAuthorTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
             if (!budgetOk)
             {
-                Response.StatusCode = 403;
-                await Response.WriteAsJsonAsync(BuildTokenBudgetExceededPayload(budgetEx!), cancellationToken);
-                return;
+                return StatusCode(403, BuildTokenBudgetExceededPayload(budgetEx!));
             }
             // Default theo observed usage thực tế: co-create (outline + write) thường >13k token/lần.
             var minCoCreateTokens = _configuration.GetValue("AI:CoCreateMinRequiredTokens", 14000);
             var coCreateInsufficient = await TryRejectInsufficientEstimatedTokensAsync(authorUserId, minCoCreateTokens, cancellationToken).ConfigureAwait(false);
             if (coCreateInsufficient != null)
             {
-                Response.StatusCode = 403;
-                await Response.WriteAsJsonAsync(coCreateInsufficient is ObjectResult o ? o.Value : new
+                return StatusCode(403, coCreateInsufficient is ObjectResult o ? o.Value : new
                 {
                     message = "Số token AI còn lại không đủ để thực hiện đồng sáng tác. Vui lòng đợi đến kỳ cấp token tiếp theo."
-                }, cancellationToken);
-                return;
-            }
-
-            Response.ContentType = "text/event-stream";
-            Response.Headers.CacheControl = "no-cache";
-            Response.Headers.Connection = "keep-alive";
-            await Response.StartAsync(cancellationToken);
-
-            var jsonOptions = new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-            };
-
-            async Task WriteSseEventAsync(string eventType, object data, CancellationToken ct)
-            {
-                var json = JsonSerializer.Serialize(data, jsonOptions);
-                var payload = $"event: {eventType}\ndata: {json}\n\n";
-                var bytes = Encoding.UTF8.GetBytes(payload);
-                await Response.Body.WriteAsync(bytes, ct);
-                await Response.Body.FlushAsync(ct);
+                });
             }
 
             try
             {
                 var response = await _aiCoCreationService.CoCreateAsync(request, authorUserId, cancellationToken);
-                await WriteSseEventAsync("result", response, cancellationToken);
+                return Ok(response);
             }
             catch (OperationCanceledException)
             {
                 _logger.LogInformation("Co-create cancelled for StoryId={StoryId}", request.StoryId);
+                return StatusCode(499, new { message = "Yêu cầu đã bị hủy." });
             }
             catch (UnauthorizedAccessException ex)
             {
-                try { await WriteSseEventAsync("error", new { message = ex.Message }, cancellationToken); } catch { }
+                return StatusCode(403, new { message = ex.Message });
             }
             catch (InvalidOperationException ex)
             {
-                try { await WriteSseEventAsync("error", new { message = ex.Message }, cancellationToken); } catch { }
+                if (ex.Message.Contains("không tồn tại"))
+                    return NotFound(new { message = ex.Message });
+                return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "AI co-create failed for StoryId={StoryId}", request.StoryId);
-                var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi gọi dịch vụ AI. Vui lòng thử lại sau.";
-                try { await WriteSseEventAsync("error", new { message }, cancellationToken); } catch { }
+                var message = _env.IsDevelopment()
+                    ? (ex.InnerException?.Message ?? ex.Message)
+                    : "Lỗi khi gọi dịch vụ AI. Vui lòng thử lại sau.";
+                return StatusCode(500, new { message });
             }
         }
 
