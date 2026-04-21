@@ -1,4 +1,5 @@
 using AIStory.API.Controllers;
+using AIStory.API.Services;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -63,6 +64,7 @@ namespace AIStory.Tests
             var notifMock = new Mock<INotificationHubNotifier>(MockBehavior.Loose);
             guardrailMock = new Mock<IContentGuardrailService>(MockBehavior.Strict);
             commentPostMock = new Mock<IStoryCommentPostService>(MockBehavior.Strict);
+            var cloudinaryMock = new Mock<ICloudinaryImageService>(MockBehavior.Loose);
 
             guardrailMock
                 .Setup(x => x.CheckCommentBannedWordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -74,6 +76,7 @@ namespace AIStory.Tests
                 reportMock.Object,
                 notifMock.Object,
                 commentPostMock.Object,
+                cloudinaryMock.Object,
                 NullLogger<StoriesController>.Instance);
         }
 

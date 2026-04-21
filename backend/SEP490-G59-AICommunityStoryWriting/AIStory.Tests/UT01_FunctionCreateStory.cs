@@ -1,4 +1,5 @@
 ﻿using AIStory.API.Controllers;
+using AIStory.API.Services;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -624,6 +625,7 @@ namespace AIStory.Tests
             var reportMock = new Mock<IStoryReportService>();
             var notifMock = new Mock<INotificationHubNotifier>();
             var commentPostMock = new Mock<IStoryCommentPostService>(MockBehavior.Strict);
+            var cloudinaryMock = new Mock<ICloudinaryImageService>(MockBehavior.Loose);
             var logger = NullLogger<StoriesController>.Instance;
 
             var controller = new StoriesController(
@@ -632,6 +634,7 @@ namespace AIStory.Tests
                 reportMock.Object,
                 notifMock.Object,
                 commentPostMock.Object,
+                cloudinaryMock.Object,
                 logger);
 
             var claims = new List<Claim>

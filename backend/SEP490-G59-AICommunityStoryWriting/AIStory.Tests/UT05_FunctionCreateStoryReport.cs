@@ -1,4 +1,5 @@
 using AIStory.API.Controllers;
+using AIStory.API.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -50,6 +51,7 @@ namespace AIStory.Tests
             reportMock = new Mock<IStoryReportService>(MockBehavior.Strict);
             var notifMock = new Mock<INotificationHubNotifier>(MockBehavior.Loose);
             var commentPostMock = new Mock<IStoryCommentPostService>(MockBehavior.Loose);
+            var cloudinaryMock = new Mock<ICloudinaryImageService>(MockBehavior.Loose);
 
             return new StoriesController(
                 storyServiceMock.Object,
@@ -57,6 +59,7 @@ namespace AIStory.Tests
                 reportMock.Object,
                 notifMock.Object,
                 commentPostMock.Object,
+                cloudinaryMock.Object,
                 NullLogger<StoriesController>.Instance);
         }
 
