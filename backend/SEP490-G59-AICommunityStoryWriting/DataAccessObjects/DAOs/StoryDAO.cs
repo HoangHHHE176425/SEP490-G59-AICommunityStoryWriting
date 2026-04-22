@@ -188,5 +188,15 @@ namespace DataAccessObjects.DAOs
             story.updated_at = DateTime.UtcNow;
             context.SaveChanges();
         }
+
+        public static void SetStatus(Guid storyId, string status)
+        {
+            using var context = new StoryPlatformDbContext();
+            var story = context.stories.FirstOrDefault(s => s.id == storyId)
+                ?? throw new InvalidOperationException("Story not found.");
+            story.status = (status ?? string.Empty).Trim().ToUpperInvariant();
+            story.updated_at = DateTime.UtcNow;
+            context.SaveChanges();
+        }
     }
 }
