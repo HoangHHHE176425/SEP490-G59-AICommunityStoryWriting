@@ -16,11 +16,11 @@ using Xunit.Abstractions;
 
 namespace AIStory.Tests
 {
-    public class UT01_FunctionCreateStory
+    public class UT_CreateStory
     {
         private readonly ITestOutputHelper _output;
 
-        public UT01_FunctionCreateStory(ITestOutputHelper output) => _output = output;
+        public UT_CreateStory(ITestOutputHelper output) => _output = output;
 
         private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
         {

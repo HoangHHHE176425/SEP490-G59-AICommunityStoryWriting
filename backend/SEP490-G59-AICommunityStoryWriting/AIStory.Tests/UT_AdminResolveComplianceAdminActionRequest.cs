@@ -12,11 +12,11 @@ using Xunit.Abstractions;
 
 namespace AIStory.Tests
 {
-    public class UT07_FunctionAdminResolveComplianceAdminActionRequest
+    public class UT_AdminResolveComplianceAdminActionRequest
     {
         private readonly ITestOutputHelper _output;
 
-        public UT07_FunctionAdminResolveComplianceAdminActionRequest(ITestOutputHelper output) => _output = output;
+        public UT_AdminResolveComplianceAdminActionRequest(ITestOutputHelper output) => _output = output;
 
         private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
         {

@@ -10,11 +10,11 @@ using Xunit.Abstractions;
 
 namespace AIStory.Tests
 {
-    public class UT02_FunctionCreateChapter
+    public class UT_CreateChapter
     {
         private readonly ITestOutputHelper _output;
 
-        public UT02_FunctionCreateChapter(ITestOutputHelper output) => _output = output;
+        public UT_CreateChapter(ITestOutputHelper output) => _output = output;
 
         /// <summary>Ghi log có cấu trúc cho từng UTCID (hiển thị trong Test Explorer / dotnet test --logger).</summary>
         private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)

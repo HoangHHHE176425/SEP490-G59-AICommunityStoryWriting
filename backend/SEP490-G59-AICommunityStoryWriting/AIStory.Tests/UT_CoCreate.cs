@@ -16,7 +16,7 @@ using Xunit;
 
 namespace AIStory.Tests;
 
-public class UT11_FunctionCoCreate
+public class UT_CoCreate
 {
     private static readonly Guid StoryId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid AuthorId = Guid.Parse("22222222-2222-2222-2222-222222222222");

@@ -12,11 +12,11 @@ using Xunit.Abstractions;
 
 namespace AIStory.Tests
 {
-    public class UT04_FunctionApproveChapter
+    public class UT_ApproveChapter
     {
         private readonly ITestOutputHelper _output;
 
-        public UT04_FunctionApproveChapter(ITestOutputHelper output) => _output = output;
+        public UT_ApproveChapter(ITestOutputHelper output) => _output = output;
 
         private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
         {
