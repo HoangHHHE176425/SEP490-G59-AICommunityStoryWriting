@@ -45,16 +45,22 @@ public class StoryRagService : IStoryRagService
         var chunkCount = _vectorStore.GetChunkCount(storyId);
         var hasVectorIndex = _vectorStore.HasIndex(storyId);
         var available = IsRagAvailableForStory(storyId);
+        var provider = _configuration["VectorStore:Provider"] ?? "Local";
+        var faissBaseUrl = provider.Equals("FaissRemote", StringComparison.OrdinalIgnoreCase)
+            ? _configuration["FaissService:BaseUrl"]
+            : null;
         return new RagStatusResponse
         {
             StoryId = storyId,
             Available = available,
             EmbeddingConfigured = embeddingConfigured,
             ChunkCount = chunkCount,
-            HasVectorIndex = hasVectorIndex
+            HasVectorIndex = hasVectorIndex,
+            VectorStoreProvider = provider,
+            FaissServiceBaseUrl = faissBaseUrl
         };
     }
-
+    //Lấy các chương publish -> chia chunk -> embedding -> lưu vector + chapterId + content vào vector store.
     public async Task EnsureIndexedAsync(Guid storyId, Guid? afterChapterId, CancellationToken cancellationToken = default)
     {
         var config = EmbeddingHelper.GetEmbeddingConfig(_configuration);
@@ -157,7 +163,7 @@ public class StoryRagService : IStoryRagService
             return;
         await EnsureIndexedAsync(storyId, afterChapterId, cancellationToken);
     }
-
+    //Tìm kiếm top-k chunk liên quan nhất với query (embedding + cosine similarity), lấy content của chunk đó, ghép lại theo thứ tự chương để đưa vào prompt
     public async Task<string?> RetrieveContextAsync(Guid storyId, string query, int maxChars = 12000, int topK = 20, CancellationToken cancellationToken = default)
     {
         var config = EmbeddingHelper.GetEmbeddingConfig(_configuration);

@@ -137,10 +137,20 @@ namespace AIStory.API
             builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
             builder.Services.AddScoped<IContentGuardrailService, ContentGuardrailService>();
             builder.Services.AddScoped<IAIUsageLogRepository, AIUsageLogRepository>();
+            builder.Services.AddHttpClient("FaissVectorStore");
             builder.Services.AddScoped<IStoryCharacterMemoryRepository, StoryCharacterMemoryRepository>();
             builder.Services.AddScoped<IStoryEventMemoryRepository, StoryEventMemoryRepository>();
             builder.Services.AddScoped<IStoryStoryStateRepository, StoryStoryStateRepository>();
-            builder.Services.AddSingleton<IVectorStore, FaissVectorStore>();
+            var vectorStoreProvider = builder.Configuration["VectorStore:Provider"] ?? "Local";
+            // FAISS remote-only mode:
+            // Keep legacy local provider branch for reference, but disable it intentionally.
+            // if (vectorStoreProvider.Equals("FaissRemote", StringComparison.OrdinalIgnoreCase))
+            //     builder.Services.AddSingleton<IVectorStore, FaissRemoteVectorStore>();
+            // else
+            //     builder.Services.AddSingleton<IVectorStore, FaissVectorStore>();
+            if (!vectorStoreProvider.Equals("FaissRemote", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("VectorStore:Provider must be 'FaissRemote'. Local VectorStore is disabled.");
+            builder.Services.AddSingleton<IVectorStore, FaissRemoteVectorStore>();
             builder.Services.AddScoped<IStoryRagService, StoryRagService>();
             builder.Services.AddScoped<IStoryMemoryEngine, StoryMemoryEngine>();
             builder.Services.AddScoped<IChapterMemoryAnalysisService, ChapterMemoryAnalysisService>();

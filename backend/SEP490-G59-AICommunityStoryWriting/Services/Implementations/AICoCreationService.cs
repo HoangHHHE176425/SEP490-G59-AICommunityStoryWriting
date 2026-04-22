@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
 using Repositories;
 using Repositories.Interfaces;
@@ -89,6 +90,7 @@ Quy tắc bắt buộc:
     private readonly IChapterCheckService _chapterCheck;
     private readonly IAIUsageLogRepository _aiUsageLogRepository;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<AICoCreationService> _logger;
 
     public AICoCreationService(
         IStoryRepository storyRepository,
@@ -98,7 +100,8 @@ Quy tắc bắt buộc:
         IContentGuardrailService guardrail,
         IChapterCheckService chapterCheck,
         IAIUsageLogRepository aiUsageLogRepository,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ILogger<AICoCreationService> logger)
     {
         _storyRepository = storyRepository;
         _chapterRepository = chapterRepository;
@@ -108,6 +111,7 @@ Quy tắc bắt buộc:
         _chapterCheck = chapterCheck;
         _aiUsageLogRepository = aiUsageLogRepository;
         _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task<CoCreationResponse> CoCreateAsync(
@@ -472,7 +476,12 @@ Quy tắc:
             new UserChatMessage(userPrompt)
         };
         var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentWriter);
+        var sw = Stopwatch.StartNew();
         var completion = await client.CompleteChatAsync(messages, options, ct);
+        sw.Stop();
+        _logger.LogInformation(
+            "AI co-create LLM step=Correct completed in {ElapsedMs}ms.",
+            sw.ElapsedMilliseconds);
         var c = completion.Value;
         var text = c.Content?.Count > 0 ? c.Content[0].Text : null;
         if (string.IsNullOrWhiteSpace(text))
@@ -507,6 +516,11 @@ Quy tắc:
             var gr = await _guardrail.CheckAsync(storyId, draft, ct);
             sw.Stop();
             durations.Add(new AgentDuration { Step = guardStepName, DurationMs = sw.ElapsedMilliseconds });
+            _logger.LogInformation(
+                "AI co-create check step=Guardrail completed in {ElapsedMs}ms. StoryId={StoryId}, Passed={Passed}",
+                sw.ElapsedMilliseconds,
+                storyId,
+                gr.Passed);
             var ok = gr.Passed;
             var fb = ok ? null : string.Join(" ", gr.Violations.Select(v => $"[{v.Type}] {v.Message}"));
             return (draft, ok, fb, 0);
@@ -521,6 +535,12 @@ Quy tắc:
             var gr = await _guardrail.CheckAsync(storyId, draft, ct);
             swG.Stop();
             durations.Add(new AgentDuration { Step = $"{prefix}_Banned", DurationMs = swG.ElapsedMilliseconds });
+            _logger.LogInformation(
+                "AI co-create check step=Guardrail round={Round} completed in {ElapsedMs}ms. StoryId={StoryId}, Passed={Passed}",
+                round + 1,
+                swG.ElapsedMilliseconds,
+                storyId,
+                gr.Passed);
 
             var swS = Stopwatch.StartNew();
             var spell = await _chapterCheck.CheckSpellingOnlyAsync(
@@ -529,6 +549,13 @@ Quy tắc:
                 ct);
             swS.Stop();
             durations.Add(new AgentDuration { Step = $"{prefix}_Spell", DurationMs = swS.ElapsedMilliseconds });
+            _logger.LogInformation(
+                "AI co-create check step=Spelling round={Round} completed in {ElapsedMs}ms. StoryId={StoryId}, Passed={Passed}, Issues={IssueCount}",
+                round + 1,
+                swS.ElapsedMilliseconds,
+                storyId,
+                spell.Passed,
+                spell.SpellingIssues.Count);
 
             if (gr.Passed && spell.Passed)
             {
@@ -553,6 +580,11 @@ Quy tắc:
         var grFinal = await _guardrail.CheckAsync(storyId, draft, ct);
         swGf.Stop();
         durations.Add(new AgentDuration { Step = $"{phaseLabel}SelfCorrect_Final_Banned", DurationMs = swGf.ElapsedMilliseconds });
+        _logger.LogInformation(
+            "AI co-create check step=Guardrail final completed in {ElapsedMs}ms. StoryId={StoryId}, Passed={Passed}",
+            swGf.ElapsedMilliseconds,
+            storyId,
+            grFinal.Passed);
 
         var swSf = Stopwatch.StartNew();
         var spellFinal = await _chapterCheck.CheckSpellingOnlyAsync(
@@ -561,6 +593,12 @@ Quy tắc:
             ct);
         swSf.Stop();
         durations.Add(new AgentDuration { Step = $"{phaseLabel}SelfCorrect_Final_Spell", DurationMs = swSf.ElapsedMilliseconds });
+        _logger.LogInformation(
+            "AI co-create check step=Spelling final completed in {ElapsedMs}ms. StoryId={StoryId}, Passed={Passed}, Issues={IssueCount}",
+            swSf.ElapsedMilliseconds,
+            storyId,
+            spellFinal.Passed,
+            spellFinal.SpellingIssues.Count);
 
         var okFinal = grFinal.Passed && spellFinal.Passed;
         string? review = null;
@@ -597,7 +635,13 @@ Quy tắc:
             new UserChatMessage(userPrompt)
         };
         var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentPlanner);
+        var sw = Stopwatch.StartNew();
         var completion = await client.CompleteChatAsync(messages, options);
+        sw.Stop();
+        _logger.LogInformation(
+            "AI co-create LLM step=Outline completed in {ElapsedMs}ms. StoryId={StoryId}",
+            sw.ElapsedMilliseconds,
+            story.id);
         var c = completion.Value;
         var text = c.Content?.Count > 0 ? c.Content[0].Text : null;
         if (string.IsNullOrWhiteSpace(text))
@@ -629,7 +673,12 @@ Quy tắc:
             new UserChatMessage(userPrompt)
         };
         var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentWriter);
+        var sw = Stopwatch.StartNew();
         var completion = await client.CompleteChatAsync(messages, options);
+        sw.Stop();
+        _logger.LogInformation(
+            "AI co-create LLM step=Expand completed in {ElapsedMs}ms.",
+            sw.ElapsedMilliseconds);
         var c = completion.Value;
         var text = c.Content?.Count > 0 ? c.Content[0].Text : null;
         if (string.IsNullOrWhiteSpace(text))
@@ -980,7 +1029,12 @@ Chỉ trả về nội dung truyện (draft).
             new UserChatMessage(userPrompt)
         };
         var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentWriter);
+        var sw = Stopwatch.StartNew();
         var completion = await client.CompleteChatAsync(messages, options);
+        sw.Stop();
+        _logger.LogInformation(
+            "AI co-create LLM step=Write completed in {ElapsedMs}ms.",
+            sw.ElapsedMilliseconds);
         var c = completion.Value;
         var text = c.Content?.Count > 0 ? c.Content[0].Text : null;
         if (string.IsNullOrWhiteSpace(text))

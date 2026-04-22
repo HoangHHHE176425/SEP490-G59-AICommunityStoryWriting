@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Sparkles, Settings, X, Lock, Unlock, Coins, Copy, Check } from 'lucide-react';
 import { useToast } from './Toast';
-import { indexRag, suggestNextChapter, coCreate, pickAiContextWarning } from '../../../api/ai/aiApi';
+import { indexRagWithOptions, suggestNextChapter, coCreate, pickAiContextWarning } from '../../../api/ai/aiApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { translateCoCreateOutlineLabels } from '../../../utils/coCreateOutlineLabelsVi';
 import { RichTextEditor } from '../../common/RichTextEditor';
@@ -276,7 +276,7 @@ export function ChapterEditor({
             setShowSuggestPopup(true);
             setSuggestLoading(true);
             try {
-                await indexRag(storyId);
+                await indexRagWithOptions(storyId, { throwOnError: true });
                 const data = await suggestNextChapter(storyId, null, null, chapterIdForAi);
                 const list = data?.suggestions ?? data?.Suggestions ?? [];
                 setSuggestions(Array.isArray(list) ? list : []);

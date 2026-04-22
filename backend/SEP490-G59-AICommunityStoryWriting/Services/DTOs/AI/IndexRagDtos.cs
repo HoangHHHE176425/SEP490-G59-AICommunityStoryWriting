@@ -20,4 +20,8 @@ public class RagStatusResponse
     public int ChunkCount { get; set; }
     /// <summary>Có file/index vector (FAISS) cho truyện này. False nếu không dùng FAISS hoặc chưa index.</summary>
     public bool HasVectorIndex { get; set; }
+    /// <summary>Provider vector store đang chạy (Local hoặc FaissRemote).</summary>
+    public string VectorStoreProvider { get; set; } = "Local";
+    /// <summary>BaseUrl FAISS service khi dùng remote (null nếu provider local).</summary>
+    public string? FaissServiceBaseUrl { get; set; }
 }

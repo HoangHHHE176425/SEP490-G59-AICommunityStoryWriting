@@ -40,7 +40,7 @@ public class FaissVectorStore : IVectorStore
         if (File.Exists(path))
             File.Delete(path);
     }
-
+    //Ghi dữ liệu vector vào xuống file .faiss.bin 
     public void AddVectors(Guid storyId, IReadOnlyList<Guid> chunkIds, IReadOnlyList<Guid> chapterIds, IReadOnlyList<float[]> vectors, IReadOnlyList<string> contents, IReadOnlyList<Guid> indexedChapterIds)
     {
         if (chunkIds.Count == 0 || chunkIds.Count != vectors.Count || chunkIds.Count != contents.Count || chunkIds.Count != chapterIds.Count)
@@ -123,7 +123,7 @@ public class FaissVectorStore : IVectorStore
             return 0;
         }
     }
-
+    //lấy dữ liệu của chunkId, chapterId, content từ file .faiss.bin theo storyId và chunkIds
     public IReadOnlyList<(Guid ChunkId, Guid ChapterId, string Content)> GetChunkInfos(Guid storyId, IReadOnlyList<Guid> chunkIds)
     {
         if (chunkIds == null || chunkIds.Count == 0)
@@ -164,7 +164,7 @@ public class FaissVectorStore : IVectorStore
             return c;
         return LoadIntoCache(storyId);
     }
-
+    //Load dữ liệu vector từ file .faiss.bin vào cache 
     private CachedStory LoadIntoCache(Guid storyId)
     {
         var path = GetFilePath(storyId);

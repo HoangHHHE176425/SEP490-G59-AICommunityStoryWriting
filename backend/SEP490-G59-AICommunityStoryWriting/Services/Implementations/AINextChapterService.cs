@@ -1,9 +1,11 @@
 using System.Text;
 using System.Text.Json;
 using System.ClientModel;
+using System.Diagnostics;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
 using Repositories;
 using Repositories.Interfaces;
@@ -24,6 +26,7 @@ namespace Services.Implementations
         private readonly IAIUsageLogRepository _aiUsageLogRepository;
         private readonly IConfiguration _configuration;
         private readonly IUserLookup _userLookup;
+        private readonly ILogger<AINextChapterService> _logger;
 
         public AINextChapterService(
             IStoryRepository storyRepository,
@@ -32,7 +35,8 @@ namespace Services.Implementations
             IStoryMemoryEngine memoryEngine,
             IAIUsageLogRepository aiUsageLogRepository,
             IConfiguration configuration,
-            IUserLookup userLookup)
+            IUserLookup userLookup,
+            ILogger<AINextChapterService> logger)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
@@ -41,6 +45,7 @@ namespace Services.Implementations
             _aiUsageLogRepository = aiUsageLogRepository;
             _configuration = configuration;
             _userLookup = userLookup;
+            _logger = logger;
         }
 
         public async Task<SuggestNextChapterResponse> SuggestNextChapterAsync(
@@ -104,12 +109,28 @@ namespace Services.Implementations
             var cappedOutputTokens = (int)Math.Max(64, balanceNow - reservedInputTokens);
             var options = AIClientHelper.GetCompletionOptions(_configuration, null, cappedOutputTokens);
             ChatCompletion completion;
+            var swLlm = Stopwatch.StartNew();
             try
             {
                 completion = await client.CompleteChatAsync(messages, options);
+                swLlm.Stop();
+                _logger.LogInformation(
+                    "AI suggest LLM completed in {ElapsedMs}ms. StoryId={StoryId}, Model={Model}, Provider={Provider}",
+                    swLlm.ElapsedMilliseconds,
+                    request.StoryId,
+                    model,
+                    provider);
             }
             catch (Exception ex)
             {
+                swLlm.Stop();
+                _logger.LogWarning(
+                    ex,
+                    "AI suggest LLM failed after {ElapsedMs}ms. StoryId={StoryId}, Model={Model}, Provider={Provider}",
+                    swLlm.ElapsedMilliseconds,
+                    request.StoryId,
+                    model,
+                    provider);
                 throw new InvalidOperationException(
                     "Không thể kết nối dịch vụ AI. Vui lòng thử lại sau hoặc kiểm tra cấu hình API key.",
                     ex);

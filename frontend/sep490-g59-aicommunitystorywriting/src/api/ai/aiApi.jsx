@@ -15,12 +15,35 @@ export function pickAiContextWarning(payload) {
  * @param {string} storyId - ID truyện (Guid)
  */
 export async function indexRag(storyId) {
+    return indexRagWithOptions(storyId, { throwOnError: false });
+}
+
+/**
+ * Index RAG cho truyện (embedding các chương) với tùy chọn kiểm soát lỗi.
+ * @param {string} storyId - ID truyện (Guid)
+ * @param {{ throwOnError?: boolean }} options
+ */
+export async function indexRagWithOptions(storyId, options = {}) {
     if (!storyId) return;
+    const throwOnError = Boolean(options?.throwOnError);
     try {
-        await axiosInstance.post("ai/index-rag", { storyId });
-    } catch {
-        // Bỏ qua lỗi (429, 500): suggest-next-chapter vẫn chạy với Story Context
+        const response = await axiosInstance.post("ai/index-rag", { storyId });
+        return response?.data ?? null;
+    } catch (err) {
+        if (throwOnError) throw err;
+        // Legacy behavior: bỏ qua lỗi để luồng AI có thể fallback context nếu BE hỗ trợ.
+        return null;
     }
+}
+
+/**
+ * Lấy trạng thái RAG hiện tại của truyện.
+ * @param {string} storyId - ID truyện (Guid)
+ */
+export async function getRagStatus(storyId) {
+    if (!storyId) throw new Error("storyId là bắt buộc.");
+    const response = await axiosInstance.get(`ai/rag-status?storyId=${encodeURIComponent(storyId)}`);
+    return response?.data ?? null;
 }
 
 /**

@@ -4,7 +4,7 @@ import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
 import { RichTextEditor } from '../../components/common/RichTextEditor';
-import { indexRag, suggestNextChapter, coCreate, checkBannedWords, checkChapterSpelling, compareChapterPreview, pickAiContextWarning } from '../../api/ai/aiApi';
+import { indexRagWithOptions, suggestNextChapter, coCreate, checkBannedWords, checkChapterSpelling, compareChapterPreview, pickAiContextWarning } from '../../api/ai/aiApi';
 import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 import { refresh as refreshAuth } from '../../api/auth/authApi';
 import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
@@ -590,8 +590,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         setSuggestWarning(null);
         setShowSuggestPopup(true);
         try {
-            // Gọi index-rag nền (không chờ). Gợi ý chạy ngay; BE dùng RAG nếu đã index, không thì dùng Story Context.
-            indexRag(storyId);
+            // E2E local testing: bắt buộc index-rag thành công trước khi gọi suggest.
+            await indexRagWithOptions(storyId, { throwOnError: true });
             const orderIdx = (Number(chapterData.number) || 1) - 1;
             let afterChapterId = null;
             if (orderIdx > 0) {
@@ -691,13 +691,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         setCoCreateContextWarning(null);
         setCoCreateLoading(true);
         try {
-            // Chủ động yêu cầu BE index RAG trước khi đồng sáng tác.
-            // Nếu index lỗi tạm thời, vẫn cho phép gọi co-create để BE tự trả thông báo phù hợp.
-            try {
-                await indexRag(storyId);
-            } catch {
-                // best-effort: không chặn luồng co-create
-            }
+            // E2E local testing: bắt buộc index-rag thành công trước khi gọi co-create.
+            await indexRagWithOptions(storyId, { throwOnError: true });
             const chapterOrderIndex = (Number(chapterData.number) || 1) - 1;
             const chapterIdForAi = chapter?.id ?? chapter?.Id ?? null;
             const data = await coCreate(storyId, idea || null, { chapterOrderIndex, chapterId: chapterIdForAi });
