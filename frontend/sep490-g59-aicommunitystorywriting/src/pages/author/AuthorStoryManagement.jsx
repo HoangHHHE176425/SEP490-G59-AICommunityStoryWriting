@@ -416,8 +416,9 @@ export function AuthorStoryManagement({ onBack }) {
                             // Giữ lại flag FE để chặn cập nhật trạng thái tiến độ khi có chương đang chờ duyệt.
                             mapped._hasPendingReviewChapter = item._hasPendingReviewChapter === true;
                             if (mapped.isComplianceHidden) {
+                                const isPermanentHidden = String(item.status ?? item.Status ?? '').toUpperCase() === 'HIDDEN';
                                 mapped.status = 'hidden';
-                                mapped.publishStatus = 'Đã ẩn tạm thời';
+                                mapped.publishStatus = isPermanentHidden ? 'Đã ẩn vĩnh viễn' : 'Đã ẩn tạm thời';
                                 return mapped;
                             }
                             const hasPublished = item._hasPublishedChapter === true;
@@ -1996,8 +1997,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </div>
                                                 )}
                                             </div>
-                                        )
-                                    })}
+                                    )})}
                                 </div>
                                 {authorAiBudgetError && (
                                     <p style={{ margin: 0, marginTop: '-0.5rem', marginBottom: '1rem', fontSize: '0.75rem', color: '#dc2626' }}>
@@ -2292,6 +2292,9 @@ export function AuthorStoryManagement({ onBack }) {
                                                                 {story.lastUpdate}
                                                             </div>
                                                             {story.isComplianceHidden ? (
+                                                                (() => {
+                                                                    const isPermanentlyHidden = String(story.status ?? '').toLowerCase() === 'hidden';
+                                                                    return (
                                                                 <div
                                                                     style={{
                                                                         marginTop: '0.5rem',
@@ -2304,8 +2307,12 @@ export function AuthorStoryManagement({ onBack }) {
                                                                         fontWeight: 600,
                                                                     }}
                                                                 >
-                                                                    Truyện này đang bị tạm ẩn để điều tra và xử lý vi phạm.
+                                                                    {isPermanentlyHidden
+                                                                        ? 'Truyện này đã bị ẩn vĩnh viễn do vi phạm.'
+                                                                        : 'Truyện này đang bị tạm ẩn để điều tra và xử lý vi phạm.'}
                                                                 </div>
+                                                                    );
+                                                                })()
                                                             ) : null}
                                                         </div>
                                                         <div style={{
@@ -3220,12 +3227,20 @@ export function AuthorStoryManagement({ onBack }) {
                                         marginBottom: '1.25rem',
                                     }}
                                     >
-                                        <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
-                                    </div>
-                                    <div>
-                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 30% cho tác giả, 70% nền tảng</div>
-                                        <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
-                                            Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>70%</b> phí.
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                            <div style={{
+                                                width: '40px', height: '40px', borderRadius: '12px', backgroundColor: '#dcfce7',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                            }}
+                                            >
+                                                <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
+                                            </div>
+                                            <div>
+                                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 70% cho tác giả, 30% nền tảng</div>
+                                                <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
+                                                    Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>30%</b> phí.
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
 
