@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Eye, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, ChevronDown, ChevronRight, GitBranch, Percent } from 'lucide-react';
+import { Plus, Eye, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, GitBranch, Percent } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason, getChapterVersions, deleteChapterVersion, submitChapterVersion, unsubmitChapterVersion } from '../../api/chapter/chapterApi';
@@ -945,7 +945,7 @@ export function ChapterListManager({
                                                     if (!isExpanded) e.currentTarget.style.backgroundColor = '#ffffff';
                                                 }}
                                             >
-                                                {/* Order + Chevron (click to expand) */}
+                                                {/* Order (click to expand) */}
                                                 <div
                                                     role="button"
                                                     tabIndex={0}
@@ -959,11 +959,6 @@ export function ChapterListManager({
                                                         outline: 'none',
                                                     }}
                                                 >
-                                                    {isExpanded ? (
-                                                        <ChevronDown size={18} color="#6366f1" style={{ flexShrink: 0 }} />
-                                                    ) : (
-                                                        <ChevronRight size={18} color="#94a3b8" style={{ flexShrink: 0 }} />
-                                                    )}
                                                     <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#334155' }}>
                                                         Chương {chapter.number}
                                                     </span>
@@ -1214,7 +1209,7 @@ export function ChapterListManager({
                                             </div>
 
                                             {/* Panel version khi mở rộng — đồng bộ màu hệ thống, có nút Chỉnh sửa / Xóa / Xuất bản */}
-                                            {isExpanded && (
+                                            {false && isExpanded && (
                                                 <div
                                                     onClick={(e) => { e.stopPropagation(); }}
                                                     role="presentation"
