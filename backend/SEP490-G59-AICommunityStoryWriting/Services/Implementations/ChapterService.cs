@@ -91,6 +91,7 @@ namespace Services.Implementations
             if (request.Id == Guid.Empty)
                 throw new ArgumentException("Id must be a non-empty Guid (do not leave empty).");
 
+            EnsureStoryNotComplianceHidden(story, "tạo chương");
             if (story.author_id is Guid aid && _userLookup.IsAuthorWritingSuspended(aid))
                 throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
             EnsureStoryProgressAllowsChapterWrite(story, "tạo chương");
@@ -433,6 +434,7 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
             var storyForUpdate = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryNotComplianceHidden(storyForUpdate, "chỉnh sửa chương");
             EnsureStoryAuthorNotWritingSuspended(storyForUpdate);
             EnsureStoryProgressAllowsChapterWrite(storyForUpdate, "chỉnh sửa chương");
 
@@ -623,6 +625,7 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
             var storyForDelete = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryNotComplianceHidden(storyForDelete, "xóa chương");
             EnsureStoryAuthorNotWritingSuspended(storyForDelete);
             EnsureStoryProgressAllowsChapterWrite(storyForDelete, "xóa chương");
 
@@ -690,6 +693,7 @@ namespace Services.Implementations
                 return false;
 
             var story = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryNotComplianceHidden(story, "gửi xuất bản chương");
             if (story?.author_id is Guid authorId && _userLookup.IsAuthorWritingSuspended(authorId))
                 throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
             EnsureStoryProgressAllowsChapterWrite(story, "gửi xuất bản chương");
@@ -720,6 +724,7 @@ namespace Services.Implementations
                 return false;
 
             var storyUnpublish = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryNotComplianceHidden(storyUnpublish, "hủy xuất bản chương");
             EnsureStoryAuthorNotWritingSuspended(storyUnpublish);
 
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, id))
@@ -747,6 +752,7 @@ namespace Services.Implementations
                 return false;
 
             var storyReorder = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryNotComplianceHidden(storyReorder, "đổi thứ tự chương");
             EnsureStoryAuthorNotWritingSuspended(storyReorder);
 
             var storyId = chapter.story_id ?? Guid.Empty;
@@ -810,6 +816,12 @@ namespace Services.Implementations
             var progress = (story?.story_progress_status ?? "ONGOING").Trim().ToUpperInvariant();
             if (progress == "HIATUS" || progress == "COMPLETED")
                 throw new InvalidOperationException($"Truyện đang ở trạng thái {(progress == "COMPLETED" ? "Hoàn thành" : "Tạm dừng")}, không thể {actionVi}.");
+        }
+
+        private static void EnsureStoryNotComplianceHidden(stories? story, string actionVi)
+        {
+            if (story?.compliance_hidden == true)
+                throw new InvalidOperationException($"Truyện đang bị ẩn vĩnh viễn nên không thể {actionVi}.");
         }
 
         /// <summary>Hủy xuất bản phải theo thứ tự ngược: chỉ được hủy chương N nếu không còn chương nào có thứ tự > N đang xuất bản hoặc chờ duyệt.</summary>
