@@ -1,4 +1,5 @@
 using AIStory.API.Controllers;
+using AIStory.API.Services;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -13,11 +14,11 @@ using Xunit.Abstractions;
 
 namespace AIStory.Tests
 {
-    public class UT03_FunctionCreateCommentStory
+    public class UT_CreateCommentStory
     {
         private readonly ITestOutputHelper _output;
 
-        public UT03_FunctionCreateCommentStory(ITestOutputHelper output) => _output = output;
+        public UT_CreateCommentStory(ITestOutputHelper output) => _output = output;
 
         private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
         {
@@ -28,7 +29,7 @@ namespace AIStory.Tests
                 _output.WriteLine("  · " + line);
         }
 
-        /// <summary>Giống <see cref="UT01_FunctionCreateStory.CreateSut"/> — unit test nghiệp vụ qua service + Moq lookup/command.</summary>
+        /// <summary>Giống <see cref="UT_CreateStory.CreateSut"/> — unit test nghiệp vụ qua service + Moq lookup/command.</summary>
         private static StoryCommentPostService CreatePostServiceSut(
             out Mock<IStoryLookup> storyLookupMock,
             out Mock<IUserLookup> userLookupMock,
@@ -63,6 +64,7 @@ namespace AIStory.Tests
             var notifMock = new Mock<INotificationHubNotifier>(MockBehavior.Loose);
             guardrailMock = new Mock<IContentGuardrailService>(MockBehavior.Strict);
             commentPostMock = new Mock<IStoryCommentPostService>(MockBehavior.Strict);
+            var cloudinaryMock = new Mock<ICloudinaryImageService>(MockBehavior.Loose);
 
             guardrailMock
                 .Setup(x => x.CheckCommentBannedWordsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -74,6 +76,7 @@ namespace AIStory.Tests
                 reportMock.Object,
                 notifMock.Object,
                 commentPostMock.Object,
+                cloudinaryMock.Object,
                 NullLogger<StoriesController>.Instance);
         }
 
@@ -237,7 +240,7 @@ namespace AIStory.Tests
         /// UTCID04 — spec: StoryId hợp lệ, content hợp lệ, ParentId null; UserId không tồn tại trong hệ thống → Fail, không lưu;
         /// log kiểu &quot;User không tồn tại&quot; (không assert đúng từng chữ message).
         /// Mô phỏng &quot;user không tồn tại&quot;: <c>userId</c> là Guid bất kỳ; preconditions nghiệp vụ (đã đọc chapter) vẫn <c>true</c> qua mock —
-        /// tương tự <see cref="UT01_FunctionCreateStory.UTCID14_CreateStory_Fails_WhenCallerIsNotRegisteredAuthor"/> (Exists = false).
+        /// tương tự <see cref="UT_CreateStory.UTCID14_CreateStory_Fails_WhenCallerIsNotRegisteredAuthor"/> (Exists = false).
         /// Product: <see cref="StoryCommentPostService.AddAsync"/> gọi <see cref="IUserLookup.Exists"/> sau khi story hợp lệ; <c>false</c> → <see cref="StoryCommentPostStatus.Rejected"/>, không <c>AddStoryComment</c>.
         /// </summary>
         [Fact]

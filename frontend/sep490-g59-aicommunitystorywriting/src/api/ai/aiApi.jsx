@@ -49,55 +49,8 @@ export async function suggestNextChapter(storyId, afterChapterId = null, prompt 
 }
 
 /**
- * Parse body Server-Sent Events từ POST /ai/co-create (BE trả text/event-stream: result | error).
- */
-function parseCoCreateSseResponse(rawText) {
-    if (rawText == null || typeof rawText !== "string") {
-        throw new Error("Phản hồi AI không hợp lệ (rỗng).");
-    }
-    const blocks = rawText
-        .split(/\n\n+/)
-        .map((b) => b.trim())
-        .filter(Boolean);
-    let lastError = null;
-    let lastResult = null;
-    for (const block of blocks) {
-        let eventType = "message";
-        const dataLines = [];
-        for (const line of block.split("\n")) {
-            if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-            } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
-            }
-        }
-        const dataStr = dataLines.join("");
-        if (!dataStr) continue;
-        try {
-            const data = JSON.parse(dataStr);
-            if (eventType === "error") lastError = data;
-            if (eventType === "result") lastResult = data;
-        } catch {
-            /* bỏ qua chunk không parse được */
-        }
-    }
-    if (lastError) {
-        const msg = lastError.message ?? lastError.Message ?? "Lỗi khi gọi AI hỗ trợ.";
-        const err = new Error(typeof msg === "string" ? msg : JSON.stringify(lastError));
-        err.response = { status: 400, data: lastError };
-        throw err;
-    }
-    if (!lastResult) {
-        throw new Error(
-            "Không nhận được kết quả từ AI (thiếu sự kiện result). Kiểm tra cấu hình AI hoặc thử lại sau."
-        );
-    }
-    return lastResult;
-}
-
-/**
  * Đồng sáng tác: ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → Guardrail → Agent 3 (kiểm duyệt). Check token từ BE.
- * BE trả về SSE (không phải JSON thuần) — axios phải đọc text rồi parse sự kiện `result`.
+ * BE trả về JSON thường (không dùng SSE).
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null|undefined} authorIdea - Ý tưởng của tác giả (có thể null khi BE cho phép auto)
  * @param {{ chapterOrderIndex?: number, chapterId?: string }} [options] - order_index/chapterId chương đang soạn
@@ -119,53 +72,8 @@ export async function coCreate(storyId, authorIdea, options = {}) {
     if (rawChapterId != null && String(rawChapterId).trim() !== "") {
         payload.chapterId = String(rawChapterId).trim();
     }
-    const response = await axiosInstance.post(
-        "ai/co-create",
-        payload,
-        {
-            responseType: "text",
-            validateStatus: (status) => status < 600,
-        }
-    );
-
-    const body = response.data;
-    const tryJsonMessage = () => {
-        try {
-            const j = typeof body === "string" ? JSON.parse(body) : body;
-            return j?.message ?? j?.Message ?? null;
-        } catch {
-            return null;
-        }
-    };
-
-    if (response.status === 401) {
-        const msg = tryJsonMessage() || "Không xác định được người dùng. Vui lòng đăng nhập lại.";
-        const err = new Error(msg);
-        err.response = { status: 401, data: { message: msg } };
-        throw err;
-    }
-    if (response.status === 403) {
-        const msg = tryJsonMessage() || "Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo.";
-        const err = new Error(msg);
-        err.response = { status: 403, data: { message: msg } };
-        throw err;
-    }
-    if (response.status === 400) {
-        const msg = tryJsonMessage() || "Yêu cầu không hợp lệ.";
-        const err = new Error(msg);
-        err.response = { status: 400, data: { message: msg } };
-        throw err;
-    }
-    if (response.status >= 400) {
-        const msg =
-            tryJsonMessage() ||
-            (typeof body === "string" && body.length < 500 ? body : `Lỗi ${response.status}`);
-        const err = new Error(msg);
-        err.response = { status: response.status, data: { message: msg } };
-        throw err;
-    }
-
-    return parseCoCreateSseResponse(typeof body === "string" ? body : String(body ?? ""));
+    const response = await axiosInstance.post("ai/co-create", payload);
+    return response.data;
 }
 
 /**
