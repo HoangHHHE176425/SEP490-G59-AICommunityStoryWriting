@@ -32,6 +32,8 @@ namespace Services.DTOs.Stories
         public DateTime? UpdatedAt { get; set; }
         /// <summary>Thời gian cập nhật gần nhất (max giữa story.updated_at và chapter.updated_at mới nhất).</summary>
         public DateTime? LatestUpdatedAt { get; set; }
+        /// <summary>True khi truyện đang bị ẩn vĩnh viễn bởi compliance.</summary>
+        public bool ComplianceHidden { get; set; }
 
         /// <summary>Moderator đã từng để quá hạn với truyện này — không được nhận duyệt lại.</summary>
         public bool BlockedFromClaimDueToPriorDeadlineForfeit { get; set; }
