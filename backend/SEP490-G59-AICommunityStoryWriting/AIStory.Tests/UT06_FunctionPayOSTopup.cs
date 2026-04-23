@@ -223,6 +223,85 @@ public class UT06_FunctionPayOSTopup
     }
 
     [Fact]
+    public async Task UTCID07_CreatePayOSPayment_PersistsFailedOrder_WhenPayOSThrows()
+    {
+        LogUtcContext("UTCID07",
+            "Abnormal path: PayOS CreatePaymentLinkAsync ném exception.",
+            "Precondition: package hợp lệ, mock PayOS throw.",
+            "Kỳ vọng: throw ra ngoài; DB có đúng 1 coin_order FAILED + gateway_response_code ghi lỗi; không có PENDING mồ côi.");
+
+        using var scope = CoinPaymentTestHelpers.CreateScope();
+        var userId = Guid.NewGuid();
+        var package = CoinPaymentTestHelpers.CreatePackage(isActive: true);
+        CoinPaymentTestHelpers.Seed(scope.DbContext, package);
+
+        scope.PayOsMock
+            .Setup(x => x.CreatePaymentLinkAsync(
+                It.IsAny<long>(),
+                It.IsAny<decimal>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("PayOS error 503: maintenance"));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Sut.CreatePayOSPaymentAsync(userId, new CreatePayOSPaymentRequestDto
+        {
+            PackageId = package.id,
+            CancelUrl = "https://app.test/cancel",
+            ReturnUrl = "https://app.test/return"
+        }));
+
+        Assert.Contains("503", ex.Message);
+        var failed = scope.DbContext.coin_orders.Single();
+        Assert.Equal("FAILED", failed.status);
+        Assert.Null(failed.gateway_transaction_id);
+        Assert.NotNull(failed.gateway_response_code);
+        Assert.Contains("503", failed.gateway_response_code!);
+        LogActualMessage(ex.Message);
+    }
+
+    [Fact]
+    public async Task UTCID08_CreatePayOSPayment_PersistsFailedOrder_WhenPayOSCodeRejected()
+    {
+        LogUtcContext("UTCID08",
+            "Abnormal path: PayOS trả HTTP 200 nhưng code != 00.",
+            "Precondition: mock trả CreatePaymentLinkResult với Code = 99.",
+            "Kỳ vọng: throw; DB có coin_order FAILED.");
+
+        using var scope = CoinPaymentTestHelpers.CreateScope();
+        var userId = Guid.NewGuid();
+        var package = CoinPaymentTestHelpers.CreatePackage(isActive: true);
+        CoinPaymentTestHelpers.Seed(scope.DbContext, package);
+
+        scope.PayOsMock
+            .Setup(x => x.CreatePaymentLinkAsync(
+                It.IsAny<long>(),
+                It.IsAny<decimal>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PayOSClient.CreatePaymentLinkResult("plink_x", "https://payos.test/checkout/x", "{}", "99"));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Sut.CreatePayOSPaymentAsync(userId, new CreatePayOSPaymentRequestDto
+        {
+            PackageId = package.id,
+            CancelUrl = "https://app.test/cancel",
+            ReturnUrl = "https://app.test/return"
+        }));
+
+        Assert.Contains("99", ex.Message);
+        var failed = scope.DbContext.coin_orders.Single();
+        Assert.Equal("FAILED", failed.status);
+        Assert.Null(failed.gateway_transaction_id);
+        Assert.Contains("99", failed.gateway_response_code ?? string.Empty);
+        LogActualMessage(ex.Message);
+    }
+
+    [Fact]
     public async Task UTCID01_SyncMyPayOSOrder_Fails_WhenOrderNotFound()
     {
         LogUtcContext("UTCID01",
