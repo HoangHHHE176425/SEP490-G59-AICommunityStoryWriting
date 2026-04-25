@@ -31,6 +31,26 @@ namespace AIStory.Tests
                 _output.WriteLine("  · " + line);
         }
 
+        /// <summary>In-memory <c>List&lt;stories&gt;</c> do mock <c>IStoryRepository.Add</c> ghi vào — xem sau khi gọi <c>CreateSut</c> + <c>StoryService.Create</c> (cần <c>--logger \"console;verbosity=detailed\"</c> trên CLI).</summary>
+        private void LogStoryStore(string label, IReadOnlyList<stories> store)
+        {
+            _output.WriteLine("");
+            _output.WriteLine($"======== {label} — storyStore ({store.Count} phần tử) ========");
+            if (store.Count == 0)
+            {
+                _output.WriteLine("  (rỗng)");
+                return;
+            }
+
+            for (var i = 0; i < store.Count; i++)
+            {
+                var s = store[i];
+                var titlePreview = s.title == null ? "" : s.title.Length <= 24 ? s.title : s.title[..24] + "…";
+                _output.WriteLine(
+                    $"  [{i}] id={s.id}, slug={s.slug}, status={s.status}, progress={s.story_progress_status}, author_id={s.author_id}, title=\"{titlePreview}\" (len={s.title?.Length ?? 0}), summaryLen={s.summary?.Length ?? 0}, cover={s.cover_image}");
+            }
+        }
+
         private static StoryService CreateSut(
             List<stories> storyStore,
             out Mock<IStoryRepository> storyRepoMock,
@@ -64,17 +84,11 @@ namespace AIStory.Tests
 
         /// <summary>
         /// UTCID01 – happy path: user/author hợp lệ, không suspend, toàn bộ field hợp lệ → tạo truyện thành công.
-        /// Spec có thể nêu tên tác giả hiển thị / ảnh upload; DTO Create chỉ có authorId + cover URL sau xử lý API — không assert message log.
+        /// Gọi trực tiếp <see cref="StoryService.Create"/> (instance <see cref="StoryService"/> như tầng service thật).
         /// </summary>
         [Fact]
         public void UTCID01_CreateStory_Succeeds_WhenAllInputsValid_HappyPath()
         {
-            LogUtcContext("UTCID01",
-                "Happy path: tất cả input hợp lệ → Create thành công, có DTO trả về và story được Add.",
-                "Precondition: user Exists; không IsAuthorWritingSuspended; category tồn tại và is_active.",
-                "Input: Title/Summary đủ dài trong giới hạn nghiệp vụ (title ≤ 50); StoryProgressStatus ONGOING; AgeRating 13+; CategoryIds có 1 id; coverImageUrl hợp lệ.",
-                "Kỳ vọng spec: success; response có title, summary, authorId, category ids, status/progress; không assert đúng từng chữ log.");
-
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -86,7 +100,7 @@ namespace AIStory.Tests
             };
 
             var storyStore = new List<stories>();
-            var sut = CreateSut(storyStore,
+            StoryService storyService = CreateSut(storyStore,
                 out var storyRepoMock,
                 out var chapterRepoMock,
                 out var userLookupMock,
@@ -107,13 +121,22 @@ namespace AIStory.Tests
                 StoryProgressStatus = "ONGOING"
             };
 
-            var dto = sut.Create(request, authorId, coverImageUrl);
+            var dto = storyService.Create(request, authorId, coverImageUrl);
+
+            _output.WriteLine("");
+            _output.WriteLine("======== UTCID01 — kết quả StoryService.Create ========");
+            _output.WriteLine($"Id: {dto.Id}");
+            _output.WriteLine($"Status: {dto.Status}; StoryProgressStatus: {dto.StoryProgressStatus}; AgeRating: {dto.AgeRating}");
+            _output.WriteLine($"AuthorId: {dto.AuthorId}");
+            _output.WriteLine($"Title length: {dto.Title?.Length ?? 0}; Summary length: {dto.Summary?.Length ?? 0}");
+            _output.WriteLine($"CoverImage: {dto.CoverImage}");
+            _output.WriteLine($"CategoryIds: [{string.Join(", ", dto.CategoryIds ?? Enumerable.Empty<Guid>())}]");
 
             Assert.NotNull(dto);
             Assert.Equal(title, dto.Title);
             Assert.Equal(summary, dto.Summary);
             Assert.Equal(authorId, dto.AuthorId);
-            Assert.Contains(categoryId, dto.CategoryIds);
+            Assert.Contains(categoryId, dto.CategoryIds!);
             Assert.Equal("ONGOING", dto.StoryProgressStatus);
             Assert.Equal("13+", dto.AgeRating);
             Assert.Equal(coverImageUrl, dto.CoverImage);
@@ -126,6 +149,8 @@ namespace AIStory.Tests
             userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
             categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
             chapterRepoMock.VerifyNoOtherCalls();
+
+            LogStoryStore("UTCID01 (sau verify)", storyStore);
         }
 
         /// <summary>
@@ -626,6 +651,7 @@ namespace AIStory.Tests
             var notifMock = new Mock<INotificationHubNotifier>();
             var commentPostMock = new Mock<IStoryCommentPostService>(MockBehavior.Strict);
             var cloudinaryMock = new Mock<ICloudinaryImageService>(MockBehavior.Loose);
+            cloudinaryMock.Setup(c => c.IsConfigured).Returns(true);
             var logger = NullLogger<StoriesController>.Instance;
 
             var controller = new StoriesController(
@@ -1088,17 +1114,11 @@ namespace AIStory.Tests
         /// <summary>
         /// UTCID20 – truyện mới (chưa xuất bản, <c>DRAFT</c>) không được chọn tiến độ <c>HIATUS</c> (tạm ngưng): spec yêu cầu fail.
         /// Ma trận có thể ghi "Truyện chưa được xuất bản không thể chọn trạng thái là tạm ngưng" — không assert đúng từng chữ.
-        /// <b>Bug mở:</b> test assert theo spec → <b>FAIL</b> (đỏ) cho đến khi dev implement chặn HIATUS trong <see cref="StoryService.Create"/>; không dùng <c>Skip</c>.
+        /// Product: <see cref="StoryService.Create"/> chỉ cho <c>ONGOING</c> lúc tạo mới; <c>HIATUS</c> → <see cref="InvalidOperationException"/>.
         /// </summary>
         [Fact]
         public void UTCID20_CreateStory_Fails_WhenHiatusOnUnpublishedNewStory()
         {
-            LogUtcContext("UTCID20",
-                "Spec: truyện chưa xuất bản + StoryProgressStatus HIATUS → fail, không Add.",
-                "Input: StoryProgressStatus = HIATUS; category/age/title/summary/cover hợp lệ; slug chưa trùng.",
-                "Kỳ vọng spec: exception + không Add. Không assert đúng từng chữ message.",
-                "Ghi chú: ma trận ghi HIATUS ở tiến độ truyện, không phải CategoryId.");
-
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -1118,21 +1138,37 @@ namespace AIStory.Tests
 
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
 
+            var title = new string('q', 20);
+            var summary = new string('r', 52);
+            var coverImageUrl = "https://example.com/covers/utc20.jpg";
+
             var request = new CreateStoryRequestDto
             {
-                Title = new string('q', 20),
-                Summary = new string('r', 52),
+                Title = title,
+                Summary = summary,
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
-                StoryProgressStatus = "HIATUS"
+                StoryProgressStatus = "  HIATUS  "
             };
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverImageUrl));
 
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc20.jpg"));
+            _output.WriteLine("");
+            _output.WriteLine("======== UTCID20 — kết quả sut.Create (Record.Exception) ========");
+            if (ex == null)
+                _output.WriteLine("Exception: (null — không ném)");
+            else
+            {
+                _output.WriteLine($"Exception type: {ex.GetType().FullName}");
+                _output.WriteLine($"Message: {ex.Message}");
+            }
+
             Assert.NotNull(ex);
 
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
             chapterRepoMock.VerifyNoOtherCalls();
+
+            LogStoryStore("UTCID20 (sau verify)", storyStore);
         }
     }
 }
@@ -1140,4 +1176,4 @@ namespace AIStory.Tests
 
 
 
-//dotnet test ".\AIStory.Tests.csproj" --no-restore --filter "FullyQualifiedName~AIStory.Tests.UT01_FunctionCreateStory"
+// dotnet test ".\AIStory.Tests.csproj" --no-restore --filter "FullyQualifiedName~AIStory.Tests.UT_CreateStory" --logger "console;verbosity=detailed"
