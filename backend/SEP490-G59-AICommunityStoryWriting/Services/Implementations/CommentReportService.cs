@@ -392,6 +392,7 @@ public class CommentReportService : ICommentReportService
             var detail = string.IsNullOrWhiteSpace(description)
                 ? string.Empty
                 : $" Chi tiết từ người báo cáo: {description.Trim()}";
+            var verifyNote = " Thông tin này được lưu để phục vụ xác minh và đối soát quá trình xử lý vi phạm.";
             var targetUrl = comment.story_id.HasValue ? $"/story/{comment.story_id.Value}" : "/notifications";
 
             var n = new notifications
@@ -401,7 +402,7 @@ public class CommentReportService : ICommentReportService
                 type = "COMMENT_REPORTED_TO_OWNER",
                 title = $"Người báo cáo: {reporterName}",
                 content =
-                    $"Bình luận của bạn vừa bị báo cáo. Người báo cáo: {reporterName}. Vi phạm: {reasonVi}.{detail}",
+                    $"Bình luận của bạn vừa bị báo cáo. Người báo cáo: {reporterName}. Vi phạm: {reasonVi}.{detail}{verifyNote}",
                 link_url = targetUrl,
                 is_read = false,
                 created_at = DateTime.UtcNow
@@ -436,6 +437,11 @@ public class CommentReportService : ICommentReportService
         {
             var actorName = NotificationDAO.GetUserDisplayName(actorUserId);
             var targetUrl = comment.story_id.HasValue ? $"/story/{comment.story_id.Value}" : "/notifications";
+            var labels = GetVerifiedCommentReasonLabels(comment.id);
+            var violationDetail = labels.Count > 0
+                ? $" Nội dung vi phạm đã xác minh: {string.Join("; ", labels)}."
+                : " Nội dung vi phạm đang trong quá trình xác minh xử lí vi phạm.";
+            var verifyNote = " Thông báo này phục vụ xác minh và theo dõi lịch sử xử lý vi phạm.";
             var n = new notifications
             {
                 id = Guid.NewGuid(),
@@ -443,8 +449,8 @@ public class CommentReportService : ICommentReportService
                 type = "COMPLIANCE_COMMENT_MODERATION_ACTION",
                 title = hidden ? "Bình luận của bạn đã bị ẩn" : "Bình luận của bạn đã được hiển thị lại",
                 content = hidden
-                    ? $"Xử lý vi phạm viên {actorName} đã ẩn bình luận của bạn do vi phạm."
-                    : $"Xử lý vi phạm viên {actorName} đã hiển thị lại bình luận của bạn.",
+                    ? $"Xử lý vi phạm viên {actorName} đã ẩn bình luận của bạn do vi phạm.{violationDetail}{verifyNote}"
+                    : $"Xử lý vi phạm viên {actorName} đã hiển thị lại bình luận của bạn.{violationDetail}{verifyNote}",
                 link_url = targetUrl,
                 is_read = false,
                 created_at = DateTime.UtcNow
@@ -482,6 +488,11 @@ public class CommentReportService : ICommentReportService
         {
             var actorName = NotificationDAO.GetUserDisplayName(actorUserId);
             var targetUrl = comment.story_id.HasValue ? $"/story/{comment.story_id.Value}" : "/notifications";
+            var labels = GetVerifiedCommentReasonLabels(comment.id);
+            var violationDetail = labels.Count > 0
+                ? $" Nội dung vi phạm đã xác minh: {string.Join("; ", labels)}."
+                : " Nội dung vi phạm đang trong quá trình xác minh xử lí vi phạm.";
+            var verifyNote = " Thông báo này phục vụ xác minh và theo dõi lịch sử xử lý vi phạm.";
             var n = new notifications
             {
                 id = Guid.NewGuid(),
@@ -489,8 +500,8 @@ public class CommentReportService : ICommentReportService
                 type = "COMPLIANCE_AUTHOR_WRITING_MODERATION",
                 title = suspended ? "Tạm khóa quyền viết" : "Đã mở lại quyền viết",
                 content = suspended
-                    ? $"Xử lý vi phạm viên {actorName} đã tạm khóa quyền đăng truyện và chương của bạn."
-                    : $"Xử lý vi phạm viên {actorName} đã cho phép bạn đăng truyện và chương trở lại.",
+                    ? $"Xử lý vi phạm viên {actorName} đã tạm khóa quyền đăng truyện và chương của bạn.{violationDetail}{verifyNote}"
+                    : $"Xử lý vi phạm viên {actorName} đã cho phép bạn đăng truyện và chương trở lại.{violationDetail}{verifyNote}",
                 link_url = targetUrl,
                 is_read = false,
                 created_at = DateTime.UtcNow
@@ -923,9 +934,15 @@ public class CommentReportService : ICommentReportService
         if (reporterIds == null || reporterIds.Count == 0) return;
         var success = string.Equals(status, "RESOLVED", StringComparison.OrdinalIgnoreCase);
         var title = success ? "Báo cáo bình luận đã được xử lý" : "Báo cáo bình luận đã được cập nhật";
+        var labels = GetVerifiedCommentReasonLabels(commentId);
+        var detail = labels.Count > 0
+            ? $" Nội dung vi phạm đã xác minh: {string.Join("; ", labels)}."
+            : " Nội dung vi phạm đang trong quá trình xác minh xử lí vi phạm.";
+        var verifyNote = " Thông báo này phục vụ xác minh kết quả xử lý vi phạm.";
         var content = success
             ? "Đơn báo cáo bình luận bạn đã gửi đã được xử lý bởi xử lý vi phạm viên thành công."
             : "Đơn báo cáo bình luận bạn đã gửi được đánh dấu không đủ bằng chứng để xử lý.";
+        content = content + detail + verifyNote;
 
         foreach (var userId in reporterIds.Distinct())
         {
@@ -962,6 +979,22 @@ public class CommentReportService : ICommentReportService
                 // best effort push; không làm fail nghiệp vụ chính.
             }
         }
+    }
+
+    private static List<string> GetVerifiedCommentReasonLabels(Guid commentId)
+    {
+        var lines = VerifiedReporterReasonDAO.ListComplianceVerifiedReportLinesForCommentThreads(new[] { commentId });
+        if (lines == null || lines.Count == 0) return new List<string>();
+        var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var labels = new List<string>();
+        foreach (var line in lines)
+        {
+            var code = line.ReasonCode;
+            if (!seenCodes.Add(code)) continue;
+            var label = CommentReportReasonCatalog.TryGet(code, out var cd) ? cd.LabelVi : code;
+            labels.Add(label);
+        }
+        return labels;
     }
 
     private async Task MaybeCompleteCommentComplianceLockWhenNoOpenReportsAsync(
