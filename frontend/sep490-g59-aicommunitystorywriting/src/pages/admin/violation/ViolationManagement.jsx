@@ -303,6 +303,15 @@ function normalizeStoryQueueItem(x) {
         authorAccountStatus: pick(x, 'authorAccountStatus', 'AuthorAccountStatus') ?? null,
         authorWritingSuspendedUntilUtc: pick(x, 'authorWritingSuspendedUntilUtc', 'AuthorWritingSuspendedUntilUtc') ?? null,
         oldestReportAtUtc: pick(x, 'oldestReportAtUtc', 'OldestReportAtUtc') ?? null,
+        complianceClaimedAtUtc:
+            pick(x, 'complianceClaimedAtUtc', 'ComplianceClaimedAtUtc')
+            ?? pick(x, 'claimedAtUtc', 'ClaimedAtUtc')
+            ?? pick(x, 'claimedAt', 'ClaimedAt')
+            ?? pick(x, 'lockAcquiredAtUtc', 'LockAcquiredAtUtc')
+            ?? pick(x, 'lockedAtUtc', 'LockedAtUtc')
+            ?? pick(x, 'updatedAtUtc', 'UpdatedAtUtc')
+            ?? pick(x, 'updatedAt', 'UpdatedAt')
+            ?? null,
     };
 }
 
@@ -314,6 +323,15 @@ function normalizeStoryReportRow(x) {
         severityScore: Number(pick(x, 'severityScore', 'SeverityScore') ?? 0) || 0,
         status: pick(x, 'status', 'Status'),
         createdAtUtc: pick(x, 'createdAtUtc', 'CreatedAtUtc'),
+        complianceClaimedAtUtc:
+            pick(x, 'complianceClaimedAtUtc', 'ComplianceClaimedAtUtc')
+            ?? pick(x, 'claimedAtUtc', 'ClaimedAtUtc')
+            ?? pick(x, 'claimedAt', 'ClaimedAt')
+            ?? pick(x, 'lockAcquiredAtUtc', 'LockAcquiredAtUtc')
+            ?? pick(x, 'lockedAtUtc', 'LockedAtUtc')
+            ?? pick(x, 'updatedAtUtc', 'UpdatedAtUtc')
+            ?? pick(x, 'updatedAt', 'UpdatedAt')
+            ?? null,
         isComplianceLocked: coerceBool(pick(x, 'isComplianceLocked', 'IsComplianceLocked')),
         complianceClaimedByDisplayName: pick(x, 'complianceClaimedByDisplayName', 'ComplianceClaimedByDisplayName'),
         complianceHandlingSlaMessageVi: pick(x, 'complianceHandlingSlaMessageVi', 'ComplianceHandlingSlaMessageVi'),
@@ -357,6 +375,7 @@ function groupStoryRows(rawRows) {
             authorAccountStatus: null,
             authorWritingSuspendedUntilUtc: null,
             oldestReportAtUtc: null,
+            complianceClaimedAtUtc: null,
         };
         prev.reportCount += 1;
         prev.priorityScore = Math.max(prev.priorityScore, row.severityScore || 0);
@@ -390,9 +409,22 @@ function groupStoryRows(rawRows) {
                 }
             }
         }
+        if (row.complianceClaimedAtUtc) {
+            const tRow = new Date(row.complianceClaimedAtUtc).getTime();
+            const tPrev = prev.complianceClaimedAtUtc ? new Date(prev.complianceClaimedAtUtc).getTime() : 0;
+            if (Number.isFinite(tRow) && (!Number.isFinite(tPrev) || tRow > tPrev)) {
+                prev.complianceClaimedAtUtc = row.complianceClaimedAtUtc;
+            }
+        }
         m.set(storyId, prev);
     }
     return Array.from(m.values());
+}
+
+function toUnixTimeOrZero(value) {
+    if (!value) return 0;
+    const t = new Date(value).getTime();
+    return Number.isFinite(t) ? t : 0;
 }
 
 function normalizeCommentQueueItem(x) {
@@ -429,6 +461,15 @@ function normalizeCommentQueueItem(x) {
         hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
         /** BE gán = thời điểm báo cáo sớm nhất trong nhóm bình luận. */
         createdAtUtc: pick(x, 'createdAtUtc', 'CreatedAtUtc') ?? null,
+        complianceClaimedAtUtc:
+            pick(x, 'complianceClaimedAtUtc', 'ComplianceClaimedAtUtc')
+            ?? pick(x, 'claimedAtUtc', 'ClaimedAtUtc')
+            ?? pick(x, 'claimedAt', 'ClaimedAt')
+            ?? pick(x, 'lockAcquiredAtUtc', 'LockAcquiredAtUtc')
+            ?? pick(x, 'lockedAtUtc', 'LockedAtUtc')
+            ?? pick(x, 'updatedAtUtc', 'UpdatedAtUtc')
+            ?? pick(x, 'updatedAt', 'UpdatedAt')
+            ?? null,
     };
 }
 
@@ -1061,6 +1102,11 @@ export default function ViolationManagement() {
                         String(x.storyId ?? '').toLowerCase().includes(q)
                         || String(x.storyTitle ?? '').toLowerCase().includes(q)
                         || String(x.authorDisplayName ?? '').toLowerCase().includes(q));
+                    filtered.sort((a, b) =>
+                        toUnixTimeOrZero(b.complianceClaimedAtUtc) - toUnixTimeOrZero(a.complianceClaimedAtUtc)
+                        || toUnixTimeOrZero(b.updatedAtUtc) - toUnixTimeOrZero(a.updatedAtUtc)
+                        || toUnixTimeOrZero(b.oldestReportAtUtc) - toUnixTimeOrZero(a.oldestReportAtUtc),
+                    );
                     const from = (storyReportPage - 1) * REPORT_PAGE_SIZE;
                     setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
                     setTotalCount(filtered.length);
@@ -1072,6 +1118,11 @@ export default function ViolationManagement() {
                         || String(x.storyId ?? '').toLowerCase().includes(q)
                         || String(x.storyTitle ?? '').toLowerCase().includes(q)
                         || String(x.commentUserDisplayName ?? '').toLowerCase().includes(q));
+                    filtered.sort((a, b) =>
+                        toUnixTimeOrZero(b.complianceClaimedAtUtc) - toUnixTimeOrZero(a.complianceClaimedAtUtc)
+                        || toUnixTimeOrZero(b.updatedAtUtc) - toUnixTimeOrZero(a.updatedAtUtc)
+                        || toUnixTimeOrZero(b.createdAtUtc) - toUnixTimeOrZero(a.createdAtUtc),
+                    );
                     const from = (commentReportPage - 1) * REPORT_PAGE_SIZE;
                     setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
                     setTotalCount(filtered.length);
@@ -1091,6 +1142,20 @@ export default function ViolationManagement() {
                     setTotalCount(filtered.length);
                     return;
                 }
+            }
+            if (activeTab === 'story-reports') {
+                normalizedItems.sort((a, b) =>
+                    toUnixTimeOrZero(b.complianceClaimedAtUtc) - toUnixTimeOrZero(a.complianceClaimedAtUtc)
+                    || toUnixTimeOrZero(b.updatedAtUtc) - toUnixTimeOrZero(a.updatedAtUtc)
+                    || toUnixTimeOrZero(b.oldestReportAtUtc) - toUnixTimeOrZero(a.oldestReportAtUtc),
+                );
+            }
+            if (activeTab === 'comment-reports') {
+                normalizedItems.sort((a, b) =>
+                    toUnixTimeOrZero(b.complianceClaimedAtUtc) - toUnixTimeOrZero(a.complianceClaimedAtUtc)
+                    || toUnixTimeOrZero(b.updatedAtUtc) - toUnixTimeOrZero(a.updatedAtUtc)
+                    || toUnixTimeOrZero(b.createdAtUtc) - toUnixTimeOrZero(a.createdAtUtc),
+                );
             }
             setRows(normalizedItems);
             setTotalCount(activeTab === 'lock-requests' ? (paged.items?.length ?? 0) : paged.totalCount);
@@ -1885,7 +1950,7 @@ export default function ViolationManagement() {
                     <table className="w-full border-collapse table-fixed">
                         <thead>
                             <tr className="bg-[#f0faf5]">
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Ưu tiên</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>STT</th>
                                 <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Mã đơn</th>
                                 <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Truyện</th>
                                 <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Tác giả</th>
@@ -1899,7 +1964,7 @@ export default function ViolationManagement() {
                                     <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
-                            {rows.map((r) => (
+                            {rows.map((r, idx) => (
                                 <tr
                                     key={r.storyId}
                                     className={`border-t border-[#c9f0d8] hover:bg-[#f7fcf9] ${r.complianceFlagged ? 'bg-amber-200/70 ring-1 ring-amber-300' : ''}`}
@@ -1913,7 +1978,7 @@ export default function ViolationManagement() {
                                         const storyFlags = { hasPendingReleaseRequest, hasPendingAdminAction };
                                         return (
                                             <>
-                                                <td style={td}>{(r.priorityScore ?? 0).toFixed?.(1) ?? r.priorityScore}</td>
+                                                <td style={td}>{(storyReportPage - 1) * REPORT_PAGE_SIZE + idx + 1}</td>
                                                 <td style={td}><span className="text-xs text-slate-700 break-all">{r.storyId || '—'}</span></td>
                                                 <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                                 <td style={td}>{r.authorDisplayName || '—'}</td>
@@ -2054,7 +2119,7 @@ export default function ViolationManagement() {
                 <div className="w-full overflow-visible">
                     <table className="w-full border-collapse table-fixed">
                         <thead><tr className="bg-[#f0faf5]">
-                            <th style={th}>Ưu tiên</th>
+                            <th style={th}>STT</th>
                             <th style={th}>Mã đơn</th>
                             <th style={th}>Truyện</th>
                             <th style={th}>Người bình luận</th>
@@ -2067,7 +2132,7 @@ export default function ViolationManagement() {
                                     <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
-                            {rows.map((r) => (
+                            {rows.map((r, idx) => (
                                 <tr key={r.commentId} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
                                     {(() => {
                                         const hasPendingAdmin = !!r.hasPendingAdminActionRequest;
@@ -2081,7 +2146,7 @@ export default function ViolationManagement() {
                                         const reporterCount = reporters.length;
                                         return (
                                             <>
-                                                <td style={td}>{Number(r.priorityScore ?? 0).toFixed(1)}</td>
+                                                <td style={td}>{(commentReportPage - 1) * REPORT_PAGE_SIZE + idx + 1}</td>
                                                 <td style={td}><span className="text-xs text-slate-700 break-all">{r.commentId || r.reportId || '—'}</span></td>
                                                 <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                                 <td style={td}>{r.commentUserDisplayName || '—'}</td>
@@ -2563,8 +2628,6 @@ export default function ViolationManagement() {
                                     </div>
                                 </div>
                                 <div className="flex flex-wrap gap-2 mt-3">
-                                    <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Ưu tiên: {(selectedStory.priorityScore ?? 0).toFixed?.(1) ?? selectedStory.priorityScore}</span>
-                                    <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700 border border-amber-100">Mức độ: {(selectedStory.maxSeverityScore ?? 0).toFixed?.(1) ?? selectedStory.maxSeverityScore ?? '—'}</span>
                                     <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Số báo cáo: {selectedStory.reportCount ?? 0}</span>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
@@ -2769,8 +2832,6 @@ export default function ViolationManagement() {
                                             <div className="text-xs text-slate-500 truncate">{meta.authorName || r.authorDisplayName || 'Tác giả ẩn danh'}</div>
                                             <div className="text-xs text-slate-400 truncate">{r.storyId}</div>
                                             <div className="flex items-center gap-2 mt-2 overflow-x-auto whitespace-nowrap">
-                                                <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Ưu tiên: {(r.priorityScore ?? 0).toFixed?.(1) ?? r.priorityScore}</span>
-                                                <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700 border border-amber-100">Mức độ: {(r.maxSeverityScore ?? 0).toFixed?.(1) ?? r.maxSeverityScore ?? '—'}</span>
                                                 <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Số báo cáo: {r.reportCount ?? 0}</span>
                                                 <span className="px-2 py-0.5 rounded-full text-xs bg-slate-50 text-slate-700 border border-slate-200">Vi phạm: {(r.distinctReasonCodes ?? []).slice(0, 2).map(reasonCodeToViLabel).join(', ') || 'Khác'}</span>
                                             </div>
@@ -2809,10 +2870,8 @@ export default function ViolationManagement() {
                                         <div className="min-w-0 flex-1">
                                             <div className="font-semibold text-slate-900 truncate">{r.storyTitle || '—'}</div>
                                             <div className="text-xs text-slate-500 truncate">{meta.authorName ? `Truyện — ${meta.authorName}` : (r.storyId || '')}</div>
-                                            <div className="text-xs text-slate-600 truncate">Bình luận: {r.commentUserDisplayName || '—'} · {r.commentId}</div>
+                                            <div className="text-xs text-slate-600 truncate">Người bình luận: {r.commentUserDisplayName || '—'}</div>
                                             <div className="flex items-center gap-2 mt-2 overflow-x-auto whitespace-nowrap">
-                                                <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Ưu tiên: {Number(r.priorityScore ?? 0).toFixed(1)}</span>
-                                                <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700 border border-amber-100">Mức độ: {Number(r.maxSeverityScore ?? 0).toFixed(1)}</span>
                                                 <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Số báo cáo: {r.reportCount ?? 0}</span>
                                                 <span className="px-2 py-0.5 rounded-full text-xs bg-slate-50 text-slate-700 border border-slate-200">Vi phạm: {r.reasonLabelVi || reasonCodeToViLabel(r.reasonCode) || 'Khác'}</span>
                                             </div>
