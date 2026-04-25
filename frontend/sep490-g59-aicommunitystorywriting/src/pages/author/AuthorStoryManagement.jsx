@@ -419,6 +419,7 @@ export function AuthorStoryManagement({ onBack }) {
                                 const isPermanentHidden = String(item.status ?? item.Status ?? '').toUpperCase() === 'HIDDEN';
                                 mapped.status = 'hidden';
                                 mapped.publishStatus = isPermanentHidden ? 'Đã ẩn vĩnh viễn' : 'Đã ẩn tạm thời';
+                                mapped.isPermanentlyHidden = isPermanentHidden;
                                 return mapped;
                             }
                             const hasPublished = item._hasPublishedChapter === true;
@@ -2333,7 +2334,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                                     }}
                                                                 >
                                                                     {isPermanentlyHidden
-                                                                        ? 'Truyện này đã bị ẩn vĩnh viễn do vi phạm.'
+                                                                        ? 'Truyện này đã bị ẩn tạm thời để phục vụ quá trình điều tra vi phạm.'
                                                                         : 'Truyện này đang bị tạm ẩn để điều tra và xử lý vi phạm.'}
                                                                 </div>
                                                                     );
