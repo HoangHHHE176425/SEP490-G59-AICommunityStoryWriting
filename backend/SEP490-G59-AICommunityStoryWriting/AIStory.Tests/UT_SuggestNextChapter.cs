@@ -16,7 +16,7 @@ using Services.Interfaces;
 
 namespace AIStory.Tests;
 
-public class UT10_FunctionSuggestNextChapter
+public class UT_SuggestNextChapter
 {
     private static AIController CreateSut(
         IConfiguration? configuration = null,

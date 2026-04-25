@@ -28,7 +28,7 @@ function mapStoryFromApi(item) {
         PENDING_REVIEW: 'Chờ duyệt',
         REJECTED: 'Bị từ chối',
         PUBLISHED: 'Đã xuất bản',
-        HIDDEN: 'Đã ẩn',
+        HIDDEN: 'Đã ẩn vĩnh viễn',
         COMPLETED: 'Hoàn thành',
         CANCELLED: 'Đã hủy',
     };
@@ -416,8 +416,10 @@ export function AuthorStoryManagement({ onBack }) {
                             // Giữ lại flag FE để chặn cập nhật trạng thái tiến độ khi có chương đang chờ duyệt.
                             mapped._hasPendingReviewChapter = item._hasPendingReviewChapter === true;
                             if (mapped.isComplianceHidden) {
+                                const isPermanentHidden = String(item.status ?? item.Status ?? '').toUpperCase() === 'HIDDEN';
                                 mapped.status = 'hidden';
-                                mapped.publishStatus = 'Đã ẩn tạm thời';
+                                mapped.publishStatus = isPermanentHidden ? 'Đã ẩn vĩnh viễn' : 'Đã ẩn tạm thời';
+                                mapped.isPermanentlyHidden = isPermanentHidden;
                                 return mapped;
                             }
                             const hasPublished = item._hasPublishedChapter === true;
@@ -815,6 +817,17 @@ export function AuthorStoryManagement({ onBack }) {
             showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
+        const isComplianceHidden = Boolean(
+            story?.isComplianceHidden
+            ?? story?.complianceHidden
+            ?? story?.ComplianceHidden
+            ?? story?.compliance_hidden
+            ?? false
+        ) || String(story?.status ?? '').toLowerCase() === 'hidden';
+        if (isComplianceHidden) {
+            showToast('Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể chỉnh sửa.', 'error');
+            return;
+        }
         const statusLower = String(story?.status ?? '').toLowerCase();
         if (statusLower === 'pending_review') {
             showToast('Truyện đang ở trạng thái chờ duyệt, bạn không thể chỉnh sửa lúc này.', 'error');
@@ -848,6 +861,17 @@ export function AuthorStoryManagement({ onBack }) {
     const handleAddChapter = async (story) => {
         if (isAuthorWritingSuspended) {
             showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
+            return;
+        }
+        const isComplianceHidden = Boolean(
+            story?.isComplianceHidden
+            ?? story?.complianceHidden
+            ?? story?.ComplianceHidden
+            ?? story?.compliance_hidden
+            ?? false
+        ) || String(story?.status ?? '').toLowerCase() === 'hidden';
+        if (isComplianceHidden) {
+            showToast('Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể thêm chương mới.', 'error');
             return;
         }
         const storyId = story?.id ?? story?.Id;
@@ -1996,8 +2020,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </div>
                                                 )}
                                             </div>
-                                        )
-                                    })}
+                                    )})}
                                 </div>
                                 {authorAiBudgetError && (
                                     <p style={{ margin: 0, marginTop: '-0.5rem', marginBottom: '1rem', fontSize: '0.75rem', color: '#dc2626' }}>
@@ -2249,6 +2272,9 @@ export function AuthorStoryManagement({ onBack }) {
                                 <>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                                         {stories.map((story) => (
+                                            (() => {
+                                                const storyComplianceLocked = Boolean(story?.isComplianceHidden) || String(story?.status ?? '').toLowerCase() === 'hidden';
+                                                return (
                                             <div
                                                 key={story.id}
                                                 style={{
@@ -2292,6 +2318,9 @@ export function AuthorStoryManagement({ onBack }) {
                                                                 {story.lastUpdate}
                                                             </div>
                                                             {story.isComplianceHidden ? (
+                                                                (() => {
+                                                                    const isPermanentlyHidden = String(story.status ?? '').toLowerCase() === 'hidden';
+                                                                    return (
                                                                 <div
                                                                     style={{
                                                                         marginTop: '0.5rem',
@@ -2304,16 +2333,20 @@ export function AuthorStoryManagement({ onBack }) {
                                                                         fontWeight: 600,
                                                                     }}
                                                                 >
-                                                                    Truyện này đang bị tạm ẩn để điều tra và xử lý vi phạm.
+                                                                    {isPermanentlyHidden
+                                                                        ? 'Truyện này đã bị ẩn tạm thời để phục vụ quá trình điều tra vi phạm.'
+                                                                        : 'Truyện này đang bị tạm ẩn để điều tra và xử lý vi phạm.'}
                                                                 </div>
+                                                                    );
+                                                                })()
                                                             ) : null}
                                                         </div>
                                                         <div style={{
                                                             padding: '0.25rem 0.75rem',
-                                                            backgroundColor: ['published', 'completed'].includes(story.status) ? '#d1fae5' : '#fef3c7',
+                                                            backgroundColor: storyComplianceLocked ? '#fef3c7' : ['published', 'completed'].includes(story.status) ? '#d1fae5' : '#fef3c7',
                                                             borderRadius: '4px',
                                                             fontSize: '0.75rem',
-                                                            color: ['published', 'completed'].includes(story.status) ? '#065f46' : '#92400e',
+                                                            color: storyComplianceLocked ? '#92400e' : ['published', 'completed'].includes(story.status) ? '#065f46' : '#92400e',
                                                             marginLeft: '1rem',
                                                             flexShrink: 0
                                                         }}>
@@ -2380,11 +2413,11 @@ export function AuthorStoryManagement({ onBack }) {
                                                             </div>
                                                             <div style={{
                                                                 padding: '0.25rem 0.75rem',
-                                                                backgroundColor: (story.status === 'published' || story.status === 'completed') ? '#d1fae5' : '#fef3c7',
+                                                                backgroundColor: storyComplianceLocked ? '#fef3c7' : (story.status === 'published' || story.status === 'completed') ? '#d1fae5' : '#fef3c7',
                                                                 borderRadius: '9999px',
                                                                 fontSize: '0.75rem',
                                                                 fontWeight: 600,
-                                                                color: (story.status === 'published' || story.status === 'completed') ? '#065f46' : '#92400e'
+                                                                color: storyComplianceLocked ? '#92400e' : (story.status === 'published' || story.status === 'completed') ? '#065f46' : '#92400e'
                                                             }}>
                                                                 {story.publishStatus}
                                                             </div>
@@ -2425,6 +2458,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                 }}>
                                                     <button
                                                         onClick={() => handleViewChapters(story)}
+                                                        title={storyComplianceLocked ? 'Truyện đã ẩn vĩnh viễn: chỉ xem danh sách chương, không thể thao tác chỉnh sửa/xuất bản.' : 'Danh sách chương'}
                                                         style={{
                                                             display: 'flex',
                                                             alignItems: 'center',
@@ -2457,10 +2491,12 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </button>
                                                     <button
                                                         onClick={() => handleEditStory(story)}
-                                                        disabled={isAuthorWritingSuspended || story.status === 'pending_review'}
+                                                        disabled={isAuthorWritingSuspended || story.status === 'pending_review' || storyComplianceLocked}
                                                         title={
                                                             isAuthorWritingSuspended
                                                                 ? AUTHOR_WRITING_SUSPENDED_TOOLTIP
+                                                                : storyComplianceLocked
+                                                                    ? 'Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể chỉnh sửa'
                                                                 : story.status === 'pending_review'
                                                                     ? 'Truyện đang ở trạng thái chờ duyệt, không thể chỉnh sửa'
                                                                     : 'Chỉnh sửa truyện'
@@ -2477,19 +2513,19 @@ export function AuthorStoryManagement({ onBack }) {
                                                             fontSize: '0.8125rem',
                                                             fontWeight: 500,
                                                             color: '#475569',
-                                                            cursor: (isAuthorWritingSuspended || story.status === 'pending_review') ? 'not-allowed' : 'pointer',
+                                                            cursor: (isAuthorWritingSuspended || story.status === 'pending_review' || storyComplianceLocked) ? 'not-allowed' : 'pointer',
                                                             whiteSpace: 'nowrap',
                                                             transition: 'all 0.2s',
-                                                            opacity: (isAuthorWritingSuspended || story.status === 'pending_review') ? 0.7 : 1
+                                                            opacity: (isAuthorWritingSuspended || story.status === 'pending_review' || storyComplianceLocked) ? 0.7 : 1
                                                         }}
                                                         onMouseEnter={(e) => {
-                                                            if (isAuthorWritingSuspended || story.status === 'pending_review') return;
+                                                            if (isAuthorWritingSuspended || story.status === 'pending_review' || storyComplianceLocked) return;
                                                             e.currentTarget.style.backgroundColor = '#f1f5f9';
                                                             e.currentTarget.style.borderColor = '#13ec5b';
                                                             e.currentTarget.style.color = '#13ec5b';
                                                         }}
                                                         onMouseLeave={(e) => {
-                                                            if (isAuthorWritingSuspended || story.status === 'pending_review') return;
+                                                            if (isAuthorWritingSuspended || story.status === 'pending_review' || storyComplianceLocked) return;
                                                             e.currentTarget.style.backgroundColor = '#f8fafc';
                                                             e.currentTarget.style.borderColor = '#e2e8f0';
                                                             e.currentTarget.style.color = '#475569';
@@ -2499,35 +2535,35 @@ export function AuthorStoryManagement({ onBack }) {
                                                         Chỉnh sửa
                                                     </button>
                                                     <button
-                                                        onClick={() => !isAuthorWritingSuspended && story.status === 'draft' && handleDeleteStory(story.id)}
-                                                        disabled={isAuthorWritingSuspended || story.status !== 'draft'}
-                                                        title={isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : story.status === 'draft' ? 'Xóa truyện' : 'Chỉ được xóa truyện khi ở trạng thái Bản nháp'}
+                                                        onClick={() => !isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft' && handleDeleteStory(story.id)}
+                                                        disabled={isAuthorWritingSuspended || storyComplianceLocked || story.status !== 'draft'}
+                                                        title={isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : storyComplianceLocked ? 'Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể xóa' : story.status === 'draft' ? 'Xóa truyện' : 'Chỉ được xóa truyện khi ở trạng thái Bản nháp'}
                                                         style={{
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center',
                                                             gap: '0.375rem',
                                                             padding: '0.5rem 1rem',
-                                                            backgroundColor: (!isAuthorWritingSuspended && story.status === 'draft') ? '#fff' : '#f1f5f9',
-                                                            border: `1px solid ${(!isAuthorWritingSuspended && story.status === 'draft') ? '#fecaca' : '#e2e8f0'}`,
+                                                            backgroundColor: (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? '#fff' : '#f1f5f9',
+                                                            border: `1px solid ${(!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? '#fecaca' : '#e2e8f0'}`,
                                                             borderRadius: '9999px',
                                                             fontSize: '0.8125rem',
                                                             fontWeight: 500,
-                                                            color: (!isAuthorWritingSuspended && story.status === 'draft') ? '#dc2626' : '#94a3b8',
-                                                            cursor: (!isAuthorWritingSuspended && story.status === 'draft') ? 'pointer' : 'not-allowed',
+                                                            color: (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? '#dc2626' : '#94a3b8',
+                                                            cursor: (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? 'pointer' : 'not-allowed',
                                                             whiteSpace: 'nowrap',
                                                             transition: 'all 0.2s',
-                                                            opacity: (!isAuthorWritingSuspended && story.status === 'draft') ? 1 : 0.8
+                                                            opacity: (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? 1 : 0.8
                                                         }}
                                                         onMouseEnter={(e) => {
-                                                            if (!isAuthorWritingSuspended && story.status === 'draft') {
+                                                            if (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') {
                                                                 e.currentTarget.style.backgroundColor = '#fef2f2';
                                                                 e.currentTarget.style.borderColor = '#ef4444';
                                                             }
                                                         }}
                                                         onMouseLeave={(e) => {
-                                                            e.currentTarget.style.backgroundColor = (!isAuthorWritingSuspended && story.status === 'draft') ? '#fff' : '#f1f5f9';
-                                                            e.currentTarget.style.borderColor = (!isAuthorWritingSuspended && story.status === 'draft') ? '#fecaca' : '#e2e8f0';
+                                                            e.currentTarget.style.backgroundColor = (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? '#fff' : '#f1f5f9';
+                                                            e.currentTarget.style.borderColor = (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? '#fecaca' : '#e2e8f0';
                                                         }}
                                                     >
                                                         <Trash2 style={{ width: '14px', height: '14px' }} />
@@ -2535,6 +2571,8 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </button>
                                                 </div>
                                             </div>
+                                                );
+                                            })()
                                         ))}
                                     </div>
                                     {!storiesLoading && !storiesError && storiesTotalPages > 1 && (
@@ -3220,12 +3258,20 @@ export function AuthorStoryManagement({ onBack }) {
                                         marginBottom: '1.25rem',
                                     }}
                                     >
-                                        <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
-                                    </div>
-                                    <div>
-                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 30% cho tác giả, 70% nền tảng</div>
-                                        <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
-                                            Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>70%</b> phí.
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                            <div style={{
+                                                width: '40px', height: '40px', borderRadius: '12px', backgroundColor: '#dcfce7',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                            }}
+                                            >
+                                                <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
+                                            </div>
+                                            <div>
+                                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 70% cho tác giả, 30% nền tảng</div>
+                                                <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
+                                                    Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>30%</b> phí.
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
 

@@ -18,11 +18,11 @@ namespace AIStory.Tests;
 /// Standard output mỗi case: <c>-------- UTCIDxx --------</c>, tóm tắt, <c>Precondition</c>, <c>Input</c>, <c>Kỳ vọng spec</c>, <c>Ghi chú</c>.
 /// Phản hồi chính tả AI mô phỏng bằng cache (cùng thuật toán khóa với <see cref="ChapterCheckService"/>).
 /// </summary>
-public class UT09_FunctionCheckChapterCheckAsync
+public class UT_CheckChapterCheckAsync
 {
     private readonly ITestOutputHelper _output;
 
-    public UT09_FunctionCheckChapterCheckAsync(ITestOutputHelper output) => _output = output;
+    public UT_CheckChapterCheckAsync(ITestOutputHelper output) => _output = output;
 
     /// <summary>
     /// Ghi ra đúng format “Standard Output Messages” (giống UT chapter: -------- UTCIDxx --------, Precondition, Input, Kỳ vọng spec, Ghi chú).

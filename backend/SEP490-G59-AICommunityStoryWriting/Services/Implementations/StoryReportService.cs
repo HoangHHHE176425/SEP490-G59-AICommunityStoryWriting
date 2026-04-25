@@ -938,6 +938,8 @@ public class StoryReportService : IStoryReportService
         EnsureComplianceStoryActPermission(storyId, actorId, actorIsAdmin);
         var st = StoryDAO.GetById(storyId) ?? throw new InvalidOperationException("Story not found.");
         StoryDAO.SetComplianceHidden(storyId, hidden);
+        if (!hidden && string.Equals(st.status, "HIDDEN", StringComparison.OrdinalIgnoreCase))
+            StoryDAO.SetStatus(storyId, "PUBLISHED");
         ViolationLogDAO.Insert(actorId, st.author_id, "STORY", storyId,
             hidden ? "STORY_HIDDEN_COMPLIANCE" : "STORY_UNHIDDEN_COMPLIANCE",
             hidden ? "Đã ẩn truyện khỏi danh sách công khai (xử lý vi phạm)." : "Đã hiện lại truyện trên danh sách công khai.", null);
@@ -1535,9 +1537,31 @@ public class StoryReportService : IStoryReportService
         }
         var n = StoryReportDAO.ResolveOpenStoryReportsForCompliance(storyId, complianceUserId, st);
         MaybeCompleteComplianceLockWhenNoOpenReports(storyId);
+        _ = MaybePromoteStoryToPermanentHiddenAfterBulkResolveAsync(storyId, st, complianceUserId);
         if (n > 0 && reporterIds.Count > 0)
             _ = NotifyReportersBulkResolvedAsync(reporterIds, storyId, st);
         return Task.FromResult(n);
+    }
+
+    private async Task MaybePromoteStoryToPermanentHiddenAfterBulkResolveAsync(Guid storyId, string resolvedStatus, Guid actorId)
+    {
+        if (!string.Equals(resolvedStatus, "RESOLVED", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (StoryReportDAO.CountOpenStoryReports(storyId) > 0)
+            return;
+
+        var story = StoryDAO.GetById(storyId);
+        if (story is null || !story.compliance_hidden)
+            return;
+        if (string.Equals(story.status, "HIDDEN", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        StoryDAO.SetStatus(storyId, "HIDDEN");
+        await NotifyStoryAuthorComplianceActionAsync(
+            story,
+            actorId,
+            "Truyện bị ẩn vĩnh viễn",
+            "Xử lý vi phạm viên đã kết luận xử lý và chuyển truyện của bạn sang trạng thái ẩn vĩnh viễn.");
     }
 
     private async Task NotifyReportersBulkResolvedAsync(IReadOnlyCollection<Guid> reporterIds, Guid storyId, string status)

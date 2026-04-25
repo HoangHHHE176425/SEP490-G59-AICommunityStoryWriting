@@ -80,80 +80,87 @@ namespace AIStory.API.BackgroundServices
 
             foreach (var order in pending)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var strategy = db.Database.CreateExecutionStrategy();
-                await strategy.ExecuteAsync(async () =>
+                try
                 {
-                    await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                    var current = await db.coin_orders.FirstOrDefaultAsync(x => x.id == order.id, cancellationToken);
-                    if (current == null)
+                    var strategy = db.Database.CreateExecutionStrategy();
+                    await strategy.ExecuteAsync(async () =>
                     {
-                        await tx.CommitAsync(cancellationToken);
-                        return;
-                    }
-                    if (!string.Equals(current.status, "PENDING", StringComparison.OrdinalIgnoreCase))
-                    {
-                        await tx.CommitAsync(cancellationToken);
-                        return;
-                    }
+                        await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
 
-                    var payosRes = await payos.GetPaymentRequestAsync(current.gateway_transaction_id!, cancellationToken);
-                    var payosStatus = (payosRes.Status ?? string.Empty).ToUpperInvariant();
-
-                    if (payosStatus == "PAID")
-                    {
-                        var wallet = await db.wallets.FirstOrDefaultAsync(w => w.user_id == current.user_id, cancellationToken);
-                        if (wallet == null)
+                        var current = await db.coin_orders.FirstOrDefaultAsync(x => x.id == order.id, cancellationToken);
+                        if (current == null)
                         {
-                            wallet = new BusinessObjects.Entities.wallets
-                            {
-                                user_id = current.user_id,
-                                balance_coin = 0,
-                                currency = "VND",
-                                income_balance = 0m,
-                                frozen_balance = 0m,
-                                pending_escrow_balance = 0m,
-                                updated_at = DateTime.UtcNow
-                            };
-                            db.wallets.Add(wallet);
-                            await db.SaveChangesAsync(cancellationToken);
+                            await tx.CommitAsync(cancellationToken);
+                            return;
+                        }
+                        if (!string.Equals(current.status, "PENDING", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await tx.CommitAsync(cancellationToken);
+                            return;
                         }
 
-                        wallet.balance_coin = (wallet.balance_coin ?? 0) + current.coins_granted;
-                        wallet.updated_at = DateTime.UtcNow;
+                        var payosRes = await payos.GetPaymentRequestAsync(current.gateway_transaction_id!, cancellationToken);
+                        var payosStatus = (payosRes.Status ?? string.Empty).ToUpperInvariant();
 
-                        current.status = "PAID";
-                        current.gateway_response_code = "00";
+                        if (payosStatus == "PAID")
+                        {
+                            var wallet = await db.wallets.FirstOrDefaultAsync(w => w.user_id == current.user_id, cancellationToken);
+                            if (wallet == null)
+                            {
+                                wallet = new BusinessObjects.Entities.wallets
+                                {
+                                    user_id = current.user_id,
+                                    balance_coin = 0,
+                                    currency = "VND",
+                                    income_balance = 0m,
+                                    frozen_balance = 0m,
+                                    pending_escrow_balance = 0m,
+                                    updated_at = DateTime.UtcNow
+                                };
+                                db.wallets.Add(wallet);
+                                await db.SaveChangesAsync(cancellationToken);
+                            }
+
+                            wallet.balance_coin = (wallet.balance_coin ?? 0) + current.coins_granted;
+                            wallet.updated_at = DateTime.UtcNow;
+
+                            current.status = "PAID";
+                            current.gateway_response_code = "00";
+                            current.completed_at = DateTime.UtcNow;
+
+                            await db.SaveChangesAsync(cancellationToken);
+                            await tx.CommitAsync(cancellationToken);
+                            return;
+                        }
+
+                        if (payosStatus is "CANCELLED" or "EXPIRED")
+                        {
+                            current.status = payosStatus;
+                            current.completed_at = (payosRes.CanceledAt?.UtcDateTime) ?? DateTime.UtcNow;
+                            await db.SaveChangesAsync(cancellationToken);
+                            await tx.CommitAsync(cancellationToken);
+                            return;
+                        }
+
+                        if (payosStatus == "PENDING")
+                        {
+                            await tx.CommitAsync(cancellationToken);
+                            return;
+                        }
+
+                        // Unknown terminal state -> mark FAILED
+                        current.status = "FAILED";
                         current.completed_at = DateTime.UtcNow;
-
                         await db.SaveChangesAsync(cancellationToken);
                         await tx.CommitAsync(cancellationToken);
-                        return;
-                    }
-
-                    if (payosStatus is "CANCELLED" or "EXPIRED")
-                    {
-                        current.status = payosStatus;
-                        current.completed_at = (payosRes.CanceledAt?.UtcDateTime) ?? DateTime.UtcNow;
-                        await db.SaveChangesAsync(cancellationToken);
-                        await tx.CommitAsync(cancellationToken);
-                        return;
-                    }
-
-                    if (payosStatus == "PENDING")
-                    {
-                        await tx.CommitAsync(cancellationToken);
-                        return;
-                    }
-
-                    // Unknown terminal state -> mark FAILED
-                    current.status = "FAILED";
-                    current.completed_at = DateTime.UtcNow;
-                    await db.SaveChangesAsync(cancellationToken);
-                    await tx.CommitAsync(cancellationToken);
-                });
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PayOS] Pending order sync failed for coin_order={OrderId}", order.id);
+                }
             }
         }
     }

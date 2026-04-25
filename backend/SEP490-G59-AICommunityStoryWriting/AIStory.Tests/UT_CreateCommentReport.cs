@@ -25,11 +25,11 @@ namespace AIStory.Tests
     /// <item><description><b>Hành vi product có nhưng chưa có UTCID riêng trong file:</b> comment không thuộc chapter URL (<c>ReportChapterComment</c>), chủ comment role không phải AUTHOR/USER (<c>Bạn không thể báo cáo bình luận này.</c>), comment thiếu <c>story_id</c> (<c>Comment has no story_id.</c>) — cùng họ <see cref="InvalidOperationException"/> → 400 như các case khác.</description></item>
     /// </list>
     /// </summary>
-    public class UT06_FunctionCreateCommentReport
+    public class UT_CreateCommentReport
     {
         private readonly ITestOutputHelper _output;
 
-        public UT06_FunctionCreateCommentReport(ITestOutputHelper output) => _output = output;
+        public UT_CreateCommentReport(ITestOutputHelper output) => _output = output;
 
         private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
         {

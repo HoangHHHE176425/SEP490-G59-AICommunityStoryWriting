@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Eye, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, ChevronDown, ChevronRight, GitBranch, Percent } from 'lucide-react';
+import { Plus, Eye, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, GitBranch, Percent } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason, getChapterVersions, deleteChapterVersion, submitChapterVersion, unsubmitChapterVersion } from '../../api/chapter/chapterApi';
@@ -337,9 +337,24 @@ export function ChapterListManager({
     });
     const [messageModal, setMessageModal] = useState({ open: false, title: '', message: '' });
     const suspendedWriteTitle = isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : '';
+    const storyComplianceHidden = Boolean(
+        story?.isComplianceHidden
+        ?? story?.complianceHidden
+        ?? story?.ComplianceHidden
+        ?? story?.compliance_hidden
+        ?? false
+    ) || String(story?.status ?? '').trim().toUpperCase() === 'HIDDEN';
+    const isStoryPermanentlyHidden = storyComplianceHidden && (
+        Boolean(story?.isPermanentlyHidden)
+        || String(story?.publishStatus ?? '').toLowerCase().includes('vĩnh viễn')
+    );
     const storyProgressRaw = String(story?.storyProgressStatus ?? story?.StoryProgressStatus ?? '').trim().toUpperCase();
-    const storyProgressLocked = storyProgressRaw === 'HIATUS' || storyProgressRaw === 'COMPLETED';
-    const storyProgressLockTitle = storyProgressRaw === 'COMPLETED'
+    const storyProgressLocked = storyComplianceHidden || storyProgressRaw === 'HIATUS' || storyProgressRaw === 'COMPLETED';
+    const storyProgressLockTitle = storyComplianceHidden
+        ? (isStoryPermanentlyHidden
+            ? 'Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể tạo/chỉnh sửa/xóa chương, xuất bản chương hoặc thao tác phiên bản.'
+            : 'Truyện đang bị ẩn tạm thời để phục vụ quá trình điều tra vi phạm, không thể tạo/chỉnh sửa/xóa chương, xuất bản chương hoặc thao tác phiên bản.')
+        : storyProgressRaw === 'COMPLETED'
         ? 'Truyện đang ở trạng thái Hoàn thành, không thể tạo/chỉnh sửa/xóa chương hoặc gửi xuất bản.'
         : 'Truyện đang ở trạng thái Tạm dừng, không thể tạo/chỉnh sửa/xóa chương hoặc gửi xuất bản.';
 
@@ -582,8 +597,10 @@ export function ChapterListManager({
 
     // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp / Bị từ chối
     const isStoryRejected = story?.status === 'rejected' || (story?.publishStatus && String(story.publishStatus).includes('từ chối'));
-    const derivedStoryStatusDisplay = isStoryRejected ? 'Bị từ chối' : hasPublishedChapter ? 'Đã xuất bản' : hasPendingReviewChapter ? 'Chờ duyệt' : 'Bản nháp';
-    const derivedStatusKind = isStoryRejected ? 'rejected' : hasPublishedChapter ? 'published' : hasPendingReviewChapter ? 'pending_review' : 'draft';
+    const derivedStoryStatusDisplay = storyComplianceHidden
+        ? (isStoryPermanentlyHidden ? 'Đã ẩn vĩnh viễn' : 'Đã ẩn tạm thời')
+        : isStoryRejected ? 'Bị từ chối' : hasPublishedChapter ? 'Đã xuất bản' : hasPendingReviewChapter ? 'Chờ duyệt' : 'Bản nháp';
+    const derivedStatusKind = storyComplianceHidden ? 'hidden' : isStoryRejected ? 'rejected' : hasPublishedChapter ? 'published' : hasPendingReviewChapter ? 'pending_review' : 'draft';
 
     const openStoryRejectionReason = () => {
         if (!storyId) return;
@@ -708,6 +725,24 @@ export function ChapterListManager({
                                     }}>
                                         Trạng thái truyện: {derivedStoryStatusDisplay}
                                     </span>
+                                    {storyComplianceHidden && (
+                                        <div
+                                            style={{
+                                                marginTop: '10px',
+                                                padding: '8px 10px',
+                                                borderRadius: '8px',
+                                                border: '1px solid #fcd34d',
+                                                background: '#fffbeb',
+                                                color: '#92400e',
+                                                fontSize: '0.75rem',
+                                                fontWeight: 600,
+                                            }}
+                                        >
+                                            {isStoryPermanentlyHidden
+                                                ? 'Truyện đang bị ẩn vĩnh viễn do vi phạm. Mọi thao tác tạo/chỉnh sửa/xuất bản chương và phiên bản đều bị khóa.'
+                                                : 'Truyện đang bị ẩn tạm thời để phục vụ quá trình điều tra vi phạm. Mọi thao tác tạo/chỉnh sửa/xuất bản chương và phiên bản đều bị khóa.'}
+                                        </div>
+                                    )}
                                     {isStoryRejected && (
                                         <button
                                             type="button"
@@ -920,7 +955,7 @@ export function ChapterListManager({
                                                     if (!isExpanded) e.currentTarget.style.backgroundColor = '#ffffff';
                                                 }}
                                             >
-                                                {/* Order + Chevron (click to expand) */}
+                                                {/* Order (click to expand) */}
                                                 <div
                                                     role="button"
                                                     tabIndex={0}
@@ -934,11 +969,6 @@ export function ChapterListManager({
                                                         outline: 'none',
                                                     }}
                                                 >
-                                                    {isExpanded ? (
-                                                        <ChevronDown size={18} color="#6366f1" style={{ flexShrink: 0 }} />
-                                                    ) : (
-                                                        <ChevronRight size={18} color="#94a3b8" style={{ flexShrink: 0 }} />
-                                                    )}
                                                     <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#334155' }}>
                                                         Chương {chapter.number}
                                                     </span>
@@ -1156,9 +1186,9 @@ export function ChapterListManager({
                                                                 const disabled = actioningChapterId === chapter.id || !canUnpublish;
                                                                 return (
                                                                     <button
-                                                                        onClick={() => !isAuthorWritingSuspended && !disabled && handleUnpublishChapter(chapter.id)}
-                                                                        disabled={isAuthorWritingSuspended || disabled}
-                                                                        title={isAuthorWritingSuspended ? suspendedWriteTitle : !canUnpublish ? 'Hủy xuất bản phải theo thứ tự ngược. Phải hủy các chương có thứ tự sau trước.' : 'Hủy xuất bản'}
+                                                                        onClick={() => !isAuthorWritingSuspended && !storyProgressLocked && !disabled && handleUnpublishChapter(chapter.id)}
+                                                                        disabled={isAuthorWritingSuspended || storyProgressLocked || disabled}
+                                                                        title={isAuthorWritingSuspended ? suspendedWriteTitle : storyProgressLocked ? storyProgressLockTitle : !canUnpublish ? 'Hủy xuất bản phải theo thứ tự ngược. Phải hủy các chương có thứ tự sau trước.' : 'Hủy xuất bản'}
                                                                         style={{
                                                                             display: 'inline-flex',
                                                                             alignItems: 'center',
@@ -1171,9 +1201,9 @@ export function ChapterListManager({
                                                                             borderRadius: '9999px',
                                                                             fontSize: '0.75rem',
                                                                             fontWeight: 600,
-                                                                            color: canUnpublish ? '#b45309' : '#94a3b8',
-                                                                            cursor: (isAuthorWritingSuspended || disabled) ? 'not-allowed' : 'pointer',
-                                                                            opacity: (isAuthorWritingSuspended || disabled) ? 0.7 : 1,
+                                                                            color: (storyProgressLocked || !canUnpublish) ? '#94a3b8' : '#b45309',
+                                                                            cursor: (isAuthorWritingSuspended || storyProgressLocked || disabled) ? 'not-allowed' : 'pointer',
+                                                                            opacity: (isAuthorWritingSuspended || storyProgressLocked || disabled) ? 0.7 : 1,
                                                                             transition: 'all 0.2s',
                                                                             whiteSpace: 'nowrap'
                                                                         }}
@@ -1189,7 +1219,7 @@ export function ChapterListManager({
                                             </div>
 
                                             {/* Panel version khi mở rộng — đồng bộ màu hệ thống, có nút Chỉnh sửa / Xóa / Xuất bản */}
-                                            {isExpanded && (
+                                            {false && isExpanded && (
                                                 <div
                                                     onClick={(e) => { e.stopPropagation(); }}
                                                     role="presentation"

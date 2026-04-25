@@ -21,15 +21,15 @@ namespace AIStory.Tests
     /// <list type="bullet">
     /// <item><description>UTCID01, 02, 04, 05, 09, 10 — product có logic tương ứng (hoặc test mock mapping HTTP/exception).</description></item>
     /// <item><description>UTCID07, 08 — thiếu mô tả (null/whitespace) → API <c>400</c> trước service.</description></item>
-    /// <item><description>UTCID03 — reporter không xác định (JWT) → 401; <c>Guid.Empty</c> hoặc user không trong DB → <see cref="StoryReportService.CreateStoryReportAsync"/> ném <see cref="InvalidOperationException"/> (<c>USER không tồn tại.</c>), không lưu — xem <see cref="UT05_FunctionCreateStoryReport.UTCID03_CreateStoryReport_Rejects_WhenReporterInvalidOrUserNotInDatabase"/>.</description></item>
-    /// <item><description>UTCID06 — mô tả không đủ 50 từ / vượt <see cref="UserReportDescriptionRules.MaxLength"/> → <see cref="CreateStoryReportRequestDto"/> + <see cref="StoryReportService.CreateStoryReportAsync"/>; test <see cref="UT05_FunctionCreateStoryReport.UTCID06_CreateStoryReport_Rejects_WhenDescriptionInvalid"/>.</description></item>
+    /// <item><description>UTCID03 — reporter không xác định (JWT) → 401; <c>Guid.Empty</c> hoặc user không trong DB → <see cref="StoryReportService.CreateStoryReportAsync"/> ném <see cref="InvalidOperationException"/> (<c>USER không tồn tại.</c>), không lưu — xem <see cref="UT_CreateStoryReport.UTCID03_CreateStoryReport_Rejects_WhenReporterInvalidOrUserNotInDatabase"/>.</description></item>
+    /// <item><description>UTCID06 — mô tả không đủ 50 từ / vượt <see cref="UserReportDescriptionRules.MaxLength"/> → <see cref="CreateStoryReportRequestDto"/> + <see cref="StoryReportService.CreateStoryReportAsync"/>; test <see cref="UT_CreateStoryReport.UTCID06_CreateStoryReport_Rejects_WhenDescriptionInvalid"/>.</description></item>
     /// </list>
     /// </summary>
-    public class UT05_FunctionCreateStoryReport
+    public class UT_CreateStoryReport
     {
         private readonly ITestOutputHelper _output;
 
-        public UT05_FunctionCreateStoryReport(ITestOutputHelper output) => _output = output;
+        public UT_CreateStoryReport(ITestOutputHelper output) => _output = output;
 
         private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
         {
