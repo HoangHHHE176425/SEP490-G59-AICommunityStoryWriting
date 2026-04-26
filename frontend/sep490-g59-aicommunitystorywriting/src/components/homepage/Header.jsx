@@ -4,11 +4,11 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { createInitialAvatarDataUrl } from '../../utils/avatarFallback';
-import { getAllCategories } from '../../api/category/categoryApi';
 import { getNotifications, getUnreadCount, markNotificationAsRead, markAllNotificationsAsRead } from '../../api/notification/notificationApi';
 import * as coinApi from '../../api/coins/coinApi';
 import { useToast } from '../author/story-editor/Toast';
 import { isAuthorChapterListActive } from '../../utils/authorUiFlags';
+import { normalizeNotificationTo } from '../../utils/notificationLink';
 
 /** Thông báo mới nhất trên cùng (theo createdAt). */
 function sortNotificationsNewestFirst(list) {
@@ -21,6 +21,135 @@ function sortNotificationsNewestFirst(list) {
     });
 }
 
+const VIOLATION_NOTIFICATION_TYPES = new Set([
+    'STORY_REPORTED_TO_AUTHOR',
+    'COMMENT_REPORTED_TO_OWNER',
+    'COMPLIANCE_STORY_MODERATION_ACTION',
+    'COMPLIANCE_COMMENT_MODERATION_ACTION',
+    'COMPLIANCE_AUTHOR_WRITING_MODERATION',
+    'COMPLIANCE_STORY_REPORT_BULK_RESOLVED',
+    'COMPLIANCE_COMMENT_REPORT_BULK_RESOLVED',
+    'COMPLIANCE_ADMIN_ACTION_APPROVED',
+]);
+
+function isViolationNotification(type) {
+    const t = String(type ?? '').toUpperCase();
+    return VIOLATION_NOTIFICATION_TYPES.has(t) || t.startsWith('COMPLIANCE_');
+}
+
+function parseNotificationContent(content) {
+    const normalized = String(content ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!normalized) {
+        return { summary: 'Không có nội dung chi tiết.', violationLine: '', verificationLine: '', detailLines: [] };
+    }
+    const lines = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
+    const violationLine = lines.find((x) => /nội dung vi phạm|lý do đã xác minh|vi phạm:/i.test(x)) || '';
+    const verificationLine = lines.find((x) =>
+        /xác minh|đối soát|lịch sử xử lý/i.test(x) && x !== violationLine
+    ) || '';
+    const summary = lines[0] || normalized;
+    const detailLines = lines
+        .slice(1)
+        .filter((x) => x !== verificationLine && x !== violationLine);
+    return { summary, violationLine, verificationLine, detailLines };
+}
+
+function extractViolationReason(content) {
+    const text = String(content || '');
+    const patterns = [
+        /nội dung vi phạm(?: đã xác minh)?\s*:\s*([^.]*)/i,
+        /lý do đã xác minh\s*:\s*([^.]*)/i,
+        /vi phạm:\s*([^.]*)/i,
+    ];
+    for (const p of patterns) {
+        const m = text.match(p);
+        if (m?.[1]?.trim()) return m[1].trim();
+    }
+    return '';
+}
+
+function inferViolationSubject(notification) {
+    const title = String(notification?.title || '').toLowerCase();
+    const type = String(notification?.type || '').toUpperCase();
+    if (title.includes('bình luận') || type.includes('COMMENT')) return 'bình luận của bạn';
+    if (title.includes('tài khoản') || type === 'COMPLIANCE_ADMIN_ACTION_APPROVED') return 'tài khoản của bạn';
+    if (title.includes('quyền viết')) return 'quyền viết của bạn';
+    return 'truyện của bạn';
+}
+
+function buildViolationSummary(notification, parsed) {
+    const capitalizeFirstAfterColon = (text) =>
+        String(text || '').replace(/:\s*([a-zA-ZÀ-ỹà-ỹ])/g, (_, ch) => `: ${ch.toUpperCase()}`);
+    const normalizeViolationPhrase = (text) =>
+        String(text || '').replace(/nội dung vi phạm\s+là\s*:/gi, 'nội dung vi phạm:');
+    const base = capitalizeFirstAfterColon(normalizeViolationPhrase(String(parsed?.summary || '').trim()));
+    if (!base) return 'Thông báo xử lý vi phạm.';
+    if (!isViolationNotification(notification?.type)) return base;
+    if (/vì có người báo cáo|nội dung vi phạm:/i.test(base)) return base;
+
+    const reason = extractViolationReason(notification?.content) || 'đang trong quá trình xác minh xử lí vi phạm';
+    const type = String(notification?.type || '').toUpperCase();
+    const title = String(notification?.title || '').toLowerCase();
+
+    if (type === 'COMPLIANCE_STORY_MODERATION_ACTION') {
+        if (title.includes('khóa bình luận')) {
+            return capitalizeFirstAfterColon(normalizeViolationPhrase(`Xử lý vi phạm viên đã tắt bình luận cho truyện của bạn vì có người báo cáo truyện của bạn với nội dung vi phạm: ${reason}.`));
+        }
+        if (title.includes('mở lại bình luận')) {
+            return `Xử lý vi phạm viên đã bật lại bình luận cho truyện của bạn sau khi rà soát báo cáo vi phạm.`;
+        }
+        if (title.includes('ẩn khỏi công khai')) {
+            return capitalizeFirstAfterColon(normalizeViolationPhrase(`Xử lý vi phạm viên đã ẩn truyện của bạn khỏi danh sách công khai vì có người báo cáo truyện của bạn với nội dung vi phạm: ${reason}.`));
+        }
+        if (title.includes('hiển thị lại')) {
+            return `Xử lý vi phạm viên đã hiển thị lại truyện của bạn sau khi rà soát báo cáo vi phạm.`;
+        }
+        if (title.includes('tạm khóa quyền viết')) {
+            return capitalizeFirstAfterColon(normalizeViolationPhrase(`Xử lý vi phạm viên đã tạm khóa quyền viết của bạn vì có người báo cáo truyện của bạn với nội dung vi phạm: ${reason}.`));
+        }
+        if (title.includes('mở lại quyền viết')) {
+            return `Xử lý vi phạm viên đã mở lại quyền viết của bạn sau khi rà soát báo cáo vi phạm.`;
+        }
+    }
+
+    if (type === 'COMPLIANCE_COMMENT_MODERATION_ACTION') {
+        if (title.includes('bị ẩn')) {
+            return capitalizeFirstAfterColon(normalizeViolationPhrase(`Xử lý vi phạm viên đã ẩn bình luận của bạn vì có người báo cáo bình luận của bạn với nội dung vi phạm: ${reason}.`));
+        }
+        if (title.includes('hiển thị lại')) {
+            return `Xử lý vi phạm viên đã hiển thị lại bình luận của bạn sau khi rà soát báo cáo vi phạm.`;
+        }
+    }
+
+    if (type === 'COMPLIANCE_AUTHOR_WRITING_MODERATION') {
+        if (title.includes('tạm khóa')) {
+            return capitalizeFirstAfterColon(normalizeViolationPhrase(`Xử lý vi phạm viên đã tạm khóa quyền viết của bạn vì có người báo cáo nội dung của bạn với nội dung vi phạm: ${reason}.`));
+        }
+        return `Xử lý vi phạm viên đã mở lại quyền viết của bạn sau khi rà soát báo cáo vi phạm.`;
+    }
+
+    if (type === 'COMPLIANCE_ADMIN_ACTION_APPROVED') {
+        if (title.includes('tài khoản đã bị khóa')) {
+            return `Admin đã duyệt khóa tài khoản của bạn vì có báo cáo vi phạm đã được xác minh với nội dung: ${reason}.`;
+        }
+        if (title.includes('đình chỉ quyền viết')) {
+            return `Admin đã duyệt đình chỉ quyền viết của bạn vì có báo cáo vi phạm đã được xác minh với nội dung: ${reason}.`;
+        }
+    }
+
+    if (type === 'STORY_REPORTED_TO_AUTHOR') {
+        return capitalizeFirstAfterColon(normalizeViolationPhrase(`Truyện của bạn đã bị báo cáo với nội dung vi phạm: ${reason}.`));
+    }
+    if (type === 'COMMENT_REPORTED_TO_OWNER') {
+        return capitalizeFirstAfterColon(normalizeViolationPhrase(`Bình luận của bạn đã bị báo cáo với nội dung vi phạm: ${reason}.`));
+    }
+
+    const subject = inferViolationSubject(notification);
+    return capitalizeFirstAfterColon(normalizeViolationPhrase(`${base} vì có người báo cáo ${subject} với nội dung vi phạm: ${reason}.`));
+}
+
 export function Header() {
     const navigate = useNavigate();
     const location = useLocation();
@@ -29,11 +158,9 @@ export function Header() {
     const showToastRef = useRef(showToast);
     showToastRef.current = showToast;
     const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const [isGenreOpen, setIsGenreOpen] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const [isNotificationOpen, setIsNotificationOpen] = useState(false);
-    const [categories, setCategories] = useState([]);
-    const [categoriesLoading, setCategoriesLoading] = useState(true);
+    const [selectedNotification, setSelectedNotification] = useState(null);
     const [notifications, setNotifications] = useState([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const [notificationsLoading, setNotificationsLoading] = useState(false);
@@ -175,31 +302,54 @@ export function Header() {
         }
     };
 
-    useEffect(() => {
-        let cancelled = false;
-        getAllCategories({ includeInactive: false })
-            .then((data) => {
-                if (cancelled) return;
-                const items = Array.isArray(data) ? data : (data?.items ?? data?.Items ?? []);
-                const categoryNames = items
-                    .map((cat) => cat.name ?? cat.Name ?? '')
-                    .filter((name) => name && name.trim())
-                    .sort();
-                setCategories(categoryNames);
-            })
-            .catch((err) => {
-                if (!cancelled) {
-                    console.error('Failed to load categories:', err);
-                    setCategories([]);
-                }
-            })
-            .finally(() => {
-                if (!cancelled) setCategoriesLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
+    const resolveNotificationTarget = useCallback((notification) => {
+        const linkUrl = notification?.linkUrl ?? notification?.LinkUrl;
+        let target = normalizeNotificationTo(linkUrl);
+        const typeUpper = String(notification?.type ?? notification?.Type ?? '').toUpperCase();
+        if (typeUpper === 'STORY_REPORTED_TO_AUTHOR' || typeUpper === 'COMMENT_REPORTED_TO_OWNER') {
+            const storyMatch = String(linkUrl ?? '').match(/\/story\/([0-9a-fA-F-]{36})/i);
+            const storyId = storyMatch?.[1];
+            target = storyId ? `/author?view=reports&storyId=${encodeURIComponent(storyId)}` : '/author?view=reports';
+        }
+        return target;
     }, []);
+
+    const handleNotificationClick = async (notification) => {
+        const notificationId = notification?.id ?? notification?.Id;
+        const isRead = notification?.isRead ?? notification?.IsRead ?? false;
+        const target = resolveNotificationTarget(notification);
+
+        if (notificationId && !isRead) {
+            try {
+                await markNotificationAsRead(notificationId);
+                setNotifications((prev) =>
+                    prev.map((item) =>
+                        (item.id ?? item.Id) === notificationId ? { ...item, isRead: true } : item
+                    )
+                );
+                setUnreadCount((count) => Math.max(0, count - 1));
+            } catch {
+                // best-effort; vẫn cho phép điều hướng
+            }
+        }
+
+        setIsNotificationOpen(false);
+        setSelectedNotification({
+            ...(notification ?? {}),
+            isRead: true,
+            _target: target,
+        });
+    };
+
+    const handleOpenNotificationTarget = () => {
+        if (!selectedNotification?._target) {
+            setSelectedNotification(null);
+            return;
+        }
+        const target = selectedNotification._target;
+        setSelectedNotification(null);
+        navigate(target);
+    };
 
     return (
         <>
@@ -306,20 +456,36 @@ export function Header() {
                                                                 typeUpper === 'STORY_REPORTED_TO_AUTHOR' ||
                                                                 typeUpper === 'COMMENT_REPORTED_TO_OWNER';
                                                             return (
-                                                                <div
+                                                                <button
+                                                                    type="button"
                                                                     key={n.id}
-                                                                    className="block px-4 py-3 border-b border-slate-700/50"
+                                                                    className="w-full text-left block px-4 py-3 border-b border-slate-700/50 hover:bg-slate-700/40 transition-colors"
+                                                                    onClick={() => handleNotificationClick(n)}
                                                                 >
                                                                     <p className={`text-sm font-medium ${n.isRead ? 'text-slate-400' : 'text-white'}`}>{n.title}</p>
                                                                     <p
-                                                                        className={`text-xs text-slate-500 mt-0.5 ${isReportToVictim ? 'line-clamp-4' : 'line-clamp-2'}`}
+                                                                        className={`text-xs text-slate-500 mt-0.5 ${isReportToVictim ? 'whitespace-pre-wrap' : 'line-clamp-2'}`}
                                                                     >
                                                                         {n.content}
                                                                     </p>
-                                                                </div>
+                                                                    {isReportToVictim && (
+                                                                        <p className="text-[11px] text-amber-300 mt-1">
+                                                                            Nhấn để mở chi tiết truyện liên quan báo cáo
+                                                                        </p>
+                                                                    )}
+                                                                </button>
                                                             );
                                                         })
                                                     )}
+                                                </div>
+                                                <div className="shrink-0 border-t border-slate-700 px-3 py-2">
+                                                    <Link
+                                                        to="/notifications"
+                                                        className="block w-full text-center text-sm font-semibold text-primary hover:text-primary/90 transition-colors"
+                                                        onClick={() => setIsNotificationOpen(false)}
+                                                    >
+                                                        Xem tất cả thông báo
+                                                    </Link>
                                                 </div>
                                             </div>
                                         )}
@@ -486,31 +652,6 @@ export function Header() {
                             </form>
 
                             <div className="flex flex-col gap-3">
-                                <Link to="/home" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Trang chủ</Link>
-                                <details className="group">
-                                    <summary className="flex items-center justify-between text-slate-300 hover:text-primary transition-colors font-semibold cursor-pointer list-none">
-                                        Thể loại
-                                        <ChevronDown className="w-4 h-4 group-open:rotate-180 transition-transform" />
-                                    </summary>
-                                    <div className="mt-2 ml-4 flex flex-col gap-2">
-                                        {categoriesLoading ? (
-                                            <div className="text-sm text-slate-400">Đang tải...</div>
-                                        ) : categories.length === 0 ? (
-                                            <div className="text-sm text-slate-400">Chưa có thể loại</div>
-                                        ) : (
-                                            categories.map((categoryName) => (
-                                                <a
-                                                    key={categoryName}
-                                                    href="#"
-                                                    className="text-sm text-slate-400 hover:text-primary transition-colors"
-                                                >
-                                                    {categoryName}
-                                                </a>
-                                            ))
-                                        )}
-                                    </div>
-                                </details>
-
                                 {isAuthor ? (
                                     <>
                                         <Link to="/home" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Trang chủ</Link>
@@ -566,6 +707,14 @@ export function Header() {
                                             <Library className="w-4 h-4" />
                                             Tủ sách
                                         </Link>
+                                        <Link
+                                            to="/notifications"
+                                            className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold"
+                                            onClick={() => setIsMenuOpen(false)}
+                                        >
+                                            <Bell className="w-4 h-4" />
+                                            Danh sách thông báo
+                                        </Link>
                                         {isAuthor && (
                                             <>
                                                 <Link
@@ -617,6 +766,75 @@ export function Header() {
                 )}
 
             </header>
+            {selectedNotification && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+                    <div className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+                        <div className="flex items-start justify-between gap-3 border-b border-slate-700 px-4 py-3">
+                            <div>
+                                <p className="text-base font-semibold text-white">Chi tiết thông báo</p>
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                    {selectedNotification?.createdAt
+                                        ? new Date(selectedNotification.createdAt).toLocaleString('vi-VN')
+                                        : ''}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedNotification(null)}
+                                className="rounded-md p-1 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                                aria-label="Đóng popup thông báo"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="px-4 py-3">
+                            {(() => {
+                                const parsed = parseNotificationContent(selectedNotification?.content);
+                                const isViolation = isViolationNotification(selectedNotification?.type);
+                                const summaryText = buildViolationSummary(selectedNotification, parsed);
+                                return (
+                                    <>
+                                        <p className="text-sm font-semibold text-white">
+                                            {selectedNotification?.title ?? 'Thông báo'}
+                                        </p>
+                                        <p className="mt-2 whitespace-pre-wrap text-sm text-slate-200">
+                                            {summaryText}
+                                        </p>
+                                        {parsed.detailLines.length > 0 && (
+                                            <div className="mt-3 rounded-md border border-slate-700 bg-slate-800/70 px-3 py-2">
+                                                <p className="text-xs font-semibold text-slate-200">Chi tiết bổ sung</p>
+                                                <ul className="mt-1 space-y-1 text-xs text-slate-300">
+                                                    {parsed.detailLines.map((line, idx) => (
+                                                        <li key={`${idx}-${line.slice(0, 24)}`}>- {line}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </>
+                                );
+                            })()}
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 border-t border-slate-700 px-4 py-3">
+                            <button
+                                type="button"
+                                onClick={() => setSelectedNotification(null)}
+                                className="rounded-full border border-slate-600 px-4 py-1.5 text-sm font-semibold text-slate-300 hover:bg-slate-800 transition-colors"
+                            >
+                                Đóng
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleOpenNotificationTarget}
+                                className="rounded-full bg-primary px-4 py-1.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+                            >
+                                Mở trang liên quan
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <ToastContainer />
         </>
     );

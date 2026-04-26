@@ -508,6 +508,7 @@ namespace Services.Implementations
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
+            EnsureStoryNotComplianceHidden(story, "chỉnh sửa truyện");
             if (story.author_id is Guid aid && _userLookup.IsAuthorWritingSuspended(aid))
                 throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
 
@@ -632,6 +633,7 @@ namespace Services.Implementations
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
+            EnsureStoryNotComplianceHidden(story, "xóa truyện");
             if (story.author_id is Guid aid && _userLookup.IsAuthorWritingSuspended(aid))
                 throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
 
@@ -669,6 +671,8 @@ namespace Services.Implementations
 
                 _logger?.LogInformation("StoryService.Publish: Found story '{Title}' (ID: {StoryId}), current status: {Status}",
                     story.title, id, story.status);
+
+                EnsureStoryNotComplianceHidden(story, "gửi truyện chờ duyệt");
 
                 if (story.author_id is Guid aid && _userLookup.IsAuthorWritingSuspended(aid))
                     throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin), không thể gửi xuất bản.");
@@ -708,6 +712,8 @@ namespace Services.Implementations
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
+
+            EnsureStoryNotComplianceHidden(story, "hủy xuất bản truyện");
 
             if (story.author_id is Guid aidUnpub && _userLookup.IsAuthorWritingSuspended(aidUnpub))
                 throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
@@ -1039,6 +1045,7 @@ namespace Services.Implementations
                 Summary = story.summary,
                 Status = story.status,
                 StoryProgressStatus = story.story_progress_status,
+                ComplianceHidden = story.compliance_hidden,
                 CoverImage = story.cover_image,
                 CategoryIds = categoryIds,
                 CategoryNames = categoryNames,
@@ -1056,6 +1063,12 @@ namespace Services.Implementations
                 UpdatedAt = story.updated_at,
                 LatestUpdatedAt = latestUpdatedAt
             };
+        }
+
+        private static void EnsureStoryNotComplianceHidden(stories? story, string actionVi)
+        {
+            if (story?.compliance_hidden == true)
+                throw new InvalidOperationException($"Truyện đang bị ẩn vĩnh viễn nên không thể {actionVi}.");
         }
     }
 }

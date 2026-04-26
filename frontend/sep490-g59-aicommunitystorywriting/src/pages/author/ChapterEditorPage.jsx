@@ -1446,7 +1446,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                 Độ tương đồng với nội dung AI
                             </h3>
                             <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                                Xem trước mức giống giữa bản bạn viết và bản đồng sáng tác AI cho thứ tự chương này.{' '}
+                                Xem trước mức giống giữa bản bạn viết và bản đồng sáng tác AI cho chương này.{' '}
                                 <span className="font-semibold text-primary">
                                     Chương chỉ được lưu / gửi xuất bản khi bạn bấm xác nhận bên dưới.
                                 </span>
@@ -1469,9 +1469,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                             ? `${Number(aiCompareModal.data.similarityScore).toFixed(2)}%`
                                             : '—'}
                                     </div>
-                                    {aiCompareModal.data?.message ? (
-                                        <p className="mt-3 text-left text-sm text-slate-600">{aiCompareModal.data.message}</p>
-                                    ) : null}
                                 </div>
                             ) : (
                                 <p className="m-0 text-sm leading-relaxed text-slate-700 whitespace-pre-wrap">
@@ -1738,7 +1735,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                 </div>
                             )}
                             <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', fontSize: '0.6875rem', color: '#9a3412' }}>
-                                Lưu ý: Khi nhập định hướng tùy chỉnh, tác giả phải chịu trách nhiệm với nội dung định hướng đã nhập và nội dung AI sinh ra theo định hướng đó.
+                                Lưu ý: Tác giả chịu trách nhiệm đối với nội dung do AI tạo ra. Vui lòng đảm bảo nội dung tuân thủ pháp luật, tiêu chuẩn cộng đồng và không vi phạm quyền, lợi ích của bất kỳ cá nhân hoặc tổ chức nào. Hệ thống có hỗ trợ kiểm duyệt nhưng không thay thế trách nhiệm của tác giả.
                             </div>
                             {coCreateError ? (
                                 <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', fontSize: '0.8125rem', color: '#b91c1c' }}>

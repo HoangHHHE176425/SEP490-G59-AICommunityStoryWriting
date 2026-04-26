@@ -22,6 +22,8 @@ using Services.Implementations;
 using Services.Implementations.Lookups;
 using Services.Integrations.PayOS;
 using Services.Interfaces;
+using Polly;
+using Polly.Extensions.Http;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -156,8 +158,25 @@ namespace AIStory.API
             builder.Services.AddScoped<IChapterVersionAiCompareService, ChapterVersionAiCompareService>();
             builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();
 
-            // Coin / PayOS
-            builder.Services.AddHttpClient<PayOSClient>();
+            // Coin / PayOS — bounded HTTP timeout + transient retry (5xx/408) at the HttpClient layer.
+            var payosHttpTimeoutSeconds = builder.Configuration.GetValue<int?>("PayOS:HttpTimeoutSeconds") ?? 25;
+            payosHttpTimeoutSeconds = Math.Clamp(payosHttpTimeoutSeconds, 5, 120);
+            var payosDepositHttpRetryCount = builder.Configuration.GetValue<int?>("PayOS:DepositHttpRetryCount") ?? 3;
+            payosDepositHttpRetryCount = Math.Clamp(payosDepositHttpRetryCount, 0, 8);
+
+            var payosHttpBuilder = builder.Services.AddHttpClient<PayOSClient>()
+                .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(payosHttpTimeoutSeconds));
+
+            if (payosDepositHttpRetryCount > 0)
+            {
+                payosHttpBuilder.AddPolicyHandler(
+                    HttpPolicyExtensions
+                        .HandleTransientHttpError()
+                        .WaitAndRetryAsync(
+                            payosDepositHttpRetryCount,
+                            attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt))));
+            }
+
             builder.Services.AddScoped<IPayOSClient, PayOSClientAdapter>();
             builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
             builder.Services.AddHostedService<PayOSPendingOrderSyncService>();

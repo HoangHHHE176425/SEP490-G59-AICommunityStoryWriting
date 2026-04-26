@@ -108,6 +108,7 @@ public class StoryReportService : IStoryReportService
             var detail = string.IsNullOrWhiteSpace(description)
                 ? string.Empty
                 : $" Chi tiết từ người báo cáo: {description.Trim()}";
+            var verifyNote = " Thông tin này được lưu để phục vụ xác minh và đối soát quá trình xử lý vi phạm.";
 
             var n = new notifications
             {
@@ -117,7 +118,7 @@ public class StoryReportService : IStoryReportService
                 // Tiêu đề luôn ghi rõ người báo cáo (Header chỉ nổi bật dòng title).
                 title = $"Người báo cáo: {reporterName}",
                 content =
-                    $"Truyện «{storyTitle}» vừa nhận báo cáo. Người báo cáo: {reporterName}. Vi phạm: {reasonVi}.{detail}",
+                    $"Truyện «{storyTitle}» vừa nhận báo cáo. Người báo cáo: {reporterName}. Vi phạm: {reasonVi}.{detail}{verifyNote}",
                 link_url = $"/story/{story.id}",
                 is_read = false,
                 created_at = DateTime.UtcNow
@@ -927,7 +928,7 @@ public class StoryReportService : IStoryReportService
             actorId,
             disabled ? "Truyện bị khóa bình luận" : "Truyện được mở lại bình luận",
             disabled
-                ? "Xử lý vi phạm viên đã tắt bình luận cho truyện của bạn."
+                ? "Xử lý vi phạm viên đã tắt bình luận cho truyện của bạn vì có người báo cáo truyện của bạn với nội dung vi phạm là:"
                 : "Xử lý vi phạm viên đã bật lại bình luận cho truyện của bạn.");
         return Task.CompletedTask;
     }
@@ -938,6 +939,8 @@ public class StoryReportService : IStoryReportService
         EnsureComplianceStoryActPermission(storyId, actorId, actorIsAdmin);
         var st = StoryDAO.GetById(storyId) ?? throw new InvalidOperationException("Story not found.");
         StoryDAO.SetComplianceHidden(storyId, hidden);
+        if (!hidden && string.Equals(st.status, "HIDDEN", StringComparison.OrdinalIgnoreCase))
+            StoryDAO.SetStatus(storyId, "PUBLISHED");
         ViolationLogDAO.Insert(actorId, st.author_id, "STORY", storyId,
             hidden ? "STORY_HIDDEN_COMPLIANCE" : "STORY_UNHIDDEN_COMPLIANCE",
             hidden ? "Đã ẩn truyện khỏi danh sách công khai (xử lý vi phạm)." : "Đã hiện lại truyện trên danh sách công khai.", null);
@@ -986,13 +989,27 @@ public class StoryReportService : IStoryReportService
         {
             var actorName = NotificationDAO.GetUserDisplayName(actorId);
             var storyTitle = string.IsNullOrWhiteSpace(story.title) ? "không rõ tiêu đề" : story.title!;
+            var labels = GetVerifiedReasonLabels(
+                VerifiedReporterReasonDAO.ListComplianceVerifiedReportLinesForStory(story.id),
+                useCommentCatalog: false);
+            var shouldInlineViolationAfterColon =
+                content.Contains("nội dung vi phạm là:", StringComparison.OrdinalIgnoreCase);
+            var violationDetail = labels.Count > 0
+                ? string.Join("; ", labels)
+                : "đang trong quá trình xác minh xử lí vi phạm";
+            var violationSegment = shouldInlineViolationAfterColon
+                ? $" {violationDetail}."
+                : labels.Count > 0
+                    ? $" Nội dung vi phạm đã xác minh: {violationDetail}."
+                    : " Nội dung vi phạm đang trong quá trình xác minh xử lí vi phạm.";
+            var verifyNote = " Thông báo này phục vụ xác minh và theo dõi lịch sử xử lý vi phạm.";
             var n = new notifications
             {
                 id = Guid.NewGuid(),
                 user_id = authorId.Value,
                 type = "COMPLIANCE_STORY_MODERATION_ACTION",
                 title = title,
-                content = $"{content} Truyện: \"{storyTitle}\". Người thực hiện: {actorName}.",
+                content = $"{content}{violationSegment} Truyện: \"{storyTitle}\". Người thực hiện: {actorName}.{verifyNote}",
                 link_url = $"/story/{story.id}",
                 is_read = false,
                 created_at = DateTime.UtcNow,
@@ -1139,6 +1156,12 @@ public class StoryReportService : IStoryReportService
                 story.summary,
                 row.message,
                 row.story_id);
+            await NotifyTargetUserComplianceAdminActionApprovedAsync(
+                targetUserId: row.target_user_id,
+                storyId: row.story_id,
+                requestKind: kind,
+                suspendUntilUtc: null,
+                complianceMessage: row.message);
             return;
         }
 
@@ -1157,6 +1180,12 @@ public class StoryReportService : IStoryReportService
                 dto.AdminNote ?? row.message, until.Value.ToString("O"));
             ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusApproved, dto.AdminNote, "SUSPEND_WRITING");
+            await NotifyTargetUserComplianceAdminActionApprovedAsync(
+                targetUserId: row.target_user_id,
+                storyId: row.story_id,
+                requestKind: kind,
+                suspendUntilUtc: u,
+                complianceMessage: row.message);
             return;
         }
 
@@ -1201,6 +1230,96 @@ public class StoryReportService : IStoryReportService
         {
             // best effort
         }
+    }
+
+    private async Task NotifyTargetUserComplianceAdminActionApprovedAsync(
+        Guid targetUserId,
+        Guid storyId,
+        string requestKind,
+        DateTime? suspendUntilUtc,
+        string? complianceMessage)
+    {
+        if (targetUserId == Guid.Empty) return;
+
+        var useCommentCatalog = IsCommentThreadComplianceAdminRequest(complianceMessage);
+        var verifiedLines = LoadComplianceVerifiedUserReportLines(storyId, complianceMessage);
+        var labels = GetVerifiedReasonLabels(verifiedLines, useCommentCatalog);
+        var verifiedReasonText = labels.Count > 0
+            ? $" Lý do đã xác minh: {string.Join("; ", labels)}."
+            : " Lý do vi phạm đang trong quá trình xác minh xử lí vi phạm.";
+        var verifyNote = " Thông báo này dùng để phục vụ xác minh quyết định xử lý vi phạm.";
+
+        string title;
+        string content;
+        if (string.Equals(requestKind, ComplianceAdminActionRequestDAO.KindBanUser, StringComparison.OrdinalIgnoreCase))
+        {
+            title = "Tài khoản đã bị khóa";
+            content = "Admin đã duyệt xử lý vi phạm và khóa tài khoản của bạn." + verifiedReasonText + verifyNote;
+        }
+        else if (string.Equals(requestKind, ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting, StringComparison.OrdinalIgnoreCase))
+        {
+            title = "Tài khoản bị đình chỉ quyền viết";
+            var untilText = suspendUntilUtc.HasValue ? $" Thời hạn đến: {suspendUntilUtc.Value:dd/MM/yyyy HH:mm} UTC." : string.Empty;
+            content = "Admin đã duyệt xử lý vi phạm và đình chỉ quyền viết của bạn." + untilText + verifiedReasonText + verifyNote;
+        }
+        else
+        {
+            return;
+        }
+
+        try
+        {
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = targetUserId,
+                type = "COMPLIANCE_ADMIN_ACTION_APPROVED",
+                title = title,
+                content = content,
+                link_url = "/notifications",
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            NotificationDAO.Add(n);
+            if (_notificationHubNotifier != null)
+            {
+                await _notificationHubNotifier.NotifyUserAsync(targetUserId, new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = false,
+                    CreatedAt = n.created_at
+                });
+            }
+        }
+        catch
+        {
+            // best effort
+        }
+    }
+
+    private static List<string> GetVerifiedReasonLabels(
+        IReadOnlyList<ComplianceVerifiedUserReportLine> lines,
+        bool useCommentCatalog)
+    {
+        if (lines == null || lines.Count == 0) return new List<string>();
+        var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var labels = new List<string>();
+        foreach (var line in lines)
+        {
+            var code = line.ReasonCode;
+            if (!seenCodes.Add(code)) continue;
+            string labelVi;
+            if (useCommentCatalog)
+                labelVi = CommentReportReasonCatalog.TryGet(code, out var cd) ? cd.LabelVi : code;
+            else
+                labelVi = StoryReportReasonCatalog.TryGet(code, out var sd) ? sd.LabelVi : code;
+            labels.Add(labelVi);
+        }
+        return labels;
     }
 
     private static bool IsCommentThreadComplianceAdminRequest(string? complianceRequestMessage) =>
@@ -1535,9 +1654,31 @@ public class StoryReportService : IStoryReportService
         }
         var n = StoryReportDAO.ResolveOpenStoryReportsForCompliance(storyId, complianceUserId, st);
         MaybeCompleteComplianceLockWhenNoOpenReports(storyId);
+        _ = MaybePromoteStoryToPermanentHiddenAfterBulkResolveAsync(storyId, st, complianceUserId);
         if (n > 0 && reporterIds.Count > 0)
             _ = NotifyReportersBulkResolvedAsync(reporterIds, storyId, st);
         return Task.FromResult(n);
+    }
+
+    private async Task MaybePromoteStoryToPermanentHiddenAfterBulkResolveAsync(Guid storyId, string resolvedStatus, Guid actorId)
+    {
+        if (!string.Equals(resolvedStatus, "RESOLVED", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (StoryReportDAO.CountOpenStoryReports(storyId) > 0)
+            return;
+
+        var story = StoryDAO.GetById(storyId);
+        if (story is null || !story.compliance_hidden)
+            return;
+        if (string.Equals(story.status, "HIDDEN", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        StoryDAO.SetStatus(storyId, "HIDDEN");
+        await NotifyStoryAuthorComplianceActionAsync(
+            story,
+            actorId,
+            "Truyện bị ẩn vĩnh viễn",
+            "Xử lý vi phạm viên đã kết luận xử lý và chuyển truyện của bạn sang trạng thái ẩn vĩnh viễn.");
     }
 
     private async Task NotifyReportersBulkResolvedAsync(IReadOnlyCollection<Guid> reporterIds, Guid storyId, string status)
@@ -1545,9 +1686,17 @@ public class StoryReportService : IStoryReportService
         if (reporterIds == null || reporterIds.Count == 0) return;
         var success = string.Equals(status, "RESOLVED", StringComparison.OrdinalIgnoreCase);
         var title = success ? "Báo cáo truyện đã được xử lý" : "Báo cáo truyện đã được cập nhật";
+        var labels = GetVerifiedReasonLabels(
+            VerifiedReporterReasonDAO.ListComplianceVerifiedReportLinesForStory(storyId),
+            useCommentCatalog: false);
+        var detail = labels.Count > 0
+            ? $" Nội dung vi phạm đã xác minh: {string.Join("; ", labels)}."
+            : " Nội dung vi phạm đang trong quá trình xác minh xử lí vi phạm.";
+        var verifyNote = " Thông báo này phục vụ xác minh kết quả xử lý vi phạm.";
         var content = success
             ? "Đơn báo cáo truyện bạn đã gửi đã được xử lý bởi xử lý vi phạm viên thành công."
             : "Đơn báo cáo truyện bạn đã gửi được đánh dấu không đủ bằng chứng để xử lý.";
+        content = content + detail + verifyNote;
 
         foreach (var userId in reporterIds.Distinct())
         {
