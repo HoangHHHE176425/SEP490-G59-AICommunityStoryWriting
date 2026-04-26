@@ -590,23 +590,23 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         setSuggestWarning(null);
         setShowSuggestPopup(true);
         try {
-            // Gọi index-rag nền (không chờ). Gợi ý chạy ngay; BE dùng RAG nếu đã index, không thì dùng Story Context.
-            indexRag(storyId);
             const orderIdx = (Number(chapterData.number) || 1) - 1;
-            let afterChapterId = null;
+            let upToChapterId = null;
             if (orderIdx > 0) {
                 try {
                     const chRes = await getChapters({ storyId, page: 1, pageSize: 500 });
                     const items = chRes?.items ?? chRes?.Items ?? [];
                     const arr = Array.isArray(items) ? items : [];
                     const prev = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === orderIdx - 1);
-                    afterChapterId = prev?.id ?? prev?.Id ?? null;
+                    upToChapterId = prev?.id ?? prev?.Id ?? null;
                 } catch {
-                    afterChapterId = null;
+                    upToChapterId = null;
                 }
             }
+            // Gọi index-rag nền (không chờ). Gợi ý chạy ngay; BE dùng RAG nếu đã index, không thì dùng Story Context.
+            indexRag(storyId);
             const chapterIdForAi = chapter?.id ?? chapter?.Id ?? null;
-            const data = await suggestNextChapter(storyId, afterChapterId, null, chapterIdForAi);
+            const data = await suggestNextChapter(storyId, upToChapterId, null, chapterIdForAi);
             const list = data?.suggestions ?? data?.Suggestions ?? [];
             const normalized = Array.isArray(list) ? list : [];
             setSuggestions(normalized);
@@ -691,14 +691,22 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         setCoCreateContextWarning(null);
         setCoCreateLoading(true);
         try {
-            // Chủ động yêu cầu BE index RAG trước khi đồng sáng tác.
-            // Nếu index lỗi tạm thời, vẫn cho phép gọi co-create để BE tự trả thông báo phù hợp.
-            try {
-                await indexRag(storyId);
-            } catch {
-                // best-effort: không chặn luồng co-create
-            }
             const chapterOrderIndex = (Number(chapterData.number) || 1) - 1;
+            let upToChapterId = null;
+            if (chapterOrderIndex > 0) {
+                try {
+                    const chRes = await getChapters({ storyId, page: 1, pageSize: 500 });
+                    const items = chRes?.items ?? chRes?.Items ?? [];
+                    const arr = Array.isArray(items) ? items : [];
+                    const prev = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === chapterOrderIndex - 1);
+                    upToChapterId = prev?.id ?? prev?.Id ?? null;
+                } catch {
+                    upToChapterId = null;
+                }
+            }
+            // Gọi index-rag nền, không chặn co-create để giảm thời gian chờ lần bấm nút.
+            // Nếu index lỗi tạm thời, co-create vẫn tự trả lỗi phù hợp từ BE.
+            indexRag(storyId);
             const chapterIdForAi = chapter?.id ?? chapter?.Id ?? null;
             const data = await coCreate(storyId, idea || null, { chapterOrderIndex, chapterId: chapterIdForAi });
             const ctxWarnCo = pickAiContextWarning(data);

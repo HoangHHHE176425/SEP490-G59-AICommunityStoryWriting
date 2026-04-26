@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Services.DTOs.AI;
 
 /// <summary>Request index RAG cho một truyện (chunk + embedding). Chỉ nội dung chương <c>PUBLISHED</c> được đưa vào index.</summary>
@@ -5,7 +7,19 @@ public class IndexRagRequest
 {
     public Guid StoryId { get; set; }
     /// <summary>Chỉ index các chương <c>PUBLISHED</c> có order_index &lt;= chương mốc này. Null = mọi chương đã xuất bản.</summary>
-    public Guid? AfterChapterId { get; set; }
+    public Guid? UpToChapterId { get; set; }
+
+    /// <summary>Alias tương thích ngược cho client cũ đang gửi <c>afterChapterId</c>.</summary>
+    [JsonPropertyName("afterChapterId")]
+    public Guid? AfterChapterId
+    {
+        get => UpToChapterId;
+        set
+        {
+            if (!UpToChapterId.HasValue)
+                UpToChapterId = value;
+        }
+    }
 }
 
 /// <summary>Trạng thái RAG của một truyện (dùng cho GET /api/ai/rag-status).</summary>

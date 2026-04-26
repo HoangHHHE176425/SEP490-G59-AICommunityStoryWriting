@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
 using Repositories;
 using Repositories.Interfaces;
@@ -14,10 +15,12 @@ using Services.Interfaces;
 
 namespace Services.Implementations;
 
-/// <summary>Đồng sáng tác: Dàn ý → Viết → (tùy chọn) tự sửa từ cấm + chính tả bằng Agent 2 → guardrail/chính tả lần cuối; có thể mở rộng độ dài tối thiểu.</summary>
+/// <summary>Đồng sáng tác: Dàn ý → Viết → (tùy chọn) tự sửa từ cấm bằng Agent 2 → guardrail lần cuối; có thể mở rộng độ dài tối thiểu.</summary>
 public class AICoCreationService : IAICoCreationService
 {
+    private const int AuthorIdeaMaxChars = 1500;
     private const int MinDraftWordCount = 500;
+    private const int ExpandTargetWords = 560;
     private const string ActionOutline = "CO_CREATE_OUTLINE";
     private const string ActionWrite = "CO_CREATE_WRITE";
     private const string ActionWriteCorrect = "CO_CREATE_WRITE_CORRECT";
@@ -26,69 +29,36 @@ public class AICoCreationService : IAICoCreationService
   private const string ConstitutionalRules = """
 Quy tắc bắt buộc:
 
-1. Nguồn dữ liệu:
-- Ngữ cảnh truyện được truyền vào là DỮ LIỆU DUY NHẤT (single source of truth), bao gồm: Story Information, RAG, Character Memory, Event Memory, Story State.
-- Mọi nội dung sinh ra PHẢI tuân thủ dữ liệu này, không được suy diễn hoặc tự ý thay đổi.
+1) Nguồn dữ liệu và mức ưu tiên
+- Chỉ dùng ngữ cảnh đã cung cấp: Story Information, RAG, Character Memory, Event Memory, Story State.
+- Khi User Idea là diễn biến cụ thể do tác giả đặt: lấy đó làm hướng chính cho phần TIẾP THEO, đồng thời giữ nhất quán với ngữ cảnh.
+- Khi User Idea chỉ là hướng dẫn chung: ưu tiên Story State -> Event Memory -> Character Memory -> RAG.
 
-2. Đồng sáng tác — ý tưởng tác giả vs mạch truyện:
-- Khi User Idea trong prompt là ý diễn biến CỤ THỂ do tác giả nhập: đó là hướng chính cho scene/chương TIẾP THEO; dùng Story State, Event Memory, Character Memory và RAG để bảo đảm chỉ mô tả sự kiện SAU điểm kết thúc hiện tại, đúng tên nhân vật/địa danh, không lặp lại quá khứ như scene mới — không dùng các lớp đó để triệt tiêu hoặc từ chối ý tác giả.
-- Khi User Idea chỉ là hướng dẫn chung (không có plot cụ thể do tác giả đặt): thứ tự ưu tiên ngữ cảnh:
-  - Story State (cao nhất)
-  - Event Memory
-  - Character Memory
-  - RAG / nội dung trước đó (tham khảo)
-  Nếu có mâu thuẫn giữa các lớp này, tuân theo thứ tự trên.
+2) Timeline
+- Chỉ viết sự kiện xảy ra SAU điểm kết thúc hiện tại của truyện (mốc là sự kiện cuối cùng trong phần ngữ cảnh gần nhất).
+- Không viết lại sự kiện đã xảy ra như nội dung chính của scene/chương mới; chỉ tham chiếu ngắn gọn khi thật sự cần.
 
-3. Timeline:
-- Chỉ được viết nội dung xảy ra SAU điểm kết thúc hiện tại của truyện.
-- Điểm kết thúc hiện tại được xác định là sự kiện CUỐI CÙNG trong đoạn/chương gần nhất của ngữ cảnh.
-- Nghiêm cấm:
-  + Viết lại sự kiện đã xảy ra
-  + Mô tả lại quá khứ như nội dung chính của scene mới
+3) Nhất quán và tên riêng
+- Không tạo chi tiết mâu thuẫn với Story State, Event Memory, Character Memory.
+- Dùng chính xác tên nhân vật/địa danh/thuật ngữ như trong ngữ cảnh; không dịch hoặc biến đổi tên riêng.
 
-4. Tính nhất quán:
-- Không được tạo ra bất kỳ chi tiết nào mâu thuẫn với:
-  + Event Memory (timeline sự kiện)
-  + Character Memory (trạng thái nhân vật)
-  + Story State (trạng thái hiện tại)
-- Không được đảo ngược hoặc phủ định sự kiện đã xảy ra — trừ khi User Idea / Scene Outline là hướng cụ thể do tác giả đặt cho đồng sáng tác: khi đó thực hiện theo ý đó và dùng outline để nối hợp lý (không viết lại quá khứ như scene hiện tại đang diễn ra).
+4) Kiểm soát nội dung mới
+- Hạn chế thêm nhân vật quan trọng mới, sức mạnh mới, phe phái mới, plot twist lớn nếu ngữ cảnh chưa có gợi mở.
+- Có thể thêm có kiểm soát khi phục vụ trực tiếp User Idea/Scene Outline hoặc giúp chuyển mạch hợp lý, nhưng không được làm mâu thuẫn Story State/Event/Character Memory.
 
-5. Nhân vật và tên riêng:
-- Phải sử dụng chính xác tên nhân vật, địa danh, thuật ngữ như trong ngữ cảnh
-- Không dịch, không thay thế, không biến đổi tên dưới bất kỳ hình thức nào
-
-6. Kiểm soát nội dung mới:
-- Không tự ý thêm:
-  + Nhân vật quan trọng mới
-  + Sức mạnh mới
-  + Phe phái mới
-  + Plot twist lớn
-→ trừ khi đã được chuẩn bị hoặc gợi ý rõ trong ngữ cảnh
-
-7. Liên kết mạch truyện:
-- Phải bám sát các đoạn/chương gần nhất để đảm bảo tiếp nối tự nhiên
-- Không được nhảy cảnh hoặc thay đổi hướng truyện đột ngột
-
-8. Không mở rộng quá khứ:
-- Không được lấy sự kiện đã xảy ra và viết lại chi tiết hơn như một nội dung mới
-- Chỉ được tham chiếu ngắn gọn nếu cần thiết cho ngữ cảnh
-
-9. Định dạng đầu ra:
-- Phải tuân thủ chính xác format được yêu cầu
-- Không thêm giải thích, ghi chú hoặc nội dung ngoài yêu cầu
+5) Định dạng đầu ra
+- Tuân thủ đúng format được yêu cầu ở từng bước.
+- Không thêm ghi chú, giải thích, hoặc nội dung ngoài format.
 """;
-
-    /// <summary>Tiêu đề gắn lên block ngữ cảnh để agent biết đây là dữ liệu từ DB.</summary>
-    private const string DbContextLabel = "=== DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (ngữ cảnh truyện: nội dung các chương trước, nhân vật, sự kiện, trạng thái) — Dùng làm tham chiếu bắt buộc ===";
 
     private readonly IStoryRepository _storyRepository;
     private readonly IChapterRepository _chapterRepository;
     private readonly IAiGeneratedContentRepository _aiContentRepository;
     private readonly IStoryMemoryEngine _memoryEngine;
     private readonly IContentGuardrailService _guardrail;
-    private readonly IChapterCheckService _chapterCheck;
     private readonly IAIUsageLogRepository _aiUsageLogRepository;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<AICoCreationService> _logger;
 
     public AICoCreationService(
         IStoryRepository storyRepository,
@@ -96,18 +66,18 @@ Quy tắc bắt buộc:
         IAiGeneratedContentRepository aiContentRepository,
         IStoryMemoryEngine memoryEngine,
         IContentGuardrailService guardrail,
-        IChapterCheckService chapterCheck,
         IAIUsageLogRepository aiUsageLogRepository,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ILogger<AICoCreationService> logger)
     {
         _storyRepository = storyRepository;
         _chapterRepository = chapterRepository;
         _aiContentRepository = aiContentRepository;
         _memoryEngine = memoryEngine;
         _guardrail = guardrail;
-        _chapterCheck = chapterCheck;
         _aiUsageLogRepository = aiUsageLogRepository;
         _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task<CoCreationResponse> CoCreateAsync(
@@ -126,6 +96,8 @@ Quy tắc bắt buộc:
         var contextWarning = ChapterAiContextWarningHelper.GetWarningIfApplicable(allChaptersOrdered, targetOrderForWarning);
 
         var rawIdea = request.AuthorIdea?.Trim();
+        if (!string.IsNullOrWhiteSpace(rawIdea) && rawIdea.Length > AuthorIdeaMaxChars)
+            throw new InvalidOperationException($"Ý tưởng tác giả không được vượt quá {AuthorIdeaMaxChars} ký tự.");
         var hasAuthorIdea = !string.IsNullOrWhiteSpace(rawIdea);
         var effectiveIdea = hasAuthorIdea
             ? rawIdea!
@@ -133,7 +105,7 @@ Quy tắc bắt buộc:
 
         var ragQueryForRetrieval = hasAuthorIdea
             ? rawIdea!
-            : CoCreateRagQueryFromStoryMetadata(story);
+            : CoCreateRagQueryFromLatestPublishedChapter(request.StoryId, story.title);
 
         string contextBlock = await _memoryEngine.BuildContextForCoCreateAsync(
             request.StoryId, effectiveIdea, ragQueryForRetrieval, cancellationToken);
@@ -158,17 +130,35 @@ Quy tắc bắt buộc:
         var charactersInvolved = (charactersFromPayload?.Count ?? 0) > 0
             ? charactersFromPayload!
             : ExtractCharactersInvolved(outlineForPrompt);
-
+        //Agent2 
         var (p2, m2, k2, u2) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentWriter);
         var clientWriter = AIClientHelper.CreateChatClient(p2, m2, k2, u2);
 
         var swWrite = Stopwatch.StartNew();
         var (draft, writeCompletion) = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, languageInstruction, suggestedTitle, cancellationToken);
         swWrite.Stop();
-        draft = StripTrailingFeedbackFromDraft(draft);
+        var rawDraft = draft;
+        var rawWordCount = CountWords(rawDraft);
+        draft = StripTrailingFeedbackFromDraft(rawDraft);
+        var strippedWordCount = CountWords(draft);
+        var feedbackMarkerIndex = rawDraft.IndexOf("\n\nFeedback:", StringComparison.OrdinalIgnoreCase);
+        if (feedbackMarkerIndex < 0)
+            feedbackMarkerIndex = rawDraft.IndexOf("\nFeedback:", StringComparison.OrdinalIgnoreCase);
+        var feedbackTrimmed = feedbackMarkerIndex >= 0;
+        var (writePromptTokens, writeCompletionTokens, writeTotalTokens) = AiChatCompletionUsageHelper.GetTokenCounts(writeCompletion);
         durations.Add(new AgentDuration { Step = "Write", DurationMs = swWrite.ElapsedMilliseconds });
+        _logger.LogInformation(
+            "CoCreate Write diagnostics StoryId={StoryId} RawWords={RawWords} FinalWords={FinalWords} FeedbackTrimmed={FeedbackTrimmed} PromptTokens={PromptTokens} CompletionTokens={CompletionTokens} TotalTokens={TotalTokens} DurationMs={DurationMs}",
+            request.StoryId,
+            rawWordCount,
+            strippedWordCount,
+            feedbackTrimmed,
+            writePromptTokens,
+            writeCompletionTokens,
+            writeTotalTokens,
+            swWrite.ElapsedMilliseconds);
         LogUsageFromCompletion(authorUserId, request.StoryId, null, ActionWrite, m2, writeCompletion);
-
+        //check từ cấm
         var (draftAfterRefine, approved, reviewFeedback, revisionCount) = await RefineDraftWithSelfCorrectionAsync(
             clientWriter,
             request.StoryId,
@@ -195,12 +185,14 @@ Quy tắc bắt buộc:
                 languageInstruction,
                 suggestedTitle,
                 cancellationToken);
-            draft = expandedDraft;
+            draft = string.IsNullOrWhiteSpace(expandedDraft)
+                ? draft
+                : $"{draft.TrimEnd()}\n\n{expandedDraft.TrimStart()}";
             swExpand.Stop();
             draft = StripTrailingFeedbackFromDraft(draft);
             durations.Add(new AgentDuration { Step = "Length_Expand", DurationMs = swExpand.ElapsedMilliseconds });
             LogUsageFromCompletion(authorUserId, request.StoryId, null, ActionWrite, m2, expandCompletion);
-
+           
             var (draftExpanded, expandApproved, expandReviewFeedback, expandRewrites) = await RefineDraftWithSelfCorrectionAsync(
                 clientWriter,
                 request.StoryId,
@@ -290,16 +282,19 @@ Quy tắc bắt buộc:
         return allOrdered.Count == 0 ? 0 : allOrdered.Max(c => c.order_index) + 1;
     }
 
-    /// <summary>Khi tác giả không nhập gợi ý: dùng tiêu đề/tóm tắt làm query RAG để embedding gần nội dung truyện hơn so với câu hướng dẫn meta.</summary>
-    private static string CoCreateRagQueryFromStoryMetadata(stories story)
+    /// <summary>Khi tác giả không nhập gợi ý: ưu tiên dùng nội dung chương đã xuất bản gần nhất để truy hồi RAG sát mạch hiện tại.</summary>
+    private string CoCreateRagQueryFromLatestPublishedChapter(Guid storyId, string? storyTitleFallback)
     {
-        var title = story.title?.Trim();
-        var summary = story.summary?.Trim();
-        if (!string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(summary))
-            return $"{title}\n{summary}";
-        if (!string.IsNullOrWhiteSpace(summary)) return summary;
-        if (!string.IsNullOrWhiteSpace(title)) return title;
-        return string.Empty;
+        var latestPublished = _chapterRepository
+            .GetPublishedByStoryId(storyId)
+            .Where(c => !string.IsNullOrWhiteSpace(c.content))
+            .OrderByDescending(c => c.order_index)
+            .FirstOrDefault();
+        var latestContent = latestPublished?.content?.Trim();
+        if (!string.IsNullOrWhiteSpace(latestContent))
+            return latestContent;
+        var title = storyTitleFallback?.Trim();
+        return string.IsNullOrWhiteSpace(title) ? string.Empty : title;
     }
 
     /// <summary>Chỉ lưu bản <see cref="ai_generated_content"/> (không tạo/cập nhật <see cref="chapters"/>).
@@ -414,13 +409,13 @@ Role:
 Bạn là AI viết truyện (Story Writer) — lần này nhiệm vụ là SỬA bản nháp đã có theo yêu cầu cụ thể.
 
 Quy tắc:
-- Thực hiện đầy đủ các sửa được liệt kê (từ cấm → thay bằng diễn đạt tương đương; chính tả → thay cụm sai bằng gợi ý đúng).
+- Thực hiện đầy đủ các sửa được liệt kê (từ cấm → thay bằng diễn đạt tương đương).
 - Không đổi cốt truyện, timeline, nhân vật so với bản nháp và dàn ý; không thêm plot twist lớn.
 - Giữ tiếng Việt như bản gốc; độ dài không được ngắn hơn đáng kể so với bản nháp (nếu bản đã ≥500 từ thì bản sau sửa cũng ≥500 từ).
 - Chỉ trả về toàn bộ văn bản sau sửa, không markdown, không giải thích.
 """ + "\n\n" + ConstitutionalRules;
 
-    private static string? BuildCorrectionInstructionBlock(GuardrailResult gr, CheckChapterResponse spell)
+    private static string? BuildCorrectionInstructionBlock(GuardrailResult gr)
     {
         var parts = new List<string>();
         if (!gr.Passed)
@@ -437,15 +432,6 @@ Quy tắc:
             else
                 parts.Add("— Nội dung có thể chứa từ cấm: hãy thay các cụm nhạy cảm bằng diễn đạt tương đương, giữ ngữ cảnh.");
         }
-        if (!spell.Passed && spell.SpellingIssues.Count > 0)
-        {
-            parts.Add("— Lỗi chính tả (thay cụm trái bằng cụm phải, giữ nguyên câu chữ xung quanh):");
-            var take = spell.SpellingIssues.Take(40).ToList();
-            foreach (var s in take)
-                parts.Add($"  • «{s.WordOrPhrase}» → «{s.Suggestion}»");
-            if (spell.SpellingIssues.Count > 40)
-                parts.Add($"  • (và {spell.SpellingIssues.Count - 40} lỗi khác — sửa tương tự)");
-        }
         return parts.Count == 0 ? null : string.Join("\n", parts);
     }
 
@@ -459,7 +445,7 @@ Quy tắc:
         CancellationToken ct)
     {
         var userPrompt =
-            $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý (không đổi hướng plot):\n{outline}\n\n" +
+            $"{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý (không đổi hướng plot):\n{outline}\n\n" +
             "=== Bản nháp hiện tại ===\n" + currentDraft + "\n\n" +
             "=== Yêu cầu sửa (bắt buộc) ===\n" + correctionBlock + "\n\n" +
             $"{languageInstruction}\n\n" +
@@ -480,7 +466,7 @@ Quy tắc:
         return (text.Trim(), c);
     }
 
-    /// <summary>Lặp tối đa N lần: kiểm tra từ cấm + chính tả → nếu lỗi thì Agent 2 viết lại.</summary>
+    /// <summary>Lặp tối đa N lần: kiểm tra từ cấm → nếu lỗi thì Agent 2 viết lại.</summary>
     private async Task<(string Draft, bool Approved, string? ReviewFeedback, int RewritesUsed)> RefineDraftWithSelfCorrectionAsync(
         ChatClient clientWriter,
         Guid storyId,
@@ -522,20 +508,12 @@ Quy tắc:
             swG.Stop();
             durations.Add(new AgentDuration { Step = $"{prefix}_Banned", DurationMs = swG.ElapsedMilliseconds });
 
-            var swS = Stopwatch.StartNew();
-            var spell = await _chapterCheck.CheckSpellingOnlyAsync(
-                new CheckChapterSpellingRequest { Content = draft, StoryId = storyId },
-                userId: null,
-                ct);
-            swS.Stop();
-            durations.Add(new AgentDuration { Step = $"{prefix}_Spell", DurationMs = swS.ElapsedMilliseconds });
-
-            if (gr.Passed && spell.Passed)
+            if (gr.Passed)
             {
                 return (draft, true, null, rewrites);
             }
 
-            var instr = BuildCorrectionInstructionBlock(gr, spell);
+            var instr = BuildCorrectionInstructionBlock(gr);
             if (string.IsNullOrWhiteSpace(instr))
                 break;
 
@@ -554,23 +532,13 @@ Quy tắc:
         swGf.Stop();
         durations.Add(new AgentDuration { Step = $"{phaseLabel}SelfCorrect_Final_Banned", DurationMs = swGf.ElapsedMilliseconds });
 
-        var swSf = Stopwatch.StartNew();
-        var spellFinal = await _chapterCheck.CheckSpellingOnlyAsync(
-            new CheckChapterSpellingRequest { Content = draft, StoryId = storyId },
-            userId: null,
-            ct);
-        swSf.Stop();
-        durations.Add(new AgentDuration { Step = $"{phaseLabel}SelfCorrect_Final_Spell", DurationMs = swSf.ElapsedMilliseconds });
-
-        var okFinal = grFinal.Passed && spellFinal.Passed;
+        var okFinal = grFinal.Passed;
         string? review = null;
         if (!okFinal)
         {
             var bits = new List<string>();
             if (!grFinal.Passed)
                 bits.Add(string.Join(" ", grFinal.Violations.Select(v => $"[{v.Type}] {v.Message}")));
-            if (!spellFinal.Passed)
-                bits.Add("Chính tả: " + string.Join("; ", spellFinal.SpellingIssues.Take(12).Select(s => $"{s.WordOrPhrase}→{s.Suggestion}")));
             review = string.Join(" ", bits);
         }
 
@@ -586,11 +554,11 @@ Quy tắc:
         CancellationToken ct,
         bool prioritizeAuthorIdea)
     {
-        var storyInfo = $"Story Information:\nTitle: {story.title}\nSummary: {story.summary ?? ""}\n\nUser Idea:\n{authorIdea}";
+        var storyInfo = $"Story Information:\nTitle: {story.title}\n\nUser Idea:\n{authorIdea}";
         var directionNote = prioritizeAuthorIdea
             ? "User Idea là hướng sáng tác do tác giả đặt: dàn ý PHẢI thực hiện ý đó làm trọng tâm cho phần TIẾP THEO; dùng ngữ cảnh DB để tiếp nối SAU điểm kết thúc hiện tại và giữ đúng tên nhân vật, địa danh."
             : "Không có ý plot cụ thể từ tác giả (chỉ hướng dẫn chung): dàn ý tiếp nối tự nhiên theo mạch truyện, Story State, Event Memory và Character Memory.";
-        var userPrompt = $"{storyInfo}\n\n---\n{DbContextLabel}\n\n{contextBlock}\n\n---\n{languageInstruction}\n\n{directionNote}\n\nNgữ cảnh trên là phần truyện ĐÃ XẢY RA. Chỉ sinh outline cho phần TIẾP THEO (sau điểm kết thúc hiện tại). Trả lời bằng tiếng Việt. LUÔN trả về đúng một JSON có suggestedChapterTitle + outline + charactersInvolved theo system prompt (không trả JSON khác, không trả nhánh từ chối).";
+        var userPrompt = $"{storyInfo}\n\n---\n{contextBlock}\n\n---\n{languageInstruction}\n\n{directionNote}\n\nNgữ cảnh trên là phần truyện ĐÃ XẢY RA. Chỉ sinh outline cho phần TIẾP THEO (sau điểm kết thúc hiện tại). Trả lời bằng tiếng Việt. LUÔN trả về đúng một JSON có suggestedChapterTitle + outline + charactersInvolved theo system prompt (không trả JSON khác, không trả nhánh từ chối).";
         var messages = new List<ChatMessage>
         {
             new SystemChatMessage(GetAgent1SystemPrompt()),
@@ -617,11 +585,13 @@ Quy tắc:
         var titleHint = string.IsNullOrWhiteSpace(suggestedChapterTitle)
             ? ""
             : $"\n\n(Tiêu đề chương gợi ý — chỉ tham khảo tone/nội dung; không in tiêu đề trong văn bản: «{suggestedChapterTitle}»)";
+        var draftTail = ExtractTailChars(currentDraft, 2200);
         var userPrompt =
-            $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý:\n{outline}\n\nBản nháp hiện tại:\n{currentDraft}{titleHint}\n\n" +
+            $"{Agent2Checklist}\n\nDàn ý:\n{outline}\n\nPhần cuối bản nháp hiện tại (để nối mạch, KHÔNG viết lại đoạn cũ):\n{draftTail}{titleHint}\n\n" +
             $"{languageInstruction}\n\n" +
-            "Yêu cầu: giữ nguyên mạch truyện, sự kiện chính và tính nhất quán của bản nháp hiện tại; chỉ mở rộng thêm chi tiết hợp lý (miêu tả, nội tâm, đối thoại, chuyển cảnh) để bản đầy đủ trên 500 từ, ưu tiên khoảng 600–700 từ. " +
-            "Không viết lại theo hướng khác, không thêm plot twist lớn. Trả về toàn bộ bản nháp hoàn chỉnh, chỉ nội dung truyện.";
+            $"Yêu cầu: bổ sung PHẦN NỐI TIẾP NGẮN để đưa tổng độ dài bản nháp lên khoảng {ExpandTargetWords} từ (tối thiểu >500). " +
+            "Chỉ viết phần mới nối tiếp, không viết lại nội dung cũ, không đổi hướng plot, không thêm plot twist lớn. " +
+            "Trả về DUY NHẤT phần nội dung bổ sung mới (không lặp lại bản nháp cũ).";
 
         var messages = new List<ChatMessage>
         {
@@ -635,6 +605,13 @@ Quy tắc:
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("Agent mở rộng nội dung không trả về nội dung.");
         return (text.Trim(), c);
+    }
+
+    private static string ExtractTailChars(string text, int maxChars)
+    {
+        var s = (text ?? string.Empty).Trim();
+        if (s.Length <= maxChars) return s;
+        return s[^maxChars..];
     }
 
     private static int CountWords(string? text)
@@ -863,101 +840,26 @@ Nếu outline còn mơ hồ, suy luận theo hướng bám outline và mạch tr
 
     private static string GetAgent2SystemPrompt() => """
 Role:
-Bạn là AI viết truyện (Story Writer), chịu trách nhiệm viết bản nháp cho scene/chapter TIẾP THEO dựa trên outline và ngữ cảnh đã có.
+Bạn là AI viết truyện (Story Writer), viết chương TIẾP THEO dựa trên ngữ cảnh DB và Scene Outline.
 
----
+Nguyên tắc cốt lõi:
+1) Chỉ viết các sự kiện xảy ra SAU điểm kết thúc hiện tại; không viết lại quá khứ như scene đang diễn ra.
+2) Ưu tiên theo thứ tự: Scene Outline -> Ý tưởng tác giả (nếu có) -> Story State -> Event Memory -> Character Memory -> RAG.
+3) Giữ chính xác tên nhân vật/địa danh/thuật ngữ trong ngữ cảnh.
+4) Viết đúng thứ tự các ý outline, không bỏ sót ý chính; được phép mở rộng chi tiết nhưng không đổi ý nghĩa outline.
+5) Không tự ý thêm nhân vật quan trọng mới, sức mạnh mới, plot twist lớn nếu chưa có trong ngữ cảnh/outline.
 
-Task:
-Bạn nhận được:
-- Ngữ cảnh từ database (Story Information, RAG, Character Memory, Event Memory, Story State)
-- Một dàn ý có cấu trúc (Scene Outline)
-
-Ngữ cảnh mô tả những gì ĐÃ xảy ra trong truyện.
-
-Nhiệm vụ của bạn:
-→ Viết nội dung truyện cho scene/chapter TIẾP THEO, tức là các sự kiện xảy ra SAU điểm kết thúc hiện tại.
-
-Bạn phải:
-- Bắt đầu đúng tại điểm kết thúc mới nhất của truyện
-- Không viết lại hoặc mô tả lại các sự kiện đã xảy ra
-
----
-
-Context Priority (ưu tiên từ cao xuống thấp):
-1. Scene Outline (dàn ý bước trước — phải viết đủ, đúng thứ tự)
-2. Khối «Ý tưởng tác giả» trong ngữ cảnh (khi có ý cụ thể)
-3. Story State
-4. Event Memory
-5. Character Memory
-6. RAG / Previous Content
-
----
-
-Nguyên tắc bắt buộc:
-- Context mô tả quá khứ và trạng thái; Scene Outline + ý tác giả định hướng phần TIẾP THEO — ưu tiên thực hiện chúng.
-- Không viết lại quá khứ như đang diễn ra trong scene mới; mọi sự kiện mới xảy ra SAU điểm kết thúc hiện tại.
-- Giữ đúng tên nhân vật, địa danh như trong ngữ cảnh.
-- Phải tuân thủ logic timeline “hiện tại → tiếp theo”
-
----
-
-Tuân thủ Outline:
-- Viết theo đúng thứ tự các ý trong Scene Outline
-- Không bỏ sót ý quan trọng
-- Có thể mở rộng chi tiết, nhưng không được thêm nội dung làm thay đổi ý nghĩa outline
-
----
-
-Văn phong & chất lượng:
-- Viết tự nhiên, giàu cảm xúc, có chiều sâu
-- Ưu tiên “show, don’t tell”
-- Kết hợp:
-  + hành động
-  + đối thoại
-  + miêu tả nội tâm
-- Tránh lặp lại thông tin đã có trong context
-- Tránh lan man, giữ nhịp truyện tốt
-
----
-
-Kiểm soát nội dung:
-- Không tự ý thêm:
-  + sức mạnh mới
-  + nhân vật mới quan trọng
-  + plot twist lớn
-→ trừ khi đã được chuẩn bị trong context hoặc outline
-
----
+Chất lượng văn bản:
+- Văn phong tự nhiên, cảm xúc, ưu tiên show-don't-tell.
+- Kết hợp hành động, đối thoại, nội tâm và chuyển cảnh hợp lý.
+- Tránh lặp thông tin; giữ nhịp truyện tốt, không kết thúc sớm.
 
 Ngôn ngữ:
-- Viết hoàn toàn bằng tiếng Việt; không trộn ngôn ngữ khác.
-
----
-
-Checklist (PHẢI tự kiểm tra trước khi trả kết quả):
-1. Tên nhân vật đúng 100% như context (không dịch, không đổi)
-2. Đã thực hiện đủ Scene Outline và (nếu có) «Ý tưởng tác giả»; nếu outline mô tả nhân vật quay lại / twist, viết theo outline
-3. Không viết lại quá khứ như đang diễn ra; mọi sự kiện mới SAU điểm kết thúc hiện tại
-4. Nội dung đi theo đúng thứ tự outline
-5. Không lặp lại scene cũ như nội dung chính
-6. Độ dài: trên 500 từ; ưu tiên khoảng 600–700 từ (nếu chưa đủ thì mở rộng nội dung hợp lý trước khi gửi)
-
----
-
-Độ dài (bắt buộc):
-- Phải trên 500 từ (đếm theo từ tiếng Việt). Không được gửi bản nháp từ 500 từ trở xuống.
-- Mục tiêu: khoảng 600–700 từ (ưu tiên đạt khoảng này).
-- Tối đa khoảng 750 từ — tránh lan man; nếu thiếu độ dài, hãy bổ sung chi tiết, đối thoại hoặc miêu tả hợp lý thay vì kết thúc sớm.
-
----
+- Chỉ dùng tiếng Việt.
 
 Output:
-Chỉ trả về nội dung truyện (draft).
-- Không markdown
-- Không tiêu đề
-- Không giải thích
-- Không meta text
-→ Chỉ nội dung mà người đọc nhìn thấy
+- Chỉ trả về nội dung truyện hoàn chỉnh.
+- Không markdown, không tiêu đề, không giải thích, không meta text.
 """ + "\n\n" + ConstitutionalRules;
 
     private async Task<(string Text, ChatCompletion Completion)> RunAgent2WriteAsync(
@@ -971,8 +873,8 @@ Chỉ trả về nội dung truyện (draft).
         var titleHint = string.IsNullOrWhiteSpace(suggestedChapterTitle)
             ? ""
             : $"\n\n(Tiêu đề chương gợi ý — chỉ tham khảo tone/nội dung; không được in tiêu đề hay dòng meta trong văn bản truyện: «{suggestedChapterTitle}»)";
-        var userPrompt = $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý cần viết:\n{outline}{titleHint}";
-        userPrompt += $"\n\n{languageInstruction}\n\nĐộ dài: tối thiểu 500 từ, mục tiêu 600–700 từ (tối đa khoảng 750 từ). Chỉ output nội dung chương (văn bản truyện), không markdown hay giải thích.";
+        var userPrompt = $"{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý cần viết:\n{outline}{titleHint}";
+        userPrompt += $"\n\n{languageInstruction}\n\nĐộ dài bắt buộc: mục tiêu 700-850 từ. Trước khi trả lời, tự kiểm tra ước lượng số từ lần cuối; nếu chưa đạt thì tiếp tục mở rộng chi tiết hợp lý (đối thoại, nội tâm, chuyển cảnh) mà không đổi mạch truyện. Chỉ output nội dung chương (văn bản truyện), không markdown hay giải thích.";
 
         var messages = new List<ChatMessage>
         {
