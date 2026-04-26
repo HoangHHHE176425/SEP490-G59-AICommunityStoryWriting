@@ -16,6 +16,16 @@ namespace Services.Implementations
     public class AINextChapterService : IAINextChapterService
     {
         private const string ActionType = "SUGGEST_NEXT_CHAPTER";
+        private const int JsonRepairMaxInputChars = 8000;
+        private const string SuggestConstitutionalRules = """
+Quy tắc bắt buộc:
+- Chỉ dùng dữ liệu ngữ cảnh đã cung cấp (Story Information, RAG, Character Memory, Event Memory, Story State).
+- Chỉ gợi ý sự kiện xảy ra SAU điểm kết thúc hiện tại; không lặp lại sự kiện đã xảy ra như nội dung chính.
+- Không tạo chi tiết mâu thuẫn với Story State, Event Memory, Character Memory.
+- Dùng chính xác tên nhân vật/địa danh/thuật ngữ trong ngữ cảnh; không dịch hay biến đổi tên riêng.
+- Hạn chế thêm yếu tố lớn (nhân vật quan trọng mới, sức mạnh mới, phe phái mới, plot twist lớn) nếu ngữ cảnh chưa có gợi mở.
+- Tuân thủ đúng output JSON theo format yêu cầu; không thêm markdown hoặc giải thích ngoài JSON.
+""";
 
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
@@ -74,7 +84,7 @@ namespace Services.Implementations
                     "Chưa cấu hình embedding: cần AI:EmbeddingBaseUrl (vd. https://openrouter.ai/api/v1), AI:EmbeddingModel (vd. openai/text-embedding-3-small) và API key AI:ApiKey hoặc AI:EmbeddingApiKey. Với OpenRouter thường dùng cùng key với chat; đặt trong appsettings.Local.json hoặc biến môi trường trên server.");
             }
 
-            await _ragService.TryEnsureIndexedAsync(request.StoryId, afterChapterId: request.AfterChapterId, cancellationToken);
+            await _ragService.TryEnsureIndexedAsync(request.StoryId, upToChapterId: request.UpToChapterId, cancellationToken);
             if (!_ragService.IsRagAvailableForStory(request.StoryId))
             {
                 throw new InvalidOperationException(
@@ -82,12 +92,13 @@ namespace Services.Implementations
             }
 
             var lastChapterContent = chapters.LastOrDefault()?.content ?? "";
-            var ragQuery = $"{story.summary ?? ""} {lastChapterContent}".Trim();
+            var ragQuery = lastChapterContent.Trim();
             var contextBlock = await _memoryEngine.BuildContextForSuggestAsync(request.StoryId, ragQuery, cancellationToken);
 
             var languageInstruction = StoryLanguageHelper.VietnameseOnlyInstruction;
 
             var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlanner);
+            //tạo client 
             var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
 
             var systemPrompt = GetSystemPrompt();
@@ -104,9 +115,12 @@ namespace Services.Implementations
             var cappedOutputTokens = (int)Math.Max(64, balanceNow - reservedInputTokens);
             var options = AIClientHelper.GetCompletionOptions(_configuration, null, cappedOutputTokens);
             ChatCompletion completion;
+            var completionsForUsage = new List<ChatCompletion>();
             try
             {
+                //Gọi modal để sinh gợi ý chương tiếp theo dựa trên ngữ cảnh đã xây dựng. Nếu có lỗi kết nối hoặc lỗi từ provider, catch và throw với thông điệp rõ ràng.
                 completion = await client.CompleteChatAsync(messages, options);
+                completionsForUsage.Add(completion);
             }
             catch (Exception ex)
             {
@@ -122,9 +136,21 @@ namespace Services.Implementations
             var suggestions = ParseSuggestions(text);
             if (suggestions.Count == 0)
             {
-                var snippet = text.Length > 600 ? text[..600] + "..." : text;
-                throw new InvalidOperationException(
-                    "Không thể đọc được gợi ý từ phản hồi AI. Kiểm tra model trả về đúng JSON với mảng \"suggestions\" (title, summary, direction, key_events, characters_involved). Phản hồi AI (rút gọn): " + snippet);
+                var repaired = await RetryNormalizeSuggestionsJsonAsync(
+                    client,
+                    options,
+                    systemPrompt,
+                    text,
+                    cancellationToken).ConfigureAwait(false);
+                if (repaired.Completion != null)
+                    completionsForUsage.Add(repaired.Completion);
+                suggestions = repaired.Suggestions;
+                if (suggestions.Count == 0)
+                {
+                    var snippet = repaired.Text.Length > 600 ? repaired.Text[..600] + "..." : repaired.Text;
+                    throw new InvalidOperationException(
+                        "Không thể đọc được gợi ý từ phản hồi AI. Kiểm tra model trả về đúng JSON với mảng \"suggestions\" (title, summary, direction, key_events, characters_involved). Phản hồi AI (rút gọn): " + snippet);
+                }
             }
 
             var existingTitles = allChaptersOrdered
@@ -144,8 +170,16 @@ namespace Services.Implementations
                     usageLogChapterId = targetChapter.id;
             }
 
-            var promptTokens = completion.Usage?.InputTokenCount ?? 0;
-            var completionTokens = completion.Usage?.OutputTokenCount ?? 0;
+            var promptTokens = completionsForUsage.Sum(c => c.Usage?.InputTokenCount ?? 0);
+            var completionTokens = completionsForUsage.Sum(c => c.Usage?.OutputTokenCount ?? 0);
+            var usageCompletion = completionsForUsage.Count > 0 ? completionsForUsage[^1] : completion;
+            decimal? costUsd = null;
+            foreach (var c in completionsForUsage)
+            {
+                var piece = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(c);
+                if (piece.HasValue)
+                    costUsd = (costUsd ?? 0m) + piece.Value;
+            }
 
             _aiUsageLogRepository.Log(new ai_usage_logs
             {
@@ -154,8 +188,8 @@ namespace Services.Implementations
                 chapter_id = usageLogChapterId,
                 action_type = ActionType,
                 model_name = model,
-                generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
-                cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
+                generation_id = AiChatCompletionUsageHelper.GetGenerationId(usageCompletion),
+                cost_usd = costUsd,
                 prompt_tokens = promptTokens,
                 completion_tokens = completionTokens,
                 total_tokens = promptTokens + completionTokens,
@@ -215,7 +249,7 @@ namespace Services.Implementations
                 n++;
             }
         }
-
+        //
         private static int ResolveSuggestTargetOrderIndex(SuggestNextChapterRequest request, List<chapters> allOrdered)
         {
             if (request.ChapterId.HasValue)
@@ -225,17 +259,15 @@ namespace Services.Implementations
                     return ch.order_index;
             }
 
-            if (request.AfterChapterId.HasValue)
+            if (request.UpToChapterId.HasValue)
             {
-                var after = allOrdered.FirstOrDefault(c => c.id == request.AfterChapterId.Value);
+                var after = allOrdered.FirstOrDefault(c => c.id == request.UpToChapterId.Value);
                 if (after != null)
                     return after.order_index + 1;
             }
 
             return allOrdered.Count == 0 ? 0 : allOrdered.Max(c => c.order_index) + 1;
         }
-
-        private const string DbContextLabel = "=== DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (ngữ cảnh truyện: RAG, Character Memory, Event Memory, Story State) — Dùng làm tham chiếu bắt buộc ===";
 
         private static string GetSystemPrompt()
         {
@@ -269,12 +301,12 @@ Trả về DUY NHẤT một JSON hợp lệ, không markdown:
 }
 
 Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, xung đột hoặc kết cục); mỗi gợi ý phải đủ dài và cụ thể, không sơ sài; bám sát mạch truyện và đặc biệt nội dung các chương/đoạn gần nhất trong dữ liệu — chỉ gợi ý nội dung tiếp theo trên dòng thời gian, không đảo ngược hay lặp lại sự kiện đã xảy ra. Ngôn ngữ: Toàn bộ nội dung sinh ra (title, summary, direction, key_events, characters_involved) phải bằng tiếng Việt; không xen từ hoặc cụm từ ngôn ngữ khác.
-""";
+""" + "\n\n" + SuggestConstitutionalRules;
         }
 
         private static string GetUserPrompt(stories story, string contextBlock, string languageInstruction)
         {
-            return $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{languageInstruction}\n\nGợi ý đúng 3 hướng đi KHÁC NHAU và CHI TIẾT cho chương tiếp theo (chỉ nội dung xảy ra SAU điểm kết thúc hiện tại của truyện trong dữ liệu trên; không gợi ý sự kiện đã xảy ra). Mỗi gợi ý phải có summary 2–4 câu, direction 4–6 câu/bullet, key_events và characters_involved đầy đủ. Trả về JSON theo đúng cấu trúc đã nêu.";
+            return $"{contextBlock}\n\n---\n{languageInstruction}\n\nGợi ý đúng 3 hướng đi KHÁC NHAU và CHI TIẾT cho chương tiếp theo (chỉ nội dung xảy ra SAU điểm kết thúc hiện tại của truyện trong dữ liệu trên; không gợi ý sự kiện đã xảy ra). Mỗi gợi ý phải có summary 2–4 câu, direction 4–6 câu/bullet, key_events và characters_involved đầy đủ. Trả về JSON theo đúng cấu trúc đã nêu.";
         }
 
         private static List<JsonSuggestion> ParseSuggestions(string text)
@@ -355,6 +387,75 @@ Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, 
             catch
             {
                 return new List<JsonSuggestion>();
+            }
+        }
+
+        private static async Task<(List<JsonSuggestion> Suggestions, string Text, ChatCompletion? Completion)> RetryNormalizeSuggestionsJsonAsync(
+            ChatClient client,
+            ChatCompletionOptions? options,
+            string systemPrompt,
+            string rawResponse,
+            CancellationToken cancellationToken)
+        {
+            var normalizedRaw = rawResponse ?? string.Empty;
+            if (normalizedRaw.Length > JsonRepairMaxInputChars)
+                normalizedRaw = normalizedRaw[..JsonRepairMaxInputChars];
+
+            var userPrompt = """
+Phản hồi trước chưa đúng format JSON mong muốn.
+Hãy CHỈ trả về duy nhất JSON hợp lệ theo schema:
+{
+  "suggestions": [
+    {
+      "title": "string",
+      "summary": "string",
+      "direction": "string",
+      "key_events": "string",
+      "characters_involved": "string"
+    },
+    {
+      "title": "string",
+      "summary": "string",
+      "direction": "string",
+      "key_events": "string",
+      "characters_involved": "string"
+    },
+    {
+      "title": "string",
+      "summary": "string",
+      "direction": "string",
+      "key_events": "string",
+      "characters_involved": "string"
+    }
+  ]
+}
+
+Yêu cầu:
+- Không markdown, không ```json, không giải thích.
+- Giữ đúng 3 phần tử trong suggestions.
+- Mọi trường là chuỗi.
+
+Phản hồi trước cần chuẩn hóa:
+""" + "\n" + normalizedRaw;
+
+            var retryMessages = new List<ChatMessage>
+            {
+                new SystemChatMessage(systemPrompt),
+                new UserChatMessage(userPrompt)
+            };
+
+            try
+            {
+                var completion = await client.CompleteChatAsync(retryMessages, options, cancellationToken).ConfigureAwait(false);
+                var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+                if (string.IsNullOrWhiteSpace(text))
+                    return (new List<JsonSuggestion>(), rawResponse, completion.Value);
+                var parsed = ParseSuggestions(text);
+                return (parsed, text, completion.Value);
+            }
+            catch
+            {
+                return (new List<JsonSuggestion>(), rawResponse, null);
             }
         }
 

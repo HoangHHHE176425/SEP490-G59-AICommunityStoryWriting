@@ -55,7 +55,7 @@ public class StoryRagService : IStoryRagService
         };
     }
 
-    public async Task EnsureIndexedAsync(Guid storyId, Guid? afterChapterId, CancellationToken cancellationToken = default)
+    public async Task EnsureIndexedAsync(Guid storyId, Guid? upToChapterId, CancellationToken cancellationToken = default)
     {
         var config = EmbeddingHelper.GetEmbeddingConfig(_configuration);
         if (config == null)
@@ -68,7 +68,7 @@ public class StoryRagService : IStoryRagService
 
         var indexedChapterIds = _vectorStore.GetIndexedChapterIds(storyId).ToHashSet();
         bool hasExistingIndex = indexedChapterIds.Count > 0;
-        bool doIncremental = hasExistingIndex && !afterChapterId.HasValue;
+        bool doIncremental = hasExistingIndex && !upToChapterId.HasValue;
 
         List<chapters> toIndex;
         if (doIncremental)
@@ -79,9 +79,9 @@ public class StoryRagService : IStoryRagService
         }
         else
         {
-            if (afterChapterId.HasValue)
+            if (upToChapterId.HasValue)
             {
-                var idx = allChapters.FirstOrDefault(c => c.id == afterChapterId.Value)?.order_index;
+                var idx = allChapters.FirstOrDefault(c => c.id == upToChapterId.Value)?.order_index;
                 toIndex = idx.HasValue
                     ? publishedChapters.Where(c => c.order_index <= idx.Value).ToList()
                     : publishedChapters;
@@ -149,15 +149,15 @@ public class StoryRagService : IStoryRagService
         }
     }
 
-    public async Task TryEnsureIndexedAsync(Guid storyId, Guid? afterChapterId, CancellationToken cancellationToken = default)
+    public async Task TryEnsureIndexedAsync(Guid storyId, Guid? upToChapterId, CancellationToken cancellationToken = default)
     {
         if (EmbeddingHelper.GetEmbeddingConfig(_configuration) == null)
             return;
         if (_vectorStore.HasIndex(storyId) && _vectorStore.GetChunkCount(storyId) > 0)
             return;
-        await EnsureIndexedAsync(storyId, afterChapterId, cancellationToken);
+        await EnsureIndexedAsync(storyId, upToChapterId, cancellationToken);
     }
-
+    //Lấy ngữ cảnh liên quan nhất với query: embedding query, search top-k chunk, lấy content, ghép lại để đưa vào prompt..
     public async Task<string?> RetrieveContextAsync(Guid storyId, string query, int maxChars = 12000, int topK = 20, CancellationToken cancellationToken = default)
     {
         var config = EmbeddingHelper.GetEmbeddingConfig(_configuration);

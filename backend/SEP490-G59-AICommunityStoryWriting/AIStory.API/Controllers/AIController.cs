@@ -62,6 +62,7 @@ namespace AIStory.API.Controllers
     [Authorize(Policy = "AuthorOnly")]
     public class AIController : ControllerBase
     {
+        private const int CoCreateAuthorIdeaMaxChars = 1500;
         private readonly IAINextChapterService _aiNextChapterService;
         private readonly IAICoCreationService _aiCoCreationService;
         private readonly IChapterCheckService _chapterCheckService;
@@ -255,6 +256,10 @@ namespace AIStory.API.Controllers
                 return BadRequest(new { message = "StoryId là bắt buộc." });
             }
             // AuthorIdea là tùy chọn (option 1: để trống → AI tự viết theo mạch truyện).
+            if (!string.IsNullOrWhiteSpace(request.AuthorIdea) && request.AuthorIdea.Trim().Length > CoCreateAuthorIdeaMaxChars)
+            {
+                return BadRequest(new { message = $"Ý tưởng tác giả không được vượt quá {CoCreateAuthorIdeaMaxChars} ký tự." });
+            }
 
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))
@@ -340,7 +345,7 @@ namespace AIStory.API.Controllers
 
             try
             {
-                await _ragService.EnsureIndexedAsync(request.StoryId, request.AfterChapterId, cancellationToken);
+                await _ragService.EnsureIndexedAsync(request.StoryId, request.UpToChapterId, cancellationToken);
                 return Ok(new { message = "Đã index xong cho RAG.", storyId = request.StoryId });
             }
             catch (UnauthorizedAccessException ex)

@@ -123,7 +123,7 @@ public class FaissVectorStore : IVectorStore
             return 0;
         }
     }
-
+    //Lấy (chunkId, chapterId, content) cho các chunkIds (để build context sau Search). Nếu chunkId không tồn tại thì bỏ qua.
     public IReadOnlyList<(Guid ChunkId, Guid ChapterId, string Content)> GetChunkInfos(Guid storyId, IReadOnlyList<Guid> chunkIds)
     {
         if (chunkIds == null || chunkIds.Count == 0)
@@ -143,7 +143,7 @@ public class FaissVectorStore : IVectorStore
         var c = GetOrLoadFull(storyId);
         return (c.Ids, c.ChapterIds, c.Vectors, c.Contents);
     }
-
+    //Tính cosine similarity giữa queryVector và tất cả vector đã lưu, trả về top-k chunkId có điểm cao nhất. Nếu không có vector nào hoặc queryVector rỗng thì trả về rỗng.
     public IReadOnlyList<(Guid ChunkId, float Score)> Search(Guid storyId, float[] queryVector, int topK)
     {
         var c = GetOrLoadFull(storyId);
@@ -164,7 +164,7 @@ public class FaissVectorStore : IVectorStore
             return c;
         return LoadIntoCache(storyId);
     }
-
+    //đọc file binary -> chuyển từ byte[] -> Guid, float[], string; lưu vào cache; nếu lỗi thì cache empty để tránh đọc lại nhiều lần.
     private CachedStory LoadIntoCache(Guid storyId)
     {
         var path = GetFilePath(storyId);
@@ -214,7 +214,7 @@ public class FaissVectorStore : IVectorStore
             return empty;
         }
     }
-
+    //Tính tích vô hướng của 2 vector, chia cho tích của độ dài 2 vector (cosine similarity). Nếu có lỗi (độ dài 0) thì trả về 0.
     private static float CosineSimilarity(float[] a, float[] b)
     {
         if (a.Length == 0 || b.Length != a.Length)

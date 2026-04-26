@@ -26,19 +26,21 @@ export async function indexRag(storyId) {
 /**
  * Gợi ý 3 hướng đi cho chương tiếp theo (chỉ tác giả, check token từ BE).
  * @param {string} storyId - ID truyện (Guid)
- * @param {string|null} afterChapterId - ID chương sau đó muốn gợi ý; null = sau chương mới nhất
+ * @param {string|null} upToChapterId - ID chương mốc ngữ cảnh; null = sau chương mới nhất
  * @param {string|null} prompt - Prompt tùy chọn do tác giả nhập
  * @param {string|null} chapterId - ID chương đang soạn (FE tạo trước); BE lưu gợi ý vào ai_generated_content
  * @returns {Promise<{ suggestions: Array<{ title, summary, direction }>, contextUsed?: { storyTitle?, chaptersIncluded } }>}
  */
-export async function suggestNextChapter(storyId, afterChapterId = null, prompt = null, chapterId = null) {
+export async function suggestNextChapter(storyId, upToChapterId = null, prompt = null, chapterId = null) {
     if (!storyId) {
         throw new Error("StoryId là bắt buộc.");
     }
     const trimmedPrompt = (prompt ?? "").toString().trim();
     const body = {
         storyId,
-        afterChapterId: afterChapterId || null,
+        upToChapterId: upToChapterId || null,
+        // Backward compatibility for older backend contracts.
+        afterChapterId: upToChapterId || null,
         chapterId: chapterId || null,
         // Hỗ trợ BE theo nhiều naming convention (BE có thể chọn 1 trong các field này)
         prompt: trimmedPrompt || null,
