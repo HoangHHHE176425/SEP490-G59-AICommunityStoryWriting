@@ -276,8 +276,21 @@ export function ChapterEditor({
             setShowSuggestPopup(true);
             setSuggestLoading(true);
             try {
+                const orderIdx = (Number(chapterData.number) || 1) - 1;
+                let upToChapterId = null;
+                if (orderIdx > 0) {
+                    try {
+                        const chRes = await getChapters({ storyId, page: 1, pageSize: 500 });
+                        const items = chRes?.items ?? chRes?.Items ?? [];
+                        const arr = Array.isArray(items) ? items : [];
+                        const prev = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === orderIdx - 1);
+                        upToChapterId = prev?.id ?? prev?.Id ?? null;
+                    } catch {
+                        upToChapterId = null;
+                    }
+                }
                 await indexRag(storyId);
-                const data = await suggestNextChapter(storyId, null, null, chapterIdForAi);
+                const data = await suggestNextChapter(storyId, upToChapterId, null, chapterIdForAi);
                 const list = data?.suggestions ?? data?.Suggestions ?? [];
                 setSuggestions(Array.isArray(list) ? list : []);
                 const ctxWarn = pickAiContextWarning(data);

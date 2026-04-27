@@ -19,6 +19,7 @@ import { Pagination } from '../../components/pagination/Pagination';
 import { setAuthorChapterListActive } from '../../utils/authorUiFlags';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { getAiUsageLimit } from '../../api/ai/aiApi';
+import { getNotifications } from '../../api/notification/notificationApi';
 
 function mapStoryFromApi(item) {
     const status = item.status || item.Status || '';
@@ -50,7 +51,7 @@ function mapStoryFromApi(item) {
         : categoryNamesArr.map((name) => ({ id: name, name })); // fallback: chỉ có tên
     const updatedAt = item.updatedAt || item.UpdatedAt;
     const lastUpdate = updatedAt
-        ? new Date(updatedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        ? new Date(updatedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
         : '';
     const coverPath = item.coverImage ?? item.CoverImage;
     const summary = item.summary ?? item.Summary ?? '';
@@ -314,6 +315,10 @@ export function AuthorStoryManagement({ onBack }) {
     const [authorAiBudget, setAuthorAiBudget] = useState(null);
     const [authorAiBudgetLoading, setAuthorAiBudgetLoading] = useState(false);
     const [authorAiBudgetError, setAuthorAiBudgetError] = useState(null);
+    const [authorReportNotifications, setAuthorReportNotifications] = useState([]);
+    const [authorReportLoading, setAuthorReportLoading] = useState(false);
+    const [authorReportError, setAuthorReportError] = useState(null);
+    const [reportStoryFilterId, setReportStoryFilterId] = useState('');
 
     // Danh sách tài khoản ngân hàng (load từ backend)
     const [bankAccounts, setBankAccounts] = useState([]);
@@ -330,6 +335,39 @@ export function AuthorStoryManagement({ onBack }) {
         if (Number.isNaN(d.getTime())) return iso || '—';
         return d.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
+
+    const parseStoryIdFromNotificationLink = useCallback((linkUrl) => {
+        const value = String(linkUrl || '');
+        const match = value.match(/\/story\/([0-9a-fA-F-]{36})/i);
+        return match?.[1] ?? '';
+    }, []);
+
+    const loadAuthorReportNotifications = useCallback(async () => {
+        setAuthorReportLoading(true);
+        setAuthorReportError(null);
+        try {
+            const list = await getNotifications({ limit: 100, onlyUnread: false });
+            const reportTypes = new Set(['STORY_REPORTED_TO_AUTHOR', 'COMMENT_REPORTED_TO_OWNER']);
+            const mapped = (Array.isArray(list) ? list : [])
+                .filter((n) => reportTypes.has(String(n?.type ?? '').toUpperCase()))
+                .map((n) => ({
+                    ...n,
+                    storyIdFromLink: parseStoryIdFromNotificationLink(n?.linkUrl),
+                }))
+                .sort((a, b) => {
+                    const ta = Date.parse(a?.createdAt ?? '') || 0;
+                    const tb = Date.parse(b?.createdAt ?? '') || 0;
+                    return tb - ta;
+                });
+            setAuthorReportNotifications(mapped);
+        } catch (err) {
+            const message = err?.response?.data?.message ?? err?.message ?? 'Không tải được danh sách báo cáo.';
+            setAuthorReportError(message);
+            setAuthorReportNotifications([]);
+        } finally {
+            setAuthorReportLoading(false);
+        }
+    }, [parseStoryIdFromNotificationLink]);
 
     const withdrawBankAccounts = bankAccounts;
     const selectedBankAccount = withdrawBankAccounts[selectedBankAccountIdx] ?? null;
@@ -419,6 +457,7 @@ export function AuthorStoryManagement({ onBack }) {
                                 const isPermanentHidden = String(item.status ?? item.Status ?? '').toUpperCase() === 'HIDDEN';
                                 mapped.status = 'hidden';
                                 mapped.publishStatus = isPermanentHidden ? 'Đã ẩn vĩnh viễn' : 'Đã ẩn tạm thời';
+                                mapped.isPermanentlyHidden = isPermanentHidden;
                                 return mapped;
                             }
                             const hasPublished = item._hasPublishedChapter === true;
@@ -1283,9 +1322,22 @@ export function AuthorStoryManagement({ onBack }) {
             navigate('/author', { replace: true });
             return;
         }
+        if (view === 'reports') {
+            const storyId = String(searchParams.get('storyId') || '').trim();
+            setReportStoryFilterId(storyId);
+            setActiveView('reports');
+            setActiveMenu('reports');
+            navigate('/author', { replace: true });
+            return;
+        }
 
         navigate('/author', { replace: true });
     }, [searchParams, navigate]);
+
+    useEffect(() => {
+        if (activeView !== 'reports') return;
+        loadAuthorReportNotifications();
+    }, [activeView, loadAuthorReportNotifications]);
 
     /** Chỉ xóa toasts khi vừa chuyển SANG màn danh sách chương (từ màn khác), tránh xóa mỗi lần re-render gây nhấp nháy. */
     const prevActiveViewRef = useRef(activeView);
@@ -1469,6 +1521,9 @@ export function AuthorStoryManagement({ onBack }) {
         );
     }
 
+    const filteredAuthorReports = (Array.isArray(authorReportNotifications) ? authorReportNotifications : [])
+        .filter((item) => !reportStoryFilterId || String(item.storyIdFromLink || '').toLowerCase() === reportStoryFilterId.toLowerCase());
+
     return (
         <div>
             <Header />
@@ -1621,6 +1676,41 @@ export function AuthorStoryManagement({ onBack }) {
                         >
                             <Book style={{ width: '20px', height: '20px' }} />
                             Truyện của tôi
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                setActiveMenu('reports');
+                                setActiveView('reports');
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'reports' ? '#f0fdf4' : 'transparent',
+                                border: 'none',
+                                borderLeft: activeMenu === 'reports' ? '3px solid #13ec5b' : '3px solid transparent',
+                                borderRadius: '9999px',
+                                marginLeft: '0.5rem',
+                                marginRight: '0.5rem',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                fontWeight: activeMenu === 'reports' ? 600 : 500,
+                                color: activeMenu === 'reports' ? '#13ec5b' : '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'reports') e.currentTarget.style.backgroundColor = '#f9fafb';
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'reports') e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                        >
+                            <List style={{ width: '20px', height: '20px' }} />
+                            Chi tiết báo cáo
                         </button>
 
                         <button
@@ -1948,6 +2038,88 @@ export function AuthorStoryManagement({ onBack }) {
                                 <p style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: '#64748b' }}>
                                     Lưu ý: Sau khi yêu cầu được duyệt, tiền sẽ được chuyển về tài khoản ngân hàng trong khoảng 3-5 ngày làm việc.
                                 </p>
+                            </div>
+                        </div>
+                    ) : activeView === 'reports' ? (
+                        <div style={{ maxWidth: '980px' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '1rem',
+                                marginBottom: '1.25rem',
+                                flexWrap: 'wrap'
+                            }}>
+                                <div>
+                                    <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#1f2937' }}>Chi tiết báo cáo</h2>
+                                    <p style={{ margin: '0.35rem 0 0 0', color: '#6b7280', fontSize: '0.9rem' }}>
+                                        Danh sách thông báo báo cáo liên quan truyện của bạn
+                                    </p>
+                                </div>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    {reportStoryFilterId && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setReportStoryFilterId('')}
+                                            style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: '9999px', padding: '0.45rem 0.9rem', cursor: 'pointer', fontSize: '0.82rem' }}
+                                        >
+                                            Bỏ lọc truyện
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={loadAuthorReportNotifications}
+                                        style={{ border: 'none', background: '#13ec5b', color: '#fff', borderRadius: '9999px', padding: '0.45rem 1rem', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600 }}
+                                    >
+                                        Làm mới
+                                    </button>
+                                </div>
+                            </div>
+
+                            {authorReportError && (
+                                <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '10px', border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', fontSize: '0.9rem' }}>
+                                    {authorReportError}
+                                </div>
+                            )}
+
+                            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '14px', overflow: 'hidden' }}>
+                                {authorReportLoading ? (
+                                    <div style={{ padding: '1rem', color: '#64748b' }}>Đang tải danh sách báo cáo...</div>
+                                ) : filteredAuthorReports.length === 0 ? (
+                                    <div style={{ padding: '1rem', color: '#64748b' }}>
+                                        {reportStoryFilterId ? 'Không có báo cáo cho truyện này.' : 'Chưa có thông báo báo cáo nào.'}
+                                    </div>
+                                ) : (
+                                    filteredAuthorReports.map((item) => (
+                                        <div key={item.id} style={{ padding: '0.95rem 1rem', borderBottom: '1px solid #f1f5f9' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start' }}>
+                                                <div>
+                                                    <div style={{ fontWeight: 700, color: '#111827', marginBottom: '0.3rem' }}>{item.title || 'Thông báo báo cáo'}</div>
+                                                    <div style={{ color: '#475569', fontSize: '0.9rem', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                                                        {item.content || 'Không có nội dung chi tiết.'}
+                                                    </div>
+                                                </div>
+                                                <div style={{ fontSize: '0.78rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                                                    {formatTime(item.createdAt)}
+                                                </div>
+                                            </div>
+                                            <div style={{ marginTop: '0.6rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                {item.storyIdFromLink && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#0f766e', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '9999px', padding: '0.15rem 0.6rem' }}>
+                                                        StoryId: {item.storyIdFromLink}
+                                                    </span>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => navigate(item.linkUrl || '/home')}
+                                                    style={{ fontSize: '0.78rem', border: '1px solid #d1d5db', background: '#fff', borderRadius: '9999px', padding: '0.2rem 0.7rem', cursor: 'pointer' }}
+                                                >
+                                                    Mở truyện liên quan
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
                             </div>
                         </div>
                     ) : activeView === 'profile' ? (
@@ -2314,7 +2486,9 @@ export function AuthorStoryManagement({ onBack }) {
                                                                 {story.title}
                                                             </h3>
                                                             <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
-                                                                {story.lastUpdate}
+                                                                {story.lastUpdate === 'Chưa cập nhật'
+                                                                    ? 'Chưa cập nhật'
+                                                                    : `Tạo lúc: ${story.lastUpdate}`}
                                                             </div>
                                                             {story.isComplianceHidden ? (
                                                                 (() => {
@@ -2333,7 +2507,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                                     }}
                                                                 >
                                                                     {isPermanentlyHidden
-                                                                        ? 'Truyện này đã bị ẩn vĩnh viễn do vi phạm.'
+                                                                        ? 'Truyện này đã bị ẩn tạm thời để phục vụ quá trình điều tra vi phạm.'
                                                                         : 'Truyện này đang bị tạm ẩn để điều tra và xử lý vi phạm.'}
                                                                 </div>
                                                                     );

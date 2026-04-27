@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Services.DTOs.AI;
 
 /// <summary>Request gợi ý 3 hướng đi cho chương tiếp theo.</summary>
@@ -9,8 +11,20 @@ public class SuggestNextChapterRequest
     /// <summary>ID chương đang soạn (FE tạo trước khi lưu nội dung). Nếu có: lưu từng gợi ý vào <c>ai_generated_content</c> gắn <c>chapter_id</c> này.</summary>
     public Guid? ChapterId { get; set; }
 
-    /// <summary>Gợi ý ngay sau chương này (RAG/index). Thường là chương liền trước chương đang soạn; null = sau chương cuối trong DB.</summary>
-    public Guid? AfterChapterId { get; set; }
+    /// <summary>Mốc chương cho ngữ cảnh gợi ý (up-to). Thường là chương liền trước chương đang soạn; null = sau chương cuối trong DB.</summary>
+    public Guid? UpToChapterId { get; set; }
+
+    /// <summary>Alias tương thích ngược cho client cũ đang gửi <c>afterChapterId</c>.</summary>
+    [JsonPropertyName("afterChapterId")]
+    public Guid? AfterChapterId
+    {
+        get => UpToChapterId;
+        set
+        {
+            if (!UpToChapterId.HasValue)
+                UpToChapterId = value;
+        }
+    }
 }
 
 /// <summary>Một gợi ý hướng đi cho chương tiếp theo (chi tiết).</summary>

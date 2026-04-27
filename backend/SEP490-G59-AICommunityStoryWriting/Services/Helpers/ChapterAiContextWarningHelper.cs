@@ -16,6 +16,7 @@ public static class ChapterAiContextWarningHelper
             return null;
         foreach (var c in storyChapters)
         {
+            //Xét các chương đứng trước mục tiêu, nếu có chương nào đã có nội dung nhưng chưa PUBLISHED thì cảnh báo
             if (c.order_index >= targetOrderIndex)
                 continue;
             if (IsPublished(c))

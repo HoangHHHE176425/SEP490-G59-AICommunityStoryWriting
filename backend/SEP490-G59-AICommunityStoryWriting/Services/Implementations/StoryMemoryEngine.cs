@@ -79,7 +79,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         return string.Join("\n\n", parts.Where(s => !string.IsNullOrWhiteSpace(s)));
     }
 
-    /// <summary>Build context cho suggest-next-chapter: RAG (với ragQuery) + Character + Event + Story State. Không thêm ý tưởng tác giả.</summary>
+    /// <summary>Build context cho suggest-next-chapter: RAG (với ragQuery) + Character + Event + Story State. </summary>
     public async Task<string> BuildContextForSuggestAsync(Guid storyId, string ragQuery, CancellationToken cancellationToken = default)
     {
         var story = _storyRepository.GetById(storyId);
@@ -96,7 +96,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         if (ragTopK < 5) ragTopK = 5;
         var query = ragQuery?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(query))
-            query = story.summary ?? story.title ?? "";
+            query = story.title ?? "";
         string? ragBlock;
         try
         {
@@ -143,7 +143,6 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         var storyContextBlock = string.Join("\n\n", new[]
         {
             $"## Truyện: {story.title}",
-            string.IsNullOrWhiteSpace(story.summary) ? "" : $"Tóm tắt: {story.summary}",
             "## Các đoạn gần nhất từ chương đã xuất bản (fallback, không dùng RAG)",
             string.Join("\n\n", chapterBlocks)
         }.Where(s => !string.IsNullOrWhiteSpace(s)));
@@ -164,7 +163,6 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         var lines = new List<string>
         {
             $"## Truyện: {story.title}",
-            string.IsNullOrWhiteSpace(story.summary) ? "" : $"Tóm tắt: {story.summary}",
             "## Các đoạn liên quan từ truyện (RAG)",
             ragBlock
         };

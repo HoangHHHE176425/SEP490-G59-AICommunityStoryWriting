@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Eye, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, ChevronDown, ChevronRight, GitBranch, Percent } from 'lucide-react';
+import { Plus, Eye, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, GitBranch, Percent } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason, getChapterVersions, deleteChapterVersion, submitChapterVersion, unsubmitChapterVersion } from '../../api/chapter/chapterApi';
@@ -344,10 +344,16 @@ export function ChapterListManager({
         ?? story?.compliance_hidden
         ?? false
     ) || String(story?.status ?? '').trim().toUpperCase() === 'HIDDEN';
+    const isStoryPermanentlyHidden = storyComplianceHidden && (
+        Boolean(story?.isPermanentlyHidden)
+        || String(story?.publishStatus ?? '').toLowerCase().includes('vĩnh viễn')
+    );
     const storyProgressRaw = String(story?.storyProgressStatus ?? story?.StoryProgressStatus ?? '').trim().toUpperCase();
     const storyProgressLocked = storyComplianceHidden || storyProgressRaw === 'HIATUS' || storyProgressRaw === 'COMPLETED';
     const storyProgressLockTitle = storyComplianceHidden
-        ? 'Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể tạo/chỉnh sửa/xóa chương, xuất bản chương hoặc thao tác phiên bản.'
+        ? (isStoryPermanentlyHidden
+            ? 'Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể tạo/chỉnh sửa/xóa chương, xuất bản chương hoặc thao tác phiên bản.'
+            : 'Truyện đang bị ẩn tạm thời để phục vụ quá trình điều tra vi phạm, không thể tạo/chỉnh sửa/xóa chương, xuất bản chương hoặc thao tác phiên bản.')
         : storyProgressRaw === 'COMPLETED'
         ? 'Truyện đang ở trạng thái Hoàn thành, không thể tạo/chỉnh sửa/xóa chương hoặc gửi xuất bản.'
         : 'Truyện đang ở trạng thái Tạm dừng, không thể tạo/chỉnh sửa/xóa chương hoặc gửi xuất bản.';
@@ -591,7 +597,9 @@ export function ChapterListManager({
 
     // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp / Bị từ chối
     const isStoryRejected = story?.status === 'rejected' || (story?.publishStatus && String(story.publishStatus).includes('từ chối'));
-    const derivedStoryStatusDisplay = storyComplianceHidden ? 'Đã ẩn vĩnh viễn' : isStoryRejected ? 'Bị từ chối' : hasPublishedChapter ? 'Đã xuất bản' : hasPendingReviewChapter ? 'Chờ duyệt' : 'Bản nháp';
+    const derivedStoryStatusDisplay = storyComplianceHidden
+        ? (isStoryPermanentlyHidden ? 'Đã ẩn vĩnh viễn' : 'Đã ẩn tạm thời')
+        : isStoryRejected ? 'Bị từ chối' : hasPublishedChapter ? 'Đã xuất bản' : hasPendingReviewChapter ? 'Chờ duyệt' : 'Bản nháp';
     const derivedStatusKind = storyComplianceHidden ? 'hidden' : isStoryRejected ? 'rejected' : hasPublishedChapter ? 'published' : hasPendingReviewChapter ? 'pending_review' : 'draft';
 
     const openStoryRejectionReason = () => {
@@ -730,7 +738,9 @@ export function ChapterListManager({
                                                 fontWeight: 600,
                                             }}
                                         >
-                                            Truyện đang bị ẩn vĩnh viễn do vi phạm. Mọi thao tác tạo/chỉnh sửa/xuất bản chương và phiên bản đều bị khóa.
+                                            {isStoryPermanentlyHidden
+                                                ? 'Truyện đang bị ẩn vĩnh viễn do vi phạm. Mọi thao tác tạo/chỉnh sửa/xuất bản chương và phiên bản đều bị khóa.'
+                                                : 'Truyện đang bị ẩn tạm thời để phục vụ quá trình điều tra vi phạm. Mọi thao tác tạo/chỉnh sửa/xuất bản chương và phiên bản đều bị khóa.'}
                                         </div>
                                     )}
                                     {isStoryRejected && (
@@ -945,7 +955,7 @@ export function ChapterListManager({
                                                     if (!isExpanded) e.currentTarget.style.backgroundColor = '#ffffff';
                                                 }}
                                             >
-                                                {/* Order + Chevron (click to expand) */}
+                                                {/* Order (click to expand) */}
                                                 <div
                                                     role="button"
                                                     tabIndex={0}
@@ -959,11 +969,6 @@ export function ChapterListManager({
                                                         outline: 'none',
                                                     }}
                                                 >
-                                                    {isExpanded ? (
-                                                        <ChevronDown size={18} color="#6366f1" style={{ flexShrink: 0 }} />
-                                                    ) : (
-                                                        <ChevronRight size={18} color="#94a3b8" style={{ flexShrink: 0 }} />
-                                                    )}
                                                     <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#334155' }}>
                                                         Chương {chapter.number}
                                                     </span>
@@ -1214,7 +1219,7 @@ export function ChapterListManager({
                                             </div>
 
                                             {/* Panel version khi mở rộng — đồng bộ màu hệ thống, có nút Chỉnh sửa / Xóa / Xuất bản */}
-                                            {isExpanded && (
+                                            {false && isExpanded && (
                                                 <div
                                                     onClick={(e) => { e.stopPropagation(); }}
                                                     role="presentation"

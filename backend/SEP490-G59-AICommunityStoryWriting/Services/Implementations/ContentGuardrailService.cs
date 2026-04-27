@@ -45,7 +45,6 @@ public class ContentGuardrailService : IContentGuardrailService
             return new GuardrailResult { Passed = true, Violations = violations };
 
         // Chuẩn hóa unicode + chữ thường; GIỮ DẤU tiếng Việt để tránh false-positive
-        // (vd: "cặc" không được match "các", "cách").
         var draftSource = draft.Normalize(NormalizationForm.FormC);
         var draftNorm = NormalizeForMatch(draftSource);
 
