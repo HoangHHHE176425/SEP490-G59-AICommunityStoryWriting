@@ -12,14 +12,51 @@ using Services;
 using Services.DTOs.AI;
 using Services.DTOs.Admin;
 using Services.Interfaces;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Xunit.Abstractions;
 using Xunit;
 
 namespace AIStory.Tests;
 
 public class UT_CoCreate
 {
+    private readonly ITestOutputHelper _output;
     private static readonly Guid StoryId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid AuthorId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        ReferenceHandler = ReferenceHandler.IgnoreCycles
+    };
+
+    public UT_CoCreate(ITestOutputHelper output) => _output = output;
+
+    private void LogTestCase(
+        string utcId,
+        string spec,
+        object? input,
+        object? output,
+        Exception? ex = null)
+    {
+        _output.WriteLine("");
+        _output.WriteLine($"========== {utcId} ==========");
+        _output.WriteLine($"SPEC   : {spec}");
+        _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input, _jsonOptions)}");
+
+        if (ex != null)
+        {
+            _output.WriteLine("OUTPUT : ERROR");
+            _output.WriteLine($"TYPE   : {ex.GetType().Name}");
+            _output.WriteLine($"MSG    : {ex.Message}");
+        }
+        else
+        {
+            _output.WriteLine("OUTPUT : SUCCESS");
+            _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output, _jsonOptions)}");
+        }
+    }
 
     private static (AIController sut, Mock<IAICoCreationService> coCreateServiceMock, Mock<IAuthorAiTokenBudgetService> budgetServiceMock)
         CreateControllerSut(
@@ -98,8 +135,8 @@ public class UT_CoCreate
         var request = new CoCreationRequest { StoryId = Guid.Empty, AuthorIdea = "Ý tưởng mới" };
 
         var result = await sut.CoCreate(request, CancellationToken.None);
-
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        LogTestCase("UTCID01", "StoryId rỗng trả 400.", new { request.StoryId, request.AuthorIdea, AuthorId }, badRequest.Value);
         Assert.Contains("StoryId là bắt buộc", badRequest.Value?.ToString());
         coCreateServiceMock.Verify(
             x => x.CoCreateAsync(It.IsAny<CoCreationRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
@@ -114,8 +151,8 @@ public class UT_CoCreate
         var request = new CoCreationRequest { StoryId = StoryId, AuthorIdea = "Ý tưởng mới" };
 
         var result = await sut.CoCreate(request, CancellationToken.None);
-
         var unauthorized = Assert.IsType<UnauthorizedObjectResult>(result);
+        LogTestCase("UTCID02", "Thiếu claim user trả 401.", new { request.StoryId, request.AuthorIdea }, unauthorized.Value);
         Assert.Contains("Không xác định được người dùng", unauthorized.Value?.ToString());
         coCreateServiceMock.Verify(
             x => x.CoCreateAsync(It.IsAny<CoCreationRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
@@ -130,8 +167,8 @@ public class UT_CoCreate
         var request = new CoCreationRequest { StoryId = StoryId, AuthorIdea = "Ý tưởng mới" };
 
         var result = await sut.CoCreate(request, CancellationToken.None);
-
         var forbidden = Assert.IsType<ObjectResult>(result);
+        LogTestCase("UTCID03", "Vượt token budget trả 403.", new { request.StoryId, request.AuthorIdea, AuthorId }, forbidden.Value);
         Assert.Equal(403, forbidden.StatusCode);
         Assert.Contains("giới hạn token", forbidden.Value?.ToString());
         coCreateServiceMock.Verify(
@@ -147,8 +184,8 @@ public class UT_CoCreate
         var request = new CoCreationRequest { StoryId = StoryId, AuthorIdea = "Ý tưởng mới" };
 
         var result = await sut.CoCreate(request, CancellationToken.None);
-
         var forbidden = Assert.IsType<ObjectResult>(result);
+        LogTestCase("UTCID04", "Token còn lại không đủ trả 403.", new { request.StoryId, request.AuthorIdea, AuthorId }, forbidden.Value);
         Assert.Equal(403, forbidden.StatusCode);
         Assert.Contains("không đủ", forbidden.Value?.ToString());
         coCreateServiceMock.Verify(
@@ -174,9 +211,9 @@ public class UT_CoCreate
             .ReturnsAsync(expected);
 
         var result = await sut.CoCreate(request, CancellationToken.None);
-
         var ok = Assert.IsType<OkObjectResult>(result);
         var payload = Assert.IsType<CoCreationResponse>(ok.Value);
+        LogTestCase("UTCID05", "Input hợp lệ trả 200.", new { request.StoryId, request.AuthorIdea, AuthorId }, payload);
         Assert.Equal("Nội dung test", payload.FinalContent);
         coCreateServiceMock.Verify(
             x => x.CoCreateAsync(request, AuthorId, It.IsAny<CancellationToken>()),
@@ -195,8 +232,8 @@ public class UT_CoCreate
             .ThrowsAsync(new UnauthorizedAccessException("Không phải là tác giả của truyện."));
 
         var result = await sut.CoCreate(request, CancellationToken.None);
-
         var forbidden = Assert.IsType<ObjectResult>(result);
+        LogTestCase("UTCID06", "Không phải tác giả trả 403.", new { request.StoryId, request.AuthorIdea, AuthorId }, forbidden.Value);
         Assert.Equal(403, forbidden.StatusCode);
         Assert.Contains("Không phải là tác giả", forbidden.Value?.ToString());
         coCreateServiceMock.Verify(
@@ -222,9 +259,9 @@ public class UT_CoCreate
             .ReturnsAsync(expected);
 
         var result = await sut.CoCreate(request, CancellationToken.None);
-
         var ok = Assert.IsType<OkObjectResult>(result);
         var payload = Assert.IsType<CoCreationResponse>(ok.Value);
+        LogTestCase("UTCID07", "AuthorIdea null vẫn trả 200.", new { request.StoryId, request.AuthorIdea, AuthorId }, payload);
         Assert.Equal("Nội dung AI tự viết theo mạch truyện", payload.FinalContent);
         coCreateServiceMock.Verify(
             x => x.CoCreateAsync(request, AuthorId, It.IsAny<CancellationToken>()),
