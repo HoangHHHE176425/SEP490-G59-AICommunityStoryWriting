@@ -15,6 +15,19 @@ namespace Services.Implementations;
 
 public class StoryReportService : IStoryReportService
 {
+    public interface ICreateStoryReportGateway
+    {
+        stories? GetStoryById(Guid storyId);
+        Guid AppendStoryReportAggregated(Guid storyId, Guid reporterId, string reasonCode, string descriptionTrimmed);
+    }
+
+    private sealed class EfCreateStoryReportGateway : ICreateStoryReportGateway
+    {
+        public stories? GetStoryById(Guid storyId) => StoryDAO.GetById(storyId);
+        public Guid AppendStoryReportAggregated(Guid storyId, Guid reporterId, string reasonCode, string descriptionTrimmed) =>
+            StoryReportDAO.AppendStoryReportAggregated(storyId, reporterId, reasonCode, descriptionTrimmed);
+    }
+
     public interface IAdminComplianceAdminActionGateway
     {
         compliance_admin_action_requests? GetTrackedById(Guid requestId);
@@ -52,6 +65,8 @@ public class StoryReportService : IStoryReportService
     private readonly INotificationHubNotifier? _notificationHubNotifier;
     private readonly IEmailService? _emailService;
     private readonly IAdminComplianceAdminActionGateway _adminComplianceGateway;
+    private readonly ICreateStoryReportGateway _createStoryReportGateway;
+    private readonly bool _enableCreateStoryReportNotifications;
     private readonly bool _enableAdminActionNotifications;
 
     public StoryReportService(
@@ -59,6 +74,8 @@ public class StoryReportService : IStoryReportService
         IUserActivityLookup userActivityLookup,
         INotificationHubNotifier? notificationHubNotifier = null,
         IEmailService? emailService = null,
+        ICreateStoryReportGateway? createStoryReportGateway = null,
+        bool enableCreateStoryReportNotifications = true,
         IAdminComplianceAdminActionGateway? adminComplianceGateway = null,
         bool enableAdminActionNotifications = true)
     {
@@ -66,6 +83,8 @@ public class StoryReportService : IStoryReportService
         _userActivityLookup = userActivityLookup;
         _notificationHubNotifier = notificationHubNotifier;
         _emailService = emailService;
+        _createStoryReportGateway = createStoryReportGateway ?? new EfCreateStoryReportGateway();
+        _enableCreateStoryReportNotifications = enableCreateStoryReportNotifications;
         _adminComplianceGateway = adminComplianceGateway ?? new DefaultAdminComplianceAdminActionGateway();
         _enableAdminActionNotifications = enableAdminActionNotifications;
     }
@@ -95,7 +114,7 @@ public class StoryReportService : IStoryReportService
         if (reporterId == Guid.Empty || !_userLookup.Exists(reporterId))
             throw new InvalidOperationException("USER không tồn tại.");
 
-        var story = StoryDAO.GetById(storyId)
+        var story = _createStoryReportGateway.GetStoryById(storyId)
                     ?? throw new InvalidOperationException("Story not found.");
 
         var st = (story.status ?? "").Trim().ToUpperInvariant();
@@ -110,13 +129,13 @@ public class StoryReportService : IStoryReportService
             throw new InvalidOperationException("Bạn không thể báo cáo truyện của chính mình.");
 
         var code = request.ReasonCode.Trim().ToUpperInvariant();
-        var id = StoryReportDAO.AppendStoryReportAggregated(
+        var id = _createStoryReportGateway.AppendStoryReportAggregated(
             storyId,
             reporterId,
             code,
             descriptionTrimmed);
         // Mỗi người báo cáo mới (1 lần / truyện / user) = 1 thông báo cho tác giả; trùng trả về Guid.Empty.
-        if (id != Guid.Empty)
+        if (id != Guid.Empty && _enableCreateStoryReportNotifications)
             _ = NotifyStoryAuthorReportedAsync(story, reporterId, request.ReasonCode, descriptionTrimmed);
         return Task.FromResult(id);
     }

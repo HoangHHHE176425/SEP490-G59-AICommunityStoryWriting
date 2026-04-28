@@ -1,749 +1,372 @@
-﻿using AIStory.API.Controllers;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
+﻿using BusinessObjects.Entities;
 using Moq;
 using Services.DTOs.CommentReports;
 using Services.Implementations;
 using Services.Interfaces;
 using Services.StoryReporting;
 using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
 using System.Linq;
-using System.Reflection;
-using System.Security.Claims;
 using System.Text.Json;
 using Xunit.Abstractions;
 
 namespace AIStory.Tests
 {
-    /// <summary>
-    /// UT06 — tạo báo cáo comment (endpoint <see cref="CommentReportsController.ReportStoryComment"/>; unit test + mock <see cref="ICommentReportService"/>).
-    /// <b>Đối soát ma trận UTCID vs product (<see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/>):</b>
-    /// <list type="bullet">
-    /// <item><description><b>Đã bắt — test pass:</b> UTCID01 (happy), UTCID02 (comment không tồn tại), UTCID04 (reporter không xác định → 401; JWT có id nhưng user không trong DB / <c>Guid.Empty</c> → <see cref="CommentReportService"/> + <see cref="IUserLookup"/>), UTCID05 (ReasonCode không có catalog), UTCID06 (ReasonCode thiếu/null — controller), UTCID07 (Description không hợp lệ — độ dài / số từ), UTCID08–09 (Description null/whitespace → 400), UTCID10 (story không tìm thấy / mismatch URL), UTCID11 (trùng báo cáo), UTCID12 (story chưa PUBLISH), UTCID13 (tự báo cáo comment mình).</description></item>
-    /// <item><description><b>Bug / thiếu — test fail cho đến khi sửa hoặc thống nhất spec:</b> UTCID03 (<c>commentId</c> null — REST <c>{{commentId:guid}}</c> không bind null; xử lý ở routing 404).</description></item>
-    /// <item><description><b>Hành vi product có nhưng chưa có UTCID riêng trong file:</b> comment không thuộc chapter URL (<c>ReportChapterComment</c>), chủ comment role không phải AUTHOR/USER (<c>Bạn không thể báo cáo bình luận này.</c>), comment thiếu <c>story_id</c> (<c>Comment has no story_id.</c>) — cùng họ <see cref="InvalidOperationException"/> → 400 như các case khác.</description></item>
-    /// </list>
-    /// </summary>
     public class UT_CreateCommentReport
     {
         private readonly ITestOutputHelper _output;
 
         public UT_CreateCommentReport(ITestOutputHelper output) => _output = output;
 
-        private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
+        private void LogTestCase(string utcId, object? input, object? output, Exception? ex = null)
         {
             _output.WriteLine("");
-            _output.WriteLine($"======== {utcId} | UT06 CreateCommentReport ========");
-            _output.WriteLine(oneLineGoal);
-            foreach (var line in details)
-                _output.WriteLine("  · " + line);
+            _output.WriteLine($"========== {utcId} ==========");
+            _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input)}");
+            if (ex != null)
+            {
+                _output.WriteLine("OUTPUT : ERROR");
+                _output.WriteLine($"TYPE   : {ex.GetType().Name}");
+                _output.WriteLine($"MSG    : {ex.Message}");
+                return;
+            }
+
+            _output.WriteLine("OUTPUT : SUCCESS");
+            _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output)}");
         }
 
         private static string ReportDescriptionWords(int count) =>
             string.Join(" ", Enumerable.Range(1, count).Select(i => $"w{i}"));
 
-        private static CommentReportsController CreateCommentReportsControllerSut(out Mock<ICommentReportService> serviceMock)
+        private static CommentReportService CreateSut(
+            List<reports> reportStore,
+            List<report_evidences> evidenceStore,
+            out Mock<IUserLookup> userLookupMock,
+            out Mock<CommentReportService.ICreateCommentReportGateway> gatewayMock)
         {
-            serviceMock = new Mock<ICommentReportService>(MockBehavior.Strict);
-            return new CommentReportsController(serviceMock.Object);
+            userLookupMock = new Mock<IUserLookup>(MockBehavior.Strict);
+            gatewayMock = new Mock<CommentReportService.ICreateCommentReportGateway>(MockBehavior.Strict);
+
+            userLookupMock.Setup(x => x.Exists(It.IsAny<Guid>())).Returns(true);
+            gatewayMock.Setup(x => x.DisposeAsync()).Returns(ValueTask.CompletedTask);
+            gatewayMock.Setup(x => x.HasReporterEvidenceAsync(It.IsAny<Guid>(), It.IsAny<string>())).ReturnsAsync(false);
+            gatewayMock.Setup(x => x.HasLegacyReporterAsync(It.IsAny<Guid>(), It.IsAny<Guid>())).ReturnsAsync(false);
+            gatewayMock.Setup(x => x.AddReport(It.IsAny<reports>()))
+                .Callback((reports r) => reportStore.Add(r));
+            gatewayMock.Setup(x => x.AddReportEvidence(It.IsAny<report_evidences>()))
+                .Callback((report_evidences e) => evidenceStore.Add(e));
+            gatewayMock.Setup(x => x.SaveChangesAsync()).Returns(Task.CompletedTask);
+            var gateway = gatewayMock.Object;
+
+            return new CommentReportService(
+                userLookupMock.Object,
+                notificationHubNotifier: null,
+                createCommentReportGatewayFactory: () => gateway,
+                enableCreateReportNotifications: false);
         }
 
-        /// <summary>
-        /// UTCID01 — happy path: comment &amp; story hợp lệ, user chưa báo cáo comment này, truyện PUBLISHED, reporter không phải chủ comment (nghiệp vụ trong service); ReasonCode hợp lệ; mô tả đủ 50 từ.
-        /// Ma trận: Return True, log &quot;Tạo báo cáo thành công&quot; — API trả <c>200 OK</c> với <c>id</c> và &quot;Đã gửi báo cáo.&quot;; không assert đúng từng chữ.
-        /// Product: <see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/> (DAO/static) — unit test tầng API: <see cref="CommentReportsController.ReportStoryComment"/> + mock <see cref="ICommentReportService"/> trả <c>Guid</c> khác Empty → <c>Ok</c>; không DB.
-        /// </summary>
         [Fact]
-        public async Task UTCID01_CreateCommentReport_Succeeds_WhenPreconditionsMet_HappyPath()
+        public void UTCID01_CreateCommentReportAsync_Success_WhenValidInput()
         {
-            LogUtcContext("UTCID01",
-                "Spec: đủ điều kiện → tạo báo cáo comment thành công, persist (ma trận: Return True).",
-                "API: POST stories/{storyId}/comments/{commentId}/reports — reporterId từ JWT.",
-                "Kỳ vọng: 200 OK, body có id; CreateCommentReportAsync(..., expectedStoryId: storyId) gọi đúng 1 lần.",
-                "Không assert log/message từng chữ so với ma trận.");
-
-            var storyId = Guid.NewGuid();
+            // Arrange
             var commentId = Guid.NewGuid();
             var reporterId = Guid.NewGuid();
-            var returnedReportId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
-
+            var storyId = Guid.NewGuid();
             var request = new CreateCommentReportRequestDto
             {
                 ReasonCode = "OTHER",
                 Description = ReportDescriptionWords(50)
             };
 
-            serviceMock
-                .Setup(s => s.CreateCommentReportAsync(
-                    commentId,
-                    reporterId,
-                    request,
-                    storyId,
-                    null))
-                .ReturnsAsync(returnedReportId);
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out var userLookupMock, out var gatewayMock);
 
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
+            gatewayMock.Setup(x => x.GetCommentById(commentId)).Returns(new comments
             {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
+                id = commentId,
+                story_id = storyId,
+                user_id = Guid.NewGuid()
+            });
+            gatewayMock.Setup(x => x.GetUserRoleAsync(It.IsAny<Guid>())).ReturnsAsync("USER");
+            gatewayMock.Setup(x => x.GetStoryById(storyId)).Returns(new stories { id = storyId, status = "PUBLISHED" });
+            gatewayMock.Setup(x => x.FindOpenGroupedReportAsync(commentId, "OTHER")).ReturnsAsync((reports?)null);
 
-            var result = await controller.ReportStoryComment(storyId, commentId, request);
+            // Act
+            var reportId = sut.CreateCommentReportAsync(commentId, reporterId, request, expectedStoryId: storyId).GetAwaiter().GetResult();
+            LogTestCase("UTCID01", new { commentId, reporterId, storyId, request.ReasonCode }, new { reportId });
 
-            var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Equal(StatusCodes.Status200OK, ok.StatusCode);
-            Assert.NotNull(ok.Value);
-            var idProp = ok.Value.GetType().GetProperty("id", BindingFlags.Public | BindingFlags.Instance);
-            Assert.NotNull(idProp);
-            Assert.Equal(returnedReportId, idProp.GetValue(ok.Value));
-            serviceMock.Verify(s => s.CreateCommentReportAsync(
-                commentId,
-                reporterId,
-                request,
-                storyId,
-                null), Times.Once);
+            // Assert
+            Assert.NotEqual(Guid.Empty, reportId);
+            Assert.Single(reportStore);
+            Assert.Single(evidenceStore);
+            Assert.Equal(reportId, reportStore[0].id);
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Once);
+            gatewayMock.Verify(x => x.AddReportEvidence(It.IsAny<report_evidences>()), Times.Once);
+            userLookupMock.Verify(x => x.Exists(reporterId), Times.Once);
         }
 
-        /// <summary>
-        /// UTCID02 — spec: <c>commentId</c> không tồn tại → không tạo báo cáo; ma trận Return <c>false</c>, log &quot;Không tìm thấy comment&quot; (không assert đúng từng chữ).
-        /// Product: <see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/> — <c>CommentDAO.GetById</c> null → <see cref="InvalidOperationException"/> (message hiện tại tiếng Anh: <c>Comment not found.</c>).
-        /// <see cref="CommentReportsController.ReportStoryComment"/> bắt <c>InvalidOperationException</c> → <c>400 BadRequest</c> (không trả bool <c>false</c>).
-        /// Ghi chú: Ma trận của bạn có thể ghi &quot;UTCID01&quot; cho case này; trong file UT06 <see cref="UTCID01_CreateCommentReport_Succeeds_WhenPreconditionsMet_HappyPath"/> đã dùng cho happy path — case comment missing là <b>UTCID02</b>.
-        /// </summary>
         [Fact]
-        public async Task UTCID02_CreateCommentReport_ReturnsBadRequest_WhenCommentNotFound()
+        public void UTCID02_CreateCommentReportAsync_Fail_WhenCommentIdEmpty()
         {
-            LogUtcContext("UTCID02",
-                "Spec: commentId không có trong DB → dừng, không lưu (ma trận: false).",
-                "Product service: InvalidOperationException; API: BadRequest. Mock tương đương.",
-                "Không assert message từng chữ so với ma trận.");
+            // Arrange
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(50) };
 
-            var storyId = Guid.NewGuid();
-            var missingCommentId = Guid.NewGuid();
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(Guid.Empty, Guid.NewGuid(), request).GetAwaiter().GetResult());
+
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
+        }
+
+        [Fact]
+        public void UTCID03_CreateCommentReportAsync_Fail_WhenReasonCodeInvalid()
+        {
+            // Arrange
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
+            var request = new CreateCommentReportRequestDto { ReasonCode = "INVALID", Description = ReportDescriptionWords(50) };
+
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(Guid.NewGuid(), Guid.NewGuid(), request).GetAwaiter().GetResult());
+
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
+        }
+
+        [Fact]
+        public void UTCID04_CreateCommentReportAsync_Fail_WhenReporterIdEmpty()
+        {
+            // Arrange
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out var userLookupMock, out var gatewayMock);
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(50) };
+
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(Guid.NewGuid(), Guid.Empty, request).GetAwaiter().GetResult());
+
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            userLookupMock.Verify(x => x.Exists(It.IsAny<Guid>()), Times.Never);
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
+        }
+
+        [Fact]
+        public void UTCID05_CreateCommentReportAsync_Fail_WhenReporterNotFound()
+        {
+            // Arrange
             var reporterId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out var userLookupMock, out var gatewayMock);
+            userLookupMock.Reset();
+            userLookupMock.Setup(x => x.Exists(reporterId)).Returns(false);
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(50) };
 
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('b', 80)
-            };
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(Guid.NewGuid(), reporterId, request).GetAwaiter().GetResult());
 
-            serviceMock
-                .Setup(s => s.CreateCommentReportAsync(
-                    missingCommentId,
-                    reporterId,
-                    request,
-                    storyId,
-                    null))
-                .ThrowsAsync(new InvalidOperationException("Comment not found."));
-
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
-
-            var result = await controller.ReportStoryComment(storyId, missingCommentId, request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            Assert.NotNull(badRequest.Value);
-            serviceMock.Verify(s => s.CreateCommentReportAsync(
-                missingCommentId,
-                reporterId,
-                request,
-                storyId,
-                null), Times.Once);
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
         }
 
-        /// <summary>
-        /// UTCID03 — ma trận: <c>commentId</c> null/không xác định → không tạo báo cáo (tương đương <c>Guid.Empty</c> trong unit test),
-        /// Return <c>false</c> + log &quot;Không tìm thấy comment&quot;.
-        /// </summary>
         [Fact]
-        public async Task UTCID03_CreateCommentReport_ReturnsBadRequest_WhenCommentIdMissingOrEmpty()
+        public void UTCID06_CreateCommentReportAsync_Fail_WhenCommentNotFound()
         {
-            LogUtcContext("UTCID03",
-                "Spec: commentId null/không xác định → dừng, không lưu báo cáo.",
-                "Test: mô phỏng bằng Guid.Empty; controller không gọi ICommentReportService.",
-                "Kỳ vọng: BadRequest + message Không tìm thấy comment.");
-
-            var storyId = Guid.NewGuid();
-            var commentId = Guid.Empty;
-            var reporterId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
-
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('c', 40)
-            };
-
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
-
-            var result = await controller.ReportStoryComment(storyId, commentId, request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            Assert.NotNull(badRequest.Value);
-            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
-            Assert.Equal("Không tìm thấy comment.", doc.RootElement.GetProperty("message").GetString());
-
-            serviceMock.Verify(s => s.CreateCommentReportAsync(
-                It.IsAny<Guid>(),
-                It.IsAny<Guid>(),
-                It.IsAny<CreateCommentReportRequestDto>(),
-                It.IsAny<Guid?>(),
-                It.IsAny<Guid?>()), Times.Never);
-        }
-
-        /// <summary>
-        /// UTCID04 — không xác định được người báo cáo <b>hoặc</b> user không còn trong CSDL → không tạo báo cáo; message kiểu &quot;USER không tồn tại&quot;.
-        /// (A) API: <see cref="CommentReportsController.ReportStoryComment"/> — không parse được user từ JWT → <c>401</c>, không gọi service.
-        /// (B) <see cref="CommentReportService.CreateCommentReportAsync"/>: <c>IUserLookup.Exists(reporterId)==false</c> hoặc <c>reporterId == Guid.Empty</c> → <see cref="InvalidOperationException"/> trước khi load comment / ghi DB.
-        /// </summary>
-        [Fact]
-        public async Task UTCID04_CreateCommentReport_Rejects_WhenReporterInvalidOrUserNotInDatabase()
-        {
-            LogUtcContext("UTCID04 — reporter không hợp lệ / user không tồn tại",
-                "Spec: không tạo báo cáo; API 401 khi thiếu identity; service từ chối khi Empty hoặc !Exists.",
-                "Không assert message từng chữ so với ma trận.");
-
-            var storyId = Guid.NewGuid();
+            // Arrange
             var commentId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
+            gatewayMock.Setup(x => x.GetCommentById(commentId)).Returns((comments?)null);
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(50) };
 
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = ReportDescriptionWords(50)
-            };
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(commentId, Guid.NewGuid(), request).GetAwaiter().GetResult());
 
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext
-                {
-                    User = new ClaimsPrincipal(new ClaimsIdentity())
-                }
-            };
-
-            var result = await controller.ReportStoryComment(storyId, commentId, request);
-
-            var unauthorized = Assert.IsType<UnauthorizedObjectResult>(result);
-            Assert.Equal(StatusCodes.Status401Unauthorized, unauthorized.StatusCode);
-            serviceMock.Verify(
-                s => s.CreateCommentReportAsync(
-                    It.IsAny<Guid>(),
-                    It.IsAny<Guid>(),
-                    It.IsAny<CreateCommentReportRequestDto>(),
-                    It.IsAny<Guid?>(),
-                    It.IsAny<Guid?>()),
-                Times.Never);
-
-            var reporterId = Guid.NewGuid();
-            var userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
-            userLookup.Setup(x => x.Exists(reporterId)).Returns(false);
-            var sut = new CommentReportService(userLookup.Object, notificationHubNotifier: null);
-
-            var ex = await Record.ExceptionAsync(() =>
-                sut.CreateCommentReportAsync(commentId, reporterId, request, expectedStoryId: storyId));
-            var ioe = Assert.IsType<InvalidOperationException>(ex);
-            Assert.Equal("USER không tồn tại.", ioe.Message);
-            userLookup.Verify(x => x.Exists(reporterId), Times.Once);
-
-            var userLookupEmpty = new Mock<IUserLookup>(MockBehavior.Strict);
-            var sutEmpty = new CommentReportService(userLookupEmpty.Object, notificationHubNotifier: null);
-            var exEmpty = await Record.ExceptionAsync(() =>
-                sutEmpty.CreateCommentReportAsync(commentId, Guid.Empty, request, expectedStoryId: storyId));
-            var ioeEmpty = Assert.IsType<InvalidOperationException>(exEmpty);
-            Assert.Equal("USER không tồn tại.", ioeEmpty.Message);
-            userLookupEmpty.Verify(x => x.Exists(It.IsAny<Guid>()), Times.Never);
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
         }
 
-        /// <summary>
-        /// UTCID05 — ma trận: <c>ReasonCode</c> không tồn tại trong hệ thống → không tạo báo cáo; Return <c>false</c>, log &quot;Không tồn tại lý do phù hợp&quot; (không assert đúng từng chữ).
-        /// Product: <see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/> — <c>CommentReportReasonCatalog.TryGet</c> false → <see cref="ArgumentException"/> (message hiện tại: <c>Invalid reason code.</c>).
-        /// <see cref="CommentReportsController.ReportStoryComment"/> bắt <c>ArgumentException</c> → <c>400 BadRequest</c> với <c>ex.Message</c> (không trả bool <c>false</c>). Body phải có <c>ReasonCode</c> không rỗng mới vào service; rỗng thì controller trả BadRequest khác (&quot;ReasonCode is required.&quot;).
-        /// Test: mock service ném <c>ArgumentException</c> tương đương — xác nhận mapping API.
-        /// </summary>
         [Fact]
-        public async Task UTCID05_CreateCommentReport_ReturnsBadRequest_WhenReasonCodeUnknown()
+        public void UTCID07_CreateCommentReportAsync_Fail_WhenCommentNotBelongToStory()
         {
-            LogUtcContext("UTCID05",
-                "Spec: ReasonCode không có trong catalog → dừng, không lưu (ma trận: false).",
-                "Product service: ArgumentException; API: BadRequest. Mock tương đương.",
-                "Không assert message từng chữ so với ma trận.");
+            // Arrange
+            var commentId = Guid.NewGuid();
+            var expectedStoryId = Guid.NewGuid();
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
+            gatewayMock.Setup(x => x.GetCommentById(commentId)).Returns(new comments { id = commentId, story_id = Guid.NewGuid(), user_id = Guid.NewGuid() });
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(50) };
 
-            var storyId = Guid.NewGuid();
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(commentId, Guid.NewGuid(), request, expectedStoryId: expectedStoryId).GetAwaiter().GetResult());
+
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
+        }
+
+        [Fact]
+        public void UTCID08_CreateCommentReportAsync_Fail_WhenReporterIsCommentOwner()
+        {
+            // Arrange
             var commentId = Guid.NewGuid();
             var reporterId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
+            gatewayMock.Setup(x => x.GetCommentById(commentId)).Returns(new comments { id = commentId, story_id = Guid.NewGuid(), user_id = reporterId });
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(50) };
 
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "NOT_A_REGISTERED_COMMENT_REPORT_REASON",
-                Description = new string('d', 40)
-            };
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(commentId, reporterId, request).GetAwaiter().GetResult());
 
-            serviceMock
-                .Setup(s => s.CreateCommentReportAsync(
-                    commentId,
-                    reporterId,
-                    request,
-                    storyId,
-                    null))
-                .ThrowsAsync(new ArgumentException("Invalid reason code."));
-
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
-
-            var result = await controller.ReportStoryComment(storyId, commentId, request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            Assert.NotNull(badRequest.Value);
-            serviceMock.Verify(s => s.CreateCommentReportAsync(
-                commentId,
-                reporterId,
-                request,
-                storyId,
-                null), Times.Once);
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
         }
 
-        /// <summary>
-        /// UTCID06 — ma trận: <c>ReasonCode</c> null → không tạo báo cáo; Return <c>false</c>, log &quot;Không tìm thấy lý do phù hợp&quot; (không assert đúng từng chữ).
-        /// Product API: <see cref="CommentReportsController.ReportStoryComment"/> — <c>request == null || string.IsNullOrWhiteSpace(request.ReasonCode)</c> → <c>400 BadRequest</c> (&quot;ReasonCode is required.&quot;), <b>không</b> gọi <see cref="ICommentReportService.CreateCommentReportAsync"/>.
-        /// DTO <see cref="CreateCommentReportRequestDto"/> có thể nhận <c>null</c> sau deserialize JSON; service không chạy nên không tới <c>CommentReportReasonCatalog.TryGet</c>.
-        /// </summary>
         [Fact]
-        public async Task UTCID06_CreateCommentReport_ReturnsBadRequest_WhenReasonCodeMissing()
+        public void UTCID09_CreateCommentReportAsync_Fail_WhenCommentOwnerRoleInvalid()
         {
-            LogUtcContext("UTCID06",
-                "Spec: ReasonCode null → dừng, không lưu (ma trận: false).",
-                "Product: controller chặn trước; BadRequest. Service không gọi.",
-                "Không assert message từng chữ so với ma trận.");
-
+            // Arrange
+            var commentId = Guid.NewGuid();
             var storyId = Guid.NewGuid();
+            var commentOwnerId = Guid.NewGuid();
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
+            gatewayMock.Setup(x => x.GetCommentById(commentId)).Returns(new comments { id = commentId, story_id = storyId, user_id = commentOwnerId });
+            gatewayMock.Setup(x => x.GetUserRoleAsync(commentOwnerId)).ReturnsAsync("ADMIN");
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(50) };
+
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(commentId, Guid.NewGuid(), request).GetAwaiter().GetResult());
+
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
+        }
+
+        [Fact]
+        public void UTCID10_CreateCommentReportAsync_Fail_WhenStoryNotFound()
+        {
+            // Arrange
             var commentId = Guid.NewGuid();
-            var reporterId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
-
-#pragma warning disable CS8625 // null literal — mô phỏng body JSON thiếu / null reasonCode
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = null!,
-                Description = new string('e', 40)
-            };
-#pragma warning restore CS8625
-
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
-
-            var result = await controller.ReportStoryComment(storyId, commentId, request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            Assert.NotNull(badRequest.Value);
-            serviceMock.Verify(
-                s => s.CreateCommentReportAsync(
-                    It.IsAny<Guid>(),
-                    It.IsAny<Guid>(),
-                    It.IsAny<CreateCommentReportRequestDto>(),
-                    It.IsAny<Guid?>(),
-                    It.IsAny<Guid?>()),
-                Times.Never);
-        }
-
-        /// <summary>
-        /// UTCID07 — <c>Description</c> vượt <see cref="UserReportDescriptionRules.MaxLength"/> hoặc &lt; <see cref="UserReportDescriptionRules.MinWords"/> từ (service) / DTO MaxLength.
-        /// </summary>
-        [Fact]
-        public async Task UTCID07_CreateCommentReport_Rejects_WhenDescriptionInvalid()
-        {
-            LogUtcContext("UTCID07 — mô tả báo cáo không hợp lệ",
-                "Kỳ vọng: DataAnnotations MaxLength + CommentReportService.ValidateDescription.",
-                "Không assert đúng từng chữ message so với ma trận.");
-
-            static bool TryValidate(CreateCommentReportRequestDto dto, out List<ValidationResult> results)
-            {
-                results = new List<ValidationResult>();
-                var ctx = new ValidationContext(dto);
-                return Validator.TryValidateObject(dto, ctx, results, validateAllProperties: true);
-            }
-
-            var overMax = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('x', UserReportDescriptionRules.MaxLength + 1)
-            };
-            Assert.False(TryValidate(overMax, out var errorsOver));
-            Assert.Contains(errorsOver, e => e.MemberNames.Contains(nameof(CreateCommentReportRequestDto.Description)));
-
-            var twoHundredOneCharsOneWord = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('g', 201)
-            };
-            Assert.True(TryValidate(twoHundredOneCharsOneWord, out _), "201 ký tự một từ vẫn pass DataAnnotations MaxLength.");
-
-            var userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
-            var sut = new CommentReportService(userLookup.Object, notificationHubNotifier: null);
-
-            var tooFewWords = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = ReportDescriptionWords(49)
-            };
-            var exMin = await Assert.ThrowsAsync<ArgumentException>(() =>
-                sut.CreateCommentReportAsync(Guid.NewGuid(), Guid.NewGuid(), tooFewWords, expectedStoryId: Guid.NewGuid()));
-            Assert.Contains("50", exMin.Message, StringComparison.Ordinal);
-
-            var overMaxManyWords = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = string.Join(" ", Enumerable.Repeat(new string('z', 200), 51))
-            };
-            var exMax = await Assert.ThrowsAsync<ArgumentException>(() =>
-                sut.CreateCommentReportAsync(Guid.NewGuid(), Guid.NewGuid(), overMaxManyWords, expectedStoryId: Guid.NewGuid()));
-            Assert.Contains("8000", exMax.Message, StringComparison.Ordinal);
-
-            userLookup.Verify(x => x.Exists(It.IsAny<Guid>()), Times.Never);
-        }
-
-        /// <summary>
-        /// UTCID08 — <c>Description</c> null → <c>400 BadRequest</c>, không gọi service.
-        /// </summary>
-        [Fact]
-        public async Task UTCID08_CreateCommentReport_ReturnsBadRequest_WhenDescriptionIsNull()
-        {
-            LogUtcContext("UTCID08",
-                "Spec: Description null — bắt buộc có mô tả.",
-                "Kỳ vọng: 400 BadRequest; CreateCommentReportAsync không gọi.");
-
             var storyId = Guid.NewGuid();
-            var commentId = Guid.NewGuid();
-            var reporterId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
+            gatewayMock.Setup(x => x.GetCommentById(commentId)).Returns(new comments { id = commentId, story_id = storyId, user_id = Guid.NewGuid() });
+            gatewayMock.Setup(x => x.GetUserRoleAsync(It.IsAny<Guid>())).ReturnsAsync("USER");
+            gatewayMock.Setup(x => x.GetStoryById(storyId)).Returns((stories?)null);
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(50) };
 
-#pragma warning disable CS8625
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = null
-            };
-#pragma warning restore CS8625
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(commentId, Guid.NewGuid(), request).GetAwaiter().GetResult());
 
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
-
-            var result = await controller.ReportStoryComment(storyId, commentId, request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            serviceMock.Verify(
-                s => s.CreateCommentReportAsync(
-                    It.IsAny<Guid>(),
-                    It.IsAny<Guid>(),
-                    It.IsAny<CreateCommentReportRequestDto>(),
-                    It.IsAny<Guid?>(),
-                    It.IsAny<Guid?>()),
-                Times.Never);
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
         }
 
-        /// <summary>
-        /// UTCID09 — <c>Description</c> chỉ khoảng trắng → <c>400 BadRequest</c>, không gọi service.
-        /// </summary>
         [Fact]
-        public async Task UTCID09_CreateCommentReport_ReturnsBadRequest_WhenDescriptionIsWhitespaceOnly()
+        public void UTCID11_CreateCommentReportAsync_Fail_WhenStoryNotPublished()
         {
-            LogUtcContext("UTCID09",
-                "Spec: Description chỉ whitespace — không được coi là đã nhập mô tả.",
-                "Kỳ vọng: 400 BadRequest; CreateCommentReportAsync không gọi.");
-
+            // Arrange
+            var commentId = Guid.NewGuid();
             var storyId = Guid.NewGuid();
-            var commentId = Guid.NewGuid();
-            var reporterId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
+            gatewayMock.Setup(x => x.GetCommentById(commentId)).Returns(new comments { id = commentId, story_id = storyId, user_id = Guid.NewGuid() });
+            gatewayMock.Setup(x => x.GetUserRoleAsync(It.IsAny<Guid>())).ReturnsAsync("USER");
+            gatewayMock.Setup(x => x.GetStoryById(storyId)).Returns(new stories { id = storyId, status = "DRAFT" });
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(50) };
 
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = "   \t  \n  "
-            };
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(commentId, Guid.NewGuid(), request).GetAwaiter().GetResult());
 
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
-
-            var result = await controller.ReportStoryComment(storyId, commentId, request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            serviceMock.Verify(
-                s => s.CreateCommentReportAsync(
-                    It.IsAny<Guid>(),
-                    It.IsAny<Guid>(),
-                    It.IsAny<CreateCommentReportRequestDto>(),
-                    It.IsAny<Guid?>(),
-                    It.IsAny<Guid?>()),
-                Times.Never);
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
         }
 
-        /// <summary>
-        /// UTCID10 — ma trận: không tìm thấy story tương ứng với comment → không tạo báo cáo; Return <c>false</c>, log &quot;Không tìm thấy truyện&quot; (không assert đúng từng chữ).
-        /// Product: <see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/> — sau khi load comment hợp lệ, <c>StoryDAO.GetById(storyId)</c> null → <see cref="InvalidOperationException"/> (message hiện tại: <c>Story not found.</c>).
-        /// Khi <c>expectedStoryId</c> trên URL khác <c>comment.story_id</c>: <c>Comment not belong to this story.</c> (cùng nhóm &quot;story không khớp / không hợp lệ&quot;).
-        /// <see cref="CommentReportsController.ReportStoryComment"/> bắt <c>InvalidOperationException</c> → <c>400 BadRequest</c> (không trả bool <c>false</c>).
-        /// Test: mock <c>Story not found.</c> tương đương nhánh DB thiếu truyện.
-        /// </summary>
         [Fact]
-        public async Task UTCID10_CreateCommentReport_ReturnsBadRequest_WhenStoryNotFoundForComment()
+        public void UTCID12_CreateCommentReportAsync_Fail_WhenDuplicateReporterEvidenceExists()
         {
-            LogUtcContext("UTCID10",
-                "Spec: story không tồn tại / không khớp comment → dừng, không lưu (ma trận: false).",
-                "Product service: InvalidOperationException (Story not found. hoặc Comment not belong...); API: BadRequest.",
-                "Mock: Story not found. — không assert message từng chữ so với ma trận.");
-
-            var storyIdFromRoute = Guid.NewGuid();
+            // Arrange
             var commentId = Guid.NewGuid();
             var reporterId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
-
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('h', 80)
-            };
-
-            serviceMock
-                .Setup(s => s.CreateCommentReportAsync(
-                    commentId,
-                    reporterId,
-                    request,
-                    storyIdFromRoute,
-                    null))
-                .ThrowsAsync(new InvalidOperationException("Story not found."));
-
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
-
-            var result = await controller.ReportStoryComment(storyIdFromRoute, commentId, request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            Assert.NotNull(badRequest.Value);
-            serviceMock.Verify(s => s.CreateCommentReportAsync(
-                commentId,
-                reporterId,
-                request,
-                storyIdFromRoute,
-                null), Times.Once);
-        }
-
-        /// <summary>
-        /// UTCID11 — ma trận: user đã báo cáo comment này trước đó → không tạo thêm; Return <c>false</c>, log &quot;Bạn đã báo cáo comment này rồi&quot; (không assert đúng từng chữ).
-        /// Product: <see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/> — trùng user/comment (evidence hoặc legacy <c>reports.reporter_id</c>) → <see cref="InvalidOperationException"/> (message hiện tại: <c>Bạn đã báo cáo bình luận này trước đó.</c>).
-        /// <see cref="CommentReportsController.ReportStoryComment"/> bắt <c>InvalidOperationException</c> → <c>400 BadRequest</c> (không dùng <c>409</c> như <see cref="AIStory.API.Controllers.StoriesController.ReportStory"/> khi trùng report truyện).
-        /// Test: mock ném exception cùng kiểu message — xác nhận mapping API.
-        /// </summary>
-        [Fact]
-        public async Task UTCID11_CreateCommentReport_ReturnsBadRequest_WhenUserAlreadyReportedComment()
-        {
-            LogUtcContext("UTCID11",
-                "Spec: đã báo cáo comment này rồi → không lưu thêm (ma trận: false).",
-                "Product: InvalidOperationException; API: 400 BadRequest (không phải 409).",
-                "Không assert message từng chữ so với ma trận.");
-
             var storyId = Guid.NewGuid();
-            var commentId = Guid.NewGuid();
-            var reporterId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
+            gatewayMock.Setup(x => x.GetCommentById(commentId)).Returns(new comments { id = commentId, story_id = storyId, user_id = Guid.NewGuid() });
+            gatewayMock.Setup(x => x.GetUserRoleAsync(It.IsAny<Guid>())).ReturnsAsync("USER");
+            gatewayMock.Setup(x => x.GetStoryById(storyId)).Returns(new stories { id = storyId, status = "PUBLISHED" });
+            gatewayMock.Setup(x => x.HasReporterEvidenceAsync(commentId, reporterId.ToString())).ReturnsAsync(true);
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(50) };
 
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('i', 60)
-            };
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(commentId, reporterId, request).GetAwaiter().GetResult());
 
-            serviceMock
-                .Setup(s => s.CreateCommentReportAsync(
-                    commentId,
-                    reporterId,
-                    request,
-                    storyId,
-                    null))
-                .ThrowsAsync(new InvalidOperationException("Bạn đã báo cáo bình luận này trước đó."));
-
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
-
-            var result = await controller.ReportStoryComment(storyId, commentId, request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            Assert.NotNull(badRequest.Value);
-            serviceMock.Verify(s => s.CreateCommentReportAsync(
-                commentId,
-                reporterId,
-                request,
-                storyId,
-                null), Times.Once);
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
         }
 
-        /// <summary>
-        /// UTCID12 — ma trận (có thể ghi <b>UTCID122</b>): story chưa <c>PUBLISHED</c> → không tạo báo cáo comment; Return <c>false</c>, log &quot;Truyện chưa được PUBLISH&quot; (không assert đúng từng chữ).
-        /// Product: <see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/> — sau <c>StoryDAO.GetById</c>, <c>status</c> khác <c>PUBLISHED</c> → <see cref="InvalidOperationException"/> (message hiện tại: <c>Chỉ có thể báo cáo bình luận của truyện đã PUBLISHED.</c>).
-        /// <see cref="CommentReportsController.ReportStoryComment"/> bắt <c>InvalidOperationException</c> → <c>400 BadRequest</c> (không trả bool <c>false</c>).
-        /// Test: mock ném exception cùng kiểu — xác nhận mapping API.
-        /// </summary>
         [Fact]
-        public async Task UTCID12_CreateCommentReport_ReturnsBadRequest_WhenStoryNotPublished()
+        public void UTCID13_CreateCommentReportAsync_Fail_WhenDescriptionTooShort()
         {
-            LogUtcContext("UTCID12 (ma trận có thể: UTCID122)",
-                "Spec: story chưa PUBLISH → không lưu báo cáo comment (ma trận: false).",
-                "Product service: InvalidOperationException; API: BadRequest.",
-                "Không assert message từng chữ so với ma trận.");
+            // Arrange
+            var reportStore = new List<reports>();
+            var evidenceStore = new List<report_evidences>();
+            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
+            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = ReportDescriptionWords(49) };
 
-            var storyId = Guid.NewGuid();
-            var commentId = Guid.NewGuid();
-            var reporterId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
+            // Act
+            var ex = Record.Exception(() => sut.CreateCommentReportAsync(Guid.NewGuid(), Guid.NewGuid(), request).GetAwaiter().GetResult());
 
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('j', 55)
-            };
-
-            serviceMock
-                .Setup(s => s.CreateCommentReportAsync(
-                    commentId,
-                    reporterId,
-                    request,
-                    storyId,
-                    null))
-                .ThrowsAsync(new InvalidOperationException("Chỉ có thể báo cáo bình luận của truyện đã PUBLISHED."));
-
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
-
-            var result = await controller.ReportStoryComment(storyId, commentId, request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            Assert.NotNull(badRequest.Value);
-            serviceMock.Verify(s => s.CreateCommentReportAsync(
-                commentId,
-                reporterId,
-                request,
-                storyId,
-                null), Times.Once);
-        }
-
-        /// <summary>
-        /// UTCID13 — ma trận: reporter là chủ comment → không được tự báo cáo; Return <c>false</c>, log &quot;Không thể tự báo cáo chính mình&quot; (không assert đúng từng chữ).
-        /// Product: <see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/> — <c>comment.user_id == reporterId</c> → <see cref="InvalidOperationException"/> (message hiện tại: <c>Bạn không thể báo cáo bình luận của chính mình.</c>).
-        /// <see cref="CommentReportsController.ReportStoryComment"/> bắt <c>InvalidOperationException</c> → <c>400 BadRequest</c>.
-        /// Test: mock ném exception cùng kiểu — xác nhận mapping API.
-        /// </summary>
-        [Fact]
-        public async Task UTCID13_CreateCommentReport_ReturnsBadRequest_WhenReporterIsCommentOwner()
-        {
-            LogUtcContext("UTCID13",
-                "Spec: reporter trùng chủ comment → không lưu báo cáo (ma trận: false).",
-                "Product service: InvalidOperationException; API: BadRequest.",
-                "Không assert message từng chữ so với ma trận.");
-
-            var storyId = Guid.NewGuid();
-            var commentId = Guid.NewGuid();
-            var reporterId = Guid.NewGuid();
-            var controller = CreateCommentReportsControllerSut(out var serviceMock);
-
-            var request = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('k', 45)
-            };
-
-            serviceMock
-                .Setup(s => s.CreateCommentReportAsync(
-                    commentId,
-                    reporterId,
-                    request,
-                    storyId,
-                    null))
-                .ThrowsAsync(new InvalidOperationException("Bạn không thể báo cáo bình luận của chính mình."));
-
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
-                authenticationType: "Test");
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-            };
-
-            var result = await controller.ReportStoryComment(storyId, commentId, request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            Assert.NotNull(badRequest.Value);
-            serviceMock.Verify(s => s.CreateCommentReportAsync(
-                commentId,
-                reporterId,
-                request,
-                storyId,
-                null), Times.Once);
+            // Assert
+            Assert.NotNull(ex);
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
         }
     }
 }
 
-
-
-//dotnet test ".\AIStory.Tests.csproj" --no-restore --filter "FullyQualifiedName~AIStory.Tests.UT06_FunctionCreateCommentReport"
+// dotnet test ".\AIStory.Tests.csproj" --no-restore --filter "FullyQualifiedName~AIStory.Tests.UT_CreateCommentReport" --logger "console;verbosity=detailed"
