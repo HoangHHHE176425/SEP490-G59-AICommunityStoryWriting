@@ -35,6 +35,12 @@ namespace Services.Implementations
         private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly IReviewDeadlineForfeitureService _reviewDeadlineForfeiture;
         private readonly ILogger<ModerationService> _logger;
+        private readonly Action<string, Guid, Guid> _approveEnsureClaimed;
+        private readonly Action<string, Guid, Guid> _approveEnsureNoPendingEscalation;
+        private readonly Func<Guid, stories?> _approveGetStoryById;
+        private readonly Action<Guid> _approveCompleteAssignment;
+        private readonly Action<Guid> _approveMarkPendingVersionsAsPublished;
+        private readonly bool _enableApproveChapterPostSideEffects;
 
         public ModerationService(
             IStoryRepository storyRepository,
@@ -46,7 +52,13 @@ namespace Services.Implementations
             IReviewDeadlineForfeitureService reviewDeadlineForfeiture,
             ILogger<ModerationService> logger,
             IModerationHubNotifier? moderationHubNotifier = null,
-            INotificationHubNotifier? notificationHubNotifier = null)
+            INotificationHubNotifier? notificationHubNotifier = null,
+            Action<string, Guid, Guid>? approveEnsureClaimed = null,
+            Action<string, Guid, Guid>? approveEnsureNoPendingEscalation = null,
+            Func<Guid, stories?>? approveGetStoryById = null,
+            Action<Guid>? approveCompleteAssignment = null,
+            Action<Guid>? approveMarkPendingVersionsAsPublished = null,
+            bool enableApproveChapterPostSideEffects = true)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
@@ -58,6 +70,16 @@ namespace Services.Implementations
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
             _notificationHubNotifier = notificationHubNotifier;
+            _approveEnsureClaimed = approveEnsureClaimed ?? ((targetType, targetId, moderatorId) =>
+                EnsureModeratorHasClaimedForReview(targetType, targetId, moderatorId));
+            _approveEnsureNoPendingEscalation = approveEnsureNoPendingEscalation ?? ((targetType, targetId, moderatorId) =>
+                EnsureNoPendingEscalationBlocksModeratorReview(targetType, targetId, moderatorId));
+            _approveGetStoryById = approveGetStoryById ?? (storyId => StoryDAO.GetById(storyId));
+            _approveCompleteAssignment = approveCompleteAssignment ?? (targetId =>
+                ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, targetId));
+            _approveMarkPendingVersionsAsPublished = approveMarkPendingVersionsAsPublished ?? (targetId =>
+                DataAccessObjects.DAOs.ChapterVersionDAO.MarkPendingVersionsAsPublished(targetId));
+            _enableApproveChapterPostSideEffects = enableApproveChapterPostSideEffects;
         }
 
         public PagedResultDto<StoryListItemDto> GetPendingStories(int page = 1, int pageSize = 20, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null, string? timeStatusFilter = null)
@@ -898,15 +920,15 @@ namespace Services.Implementations
             }
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
             {
-                var story = StoryDAO.GetById(chapter.story_id.Value);
+                var story = _approveGetStoryById(chapter.story_id.Value);
                 if (story == null || !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
                 {
                     Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: story not found or category not allowed");
                     return false;
                 }
             }
-            EnsureModeratorHasClaimedForReview(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
-            EnsureNoPendingEscalationBlocksModeratorReview(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+            _approveEnsureClaimed(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+            _approveEnsureNoPendingEscalation(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
 
             // Duyệt theo thứ tự CHỈ khi publish lần đầu cho chapter.
             // Nếu chapter đã từng PUBLISHED (published_at có giá trị) và giờ chỉ gửi version mới,
@@ -948,13 +970,16 @@ namespace Services.Implementations
             chapter.submitted_for_review_at = null;
             _chapterRepository.Update(chapter);
 
+            if (!_enableApproveChapterPostSideEffects)
+                return true;
+
             // Cập nhật last_published_at của story nếu cần và gửi thông báo cho user follow story
             Console.WriteLine($"[CONSOLE] ApproveChapter ChapterId={chapterId} StoryId={chapter.story_id} HasStoryId={chapter.story_id.HasValue}");
             _logger.LogWarning("[NOTIFY] ApproveChapter ChapterId={ChapterId} StoryId={StoryId} HasStoryId={HasValue}",
                 chapterId, chapter.story_id, chapter.story_id.HasValue);
             if (chapter.story_id.HasValue)
             {
-                var story = StoryDAO.GetById(chapter.story_id.Value);
+                var story = _approveGetStoryById(chapter.story_id.Value);
                 if (story != null)
                 {
                     story.last_published_at = DateTime.Now;
@@ -988,8 +1013,8 @@ namespace Services.Implementations
                 _logger.LogWarning("[NOTIFY] ApproveChapter SKIP notify: chapter has no story_id ChapterId={ChapterId}", chapterId);
             }
 
-            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
-            DataAccessObjects.DAOs.ChapterVersionDAO.MarkPendingVersionsAsPublished(chapterId);
+            _approveCompleteAssignment(chapterId);
+            _approveMarkPendingVersionsAsPublished(chapterId);
             LogModeration("CHAPTER", chapterId, "APPROVED", moderatorId, null);
             var chapterNotif = NotifyChapterResult(chapter, "APPROVED", null);
             if (chapterNotif != null) _ = PushAuthorNotificationAsync(chapterNotif);

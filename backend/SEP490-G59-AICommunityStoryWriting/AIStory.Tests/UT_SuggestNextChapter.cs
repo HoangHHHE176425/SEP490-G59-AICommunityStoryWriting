@@ -13,11 +13,49 @@ using Services;
 using Services.DTOs.AI;
 using Services.DTOs.Admin;
 using Services.Interfaces;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Xunit.Abstractions;
 
 namespace AIStory.Tests;
 
 public class UT_SuggestNextChapter
 {
+    private readonly ITestOutputHelper _output;
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        ReferenceHandler = ReferenceHandler.IgnoreCycles
+    };
+
+    public UT_SuggestNextChapter(ITestOutputHelper output) => _output = output;
+
+    private void LogTestCase(
+        string utcId,
+        string spec,
+        object? input,
+        object? output,
+        Exception? ex = null)
+    {
+        _output.WriteLine("");
+        _output.WriteLine($"========== {utcId} ==========");
+        _output.WriteLine($"SPEC   : {spec}");
+        _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input, _jsonOptions)}");
+
+        if (ex != null)
+        {
+            _output.WriteLine("OUTPUT : ERROR");
+            _output.WriteLine($"TYPE   : {ex.GetType().Name}");
+            _output.WriteLine($"MSG    : {ex.Message}");
+        }
+        else
+        {
+            _output.WriteLine("OUTPUT : SUCCESS");
+            _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output, _jsonOptions)}");
+        }
+    }
+
     private static AIController CreateSut(
         IConfiguration? configuration = null,
         bool isDevelopment = false,
@@ -100,6 +138,7 @@ public class UT_SuggestNextChapter
         var result = await sut.SuggestNextChapter(new SuggestNextChapterRequest { StoryId = Guid.Empty }, CancellationToken.None);
 
         var bad = Assert.IsType<BadRequestObjectResult>(result);
+        LogTestCase("UTCID01", "StoryId rỗng trả 400.", new { StoryId = Guid.Empty, UserId = user.FindFirstValue(JwtRegisteredClaimNames.Sub) }, bad.Value);
         Assert.Equal("StoryId là bắt buộc.", GetProp<string>(bad.Value, "message"));
         aiMock.Verify(x => x.SuggestNextChapterAsync(It.IsAny<SuggestNextChapterRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         authorBudgetMock.VerifyNoOtherCalls();
@@ -116,6 +155,7 @@ public class UT_SuggestNextChapter
         var result = await sut.SuggestNextChapter(new SuggestNextChapterRequest { StoryId = Guid.NewGuid() }, CancellationToken.None);
 
         var unauthorized = Assert.IsType<UnauthorizedObjectResult>(result);
+        LogTestCase("UTCID02", "Thiếu claim user trả 401.", new { StoryId = "valid", User = "anonymous" }, unauthorized.Value);
         Assert.Equal("Không xác định được người dùng. Vui lòng đăng nhập lại.", GetProp<string>(unauthorized.Value, "message"));
         aiMock.Verify(x => x.SuggestNextChapterAsync(It.IsAny<SuggestNextChapterRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         authorBudgetMock.VerifyNoOtherCalls();
@@ -137,6 +177,7 @@ public class UT_SuggestNextChapter
         var result = await sut.SuggestNextChapter(new SuggestNextChapterRequest { StoryId = Guid.NewGuid() }, CancellationToken.None);
 
         var obj = Assert.IsType<ObjectResult>(result);
+        LogTestCase("UTCID03", "Vượt token budget trả 403.", new { UserId = userId, StoryId = "valid" }, obj.Value);
         Assert.Equal(403, obj.StatusCode);
         Assert.Contains("giới hạn token", GetProp<string>(obj.Value, "message") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         aiMock.Verify(x => x.SuggestNextChapterAsync(It.IsAny<SuggestNextChapterRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -166,6 +207,7 @@ public class UT_SuggestNextChapter
         var result = await sut.SuggestNextChapter(new SuggestNextChapterRequest { StoryId = Guid.NewGuid() }, CancellationToken.None);
 
         var obj = Assert.IsType<ObjectResult>(result);
+        LogTestCase("UTCID04", "Token còn lại không đủ trả 403.", new { UserId = userId, StoryId = "valid", Remaining = 1000 }, obj.Value);
         Assert.Equal(403, obj.StatusCode);
         Assert.Contains("không đủ", GetProp<string>(obj.Value, "message") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         aiMock.Verify(x => x.SuggestNextChapterAsync(It.IsAny<SuggestNextChapterRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -200,6 +242,7 @@ public class UT_SuggestNextChapter
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var payload = Assert.IsType<SuggestNextChapterResponse>(ok.Value);
+        LogTestCase("UTCID05", "Input hợp lệ trả 200.", new { req.StoryId, UserId = userId }, payload);
         Assert.Single(payload.Suggestions);
         Assert.Equal("Hướng 1", payload.Suggestions[0].Title);
         aiMock.VerifyAll();
@@ -224,6 +267,7 @@ public class UT_SuggestNextChapter
         var result = await sut.SuggestNextChapter(req, CancellationToken.None);
 
         var forbidden = Assert.IsType<ObjectResult>(result);
+        LogTestCase("UTCID06", "Không phải tác giả trả 403.", new { req.StoryId, UserId = userId }, forbidden.Value);
         Assert.Equal(403, forbidden.StatusCode);
         Assert.Equal("Bạn không phải là tác giả của truyện này.", GetProp<string>(forbidden.Value, "message"));
     }

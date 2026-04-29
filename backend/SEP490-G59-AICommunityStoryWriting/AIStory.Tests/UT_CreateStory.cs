@@ -40,8 +40,8 @@ namespace AIStory.Tests
             if (ex != null)
             {
                 _output.WriteLine("OUTPUT : ERROR");
-                _output.WriteLine($"TYPE   : {ex.GetType().Name}");
-                _output.WriteLine($"MSG    : {ex.Message}");
+                _output.WriteLine($"Exception type: {ex.GetType().Name}");
+                _output.WriteLine($"Message: {ex.Message}");
             }
             else
             {
@@ -1381,4 +1381,4 @@ namespace AIStory.Tests
 
 
 
-// dotnet test ".\AIStory.Tests.csproj" --no-restore --filter "FullyQualifiedName~AIStory.Tests.UT_CreateStory" --logger "console;verbosity=detailed"
+// dotnet test ".\AIStory.Tests.csproj" --no-restore --filter "FullyQualifiedName~AIStory.Tests.UT_CreateStory." --logger "console;verbosity=detailed"

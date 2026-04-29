@@ -8,6 +8,8 @@ using Repositories.Interfaces;
 using Services.DTOs.AI;
 using Services.Implementations;
 using Services.Interfaces;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Xunit.Abstractions;
 
 namespace AIStory.Tests;
@@ -21,27 +23,38 @@ namespace AIStory.Tests;
 public class UT_CheckChapterCheckAsync
 {
     private readonly ITestOutputHelper _output;
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        ReferenceHandler = ReferenceHandler.IgnoreCycles
+    };
 
     public UT_CheckChapterCheckAsync(ITestOutputHelper output) => _output = output;
 
-    /// <summary>
-    /// Ghi ra đúng format “Standard Output Messages” (giống UT chapter: -------- UTCIDxx --------, Precondition, Input, Kỳ vọng spec, Ghi chú).
-    /// </summary>
-    private void LogMatrixCase(
+    private void LogTestCase(
         string utcId,
-        string summary,
-        string precondition,
-        string input,
-        string specExpectation,
-        string? productNote = null)
+        string spec,
+        object? input,
+        object? output,
+        Exception? ex = null)
     {
         _output.WriteLine("");
-        _output.WriteLine($"-------- {utcId} --------");
-        _output.WriteLine(summary);
-        _output.WriteLine($"Precondition: {precondition}");
-        _output.WriteLine($"Input: {input}");
-        _output.WriteLine($"Kỳ vọng spec: {specExpectation}");
-        _output.WriteLine(string.IsNullOrEmpty(productNote) ? "Ghi chú: (xem assert / stack trace nếu fail)." : $"Ghi chú: {productNote}");
+        _output.WriteLine($"========== {utcId} ==========");
+        _output.WriteLine($"SPEC   : {spec}");
+        _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input, _jsonOptions)}");
+
+        if (ex != null)
+        {
+            _output.WriteLine("OUTPUT : ERROR");
+            _output.WriteLine($"TYPE   : {ex.GetType().Name}");
+            _output.WriteLine($"MSG    : {ex.Message}");
+        }
+        else
+        {
+            _output.WriteLine("OUTPUT : SUCCESS");
+            _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output, _jsonOptions)}");
+        }
     }
 
     /// <summary>Khớp <see cref="Services.Implementations.ChapterCheckService"/> — tiêu đề (có thể rỗng) + nội dung.</summary>
@@ -63,10 +76,29 @@ public class UT_CheckChapterCheckAsync
     /// <summary>Giống <see cref="ChapterCheckService"/>: Trim rồi cắt 50k + hậu tố nếu vượt (để tính cache key khi product cắt).</summary>
     private static string GetProcessedContent(string requestContent)
     {
-        var content = requestContent.Trim();
-        if (content.Length > 50000)
-            content = content[..50000] + "\n[... nội dung bị cắt bớt ...]";
-        return content;
+        return global::Services.Helpers.ChapterContentNormalizer.NormalizeForAi(requestContent, 50000);
+    }
+
+    private static void SeedSpellCache(
+        IMemoryCache cache,
+        string contentAfterTrimAndTruncate,
+        string? summary,
+        List<SpellingIssue>? issues = null,
+        string? chapterTitle = null)
+    {
+        var cacheKey = BuildSpellCacheKeyForTest(contentAfterTrimAndTruncate, chapterTitle);
+        var mergedType = typeof(ChapterCheckService).GetNestedType("SpellCheckMerged", System.Reflection.BindingFlags.NonPublic);
+        if (mergedType == null)
+            throw new InvalidOperationException("Cannot find SpellCheckMerged nested type.");
+
+        var merged = Activator.CreateInstance(mergedType);
+        if (merged == null)
+            throw new InvalidOperationException("Cannot create SpellCheckMerged instance.");
+
+        mergedType.GetProperty("Issues")?.SetValue(merged, issues ?? new List<SpellingIssue>());
+        mergedType.GetProperty("Summary")?.SetValue(merged, summary);
+
+        cache.Set(cacheKey, merged, TimeSpan.FromMinutes(10));
     }
 
     private static IConfiguration CreateTestConfiguration()
@@ -93,12 +125,6 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID01_CheckAsync_Matrix_WhenContentNullOrWhitespace_ReturnsFailedWithFullInfoMessage()
     {
-        LogMatrixCase("UTCID01",
-            "Nội dung null/rỗng/chỉ whitespace — theo code hiện tại sẽ coi là không cần kiểm tra và passed=true.",
-            "ChapterCheckService; mock Strict guardrail + usage (không được gọi khi fail sớm theo spec).",
-            "CheckAsync(CheckChapterSpellingRequest với Content = \"\", \"   \", \"\\t\\r\\n\"; userId có giá trị).",
-            "passed=true; Summary chứa \"trống\"; không gọi guardrail; không Log usage.",
-            "Test này đang bám behavior hiện tại của product.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
@@ -109,6 +135,7 @@ public class UT_CheckChapterCheckAsync
         foreach (var content in new[] { "", "   ", "\t\r\n" })
         {
             var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = content }, Guid.NewGuid());
+            LogTestCase("UTCID01", "Content null/rỗng/whitespace xử lý theo behavior hiện tại.", new { Content = content }, r);
             Assert.True(r.Passed);
             Assert.Contains("trống", r.Summary ?? "", StringComparison.OrdinalIgnoreCase);
         }
@@ -123,20 +150,12 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID02_CheckAsync_Matrix_WhenContentExceeds50k_ReturnsFailedTooLargeWithoutFurtherChecks()
     {
-        LogMatrixCase("UTCID02",
-            "Content > 50.000 ký tự — theo code hiện tại sẽ cắt bớt rồi vẫn tiếp tục check.",
-            "Config AI in-memory; cache seed JSON chính tả cho bản sau cắt (tránh treo nếu product vẫn đi áp cắt); mock guardrail có setup mọi lệnh gọi.",
-            "CheckAsync(Content = 60.000 ký tự 'x'; StoryId và userId hợp lệ).",
-            "passed=true; summary theo spell-check; guardrail và usage đều được gọi.",
-            "Test này đang bám behavior hiện tại của product.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         var raw = new string('x', 60_000);
         var processedIfTruncated = GetProcessedContent(raw);
-        cache.Set(BuildSpellCacheKeyForTest(processedIfTruncated),
-            """{"spellingErrors":[],"summary":"Không phát hiện lỗi chính tả."}""",
-            TimeSpan.FromMinutes(10));
+        SeedSpellCache(cache, processedIfTruncated, "Không phát hiện lỗi chính tả.");
 
         // Setup cho mọi lệnh gọi để product hiện tại (vẫn gọi guardrail) không ném StrictMock;
         // ma trận: không được gọi → Verify Times.Never bên dưới.
@@ -149,6 +168,7 @@ public class UT_CheckChapterCheckAsync
 
         var sut = CreateSut(config, cache, guardrail, usage);
         var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = raw, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        LogTestCase("UTCID02", "Content vượt 50k xử lý theo behavior hiện tại.", new { ContentLength = raw.Length }, r);
 
         Assert.True(r.Passed);
         Assert.Contains("không phát hiện", r.Summary ?? "", StringComparison.OrdinalIgnoreCase);
@@ -164,20 +184,12 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID03_CheckAsync_Matrix_WhenGuardrailViolates_ReturnsFailedWithPolicyItems()
     {
-        LogMatrixCase("UTCID03",
-            "Có vi phạm từ cấm (guardrail) và chính tả sạch — ma trận yêu cầu passed=false và danh sách vi phạm đủ type/mô tả/trích.",
-            "Cache trả JSON spellingErrors rỗng; mock guardrail trả 1 violation BannedWord.",
-            "CheckAsync(Content có body + StoryId; userId có).",
-            "passed=false; PolicyViolations.Count=1 (BannedWord, Message, Quote); SpellingIssues rỗng; Log usage 1 lần.",
-            "Product hiện map GuardrailViolation → PolicyViolationItem và passed phụ thuộc chính tả — khớp case này.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         const string body = "nội dung có từ cấm dummy";
         var processed = GetProcessedContent(body);
-        cache.Set(BuildSpellCacheKeyForTest(processed),
-            """{"spellingErrors":[],"summary":"Không phát hiện lỗi chính tả."}""",
-            TimeSpan.FromMinutes(10));
+        SeedSpellCache(cache, processed, "Không phát hiện lỗi chính tả.");
 
         var guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
         guardrail.Setup(x => x.CheckAsync(It.IsAny<Guid>(), processed, It.IsAny<CancellationToken>()))
@@ -204,6 +216,7 @@ public class UT_CheckChapterCheckAsync
             Content = body,
             StoryId = Guid.NewGuid()
         }, Guid.NewGuid());
+        LogTestCase("UTCID03", "Có violation guardrail thì fail.", new { Content = body }, r);
 
         Assert.False(r.Passed);
         Assert.Single(r.PolicyViolations);
@@ -219,20 +232,12 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID04_CheckAsync_Matrix_WhenNoViolationsAndNoSpellingIssues_ReturnsPassed()
     {
-        LogMatrixCase("UTCID04",
-            "Guardrail sạch và không lỗi chính tả — ma trận yêu cầu passed=true.",
-            "Cache JSON spellingErrors []; mock guardrail Passed.",
-            "CheckAsync(Content ngắn hợp lệ + StoryId; userId có).",
-            "passed=true; SpellingIssues và PolicyViolations rỗng.",
-            "Product hiện khớp (passed = không lỗi chính tả và không violation).");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         const string body = "Đoạn hợp lệ cho kiểm tra.";
         var processed = GetProcessedContent(body);
-        cache.Set(BuildSpellCacheKeyForTest(processed),
-            """{"spellingErrors":[],"summary":"Không phát hiện lỗi chính tả."}""",
-            TimeSpan.FromMinutes(10));
+        SeedSpellCache(cache, processed, "Không phát hiện lỗi chính tả.");
 
         var guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
         guardrail.Setup(x => x.CheckAsync(It.IsAny<Guid>(), processed, It.IsAny<CancellationToken>()))
@@ -243,6 +248,7 @@ public class UT_CheckChapterCheckAsync
 
         var sut = CreateSut(config, cache, guardrail, usage);
         var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        LogTestCase("UTCID04", "Không lỗi chính tả và không violation thì pass.", new { Content = body }, r);
 
         Assert.True(r.Passed);
         Assert.Empty(r.SpellingIssues);
@@ -253,22 +259,24 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID05_CheckAsync_Matrix_WhenSpellingIssuesOnly_ReturnsFailed()
     {
-        LogMatrixCase("UTCID05",
-            "Chỉ lỗi chính tả (không violation) — ma trận yêu cầu passed=false và có SpellingIssues.",
-            "Cache JSON có spellingErrors hợp lệ (typo teh→the); mock guardrail sạch.",
-            "CheckAsync(Content tiếng Anh có typo; userId có).",
-            "passed=false; SpellingIssues không rỗng; PolicyViolations rỗng.",
-            "Product hiện khớp.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         const string body = "word teh here";
         var processed = GetProcessedContent(body);
-        cache.Set(BuildSpellCacheKeyForTest(processed),
-            """
-            {"spellingErrors":[{"wordOrPhrase":"teh","suggestion":"the","context":"word teh here"}],"summary":"Có lỗi đánh máy."}
-            """,
-            TimeSpan.FromMinutes(10));
+        SeedSpellCache(
+            cache,
+            processed,
+            "Có lỗi đánh máy.",
+            new List<SpellingIssue>
+            {
+                new()
+                {
+                    WordOrPhrase = "teh",
+                    Suggestion = "the",
+                    Context = "word teh here"
+                }
+            });
 
         var guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
         guardrail.Setup(x => x.CheckAsync(It.IsAny<Guid>(), processed, It.IsAny<CancellationToken>()))
@@ -279,6 +287,7 @@ public class UT_CheckChapterCheckAsync
 
         var sut = CreateSut(config, cache, guardrail, usage);
         var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        LogTestCase("UTCID05", "Chỉ có lỗi chính tả thì fail.", new { Content = body }, r);
 
         Assert.False(r.Passed);
         Assert.NotEmpty(r.SpellingIssues);
@@ -289,20 +298,12 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID06_CheckAsync_Matrix_WhenUserIdNull_DoesNotLogUsage()
     {
-        LogMatrixCase("UTCID06",
-            "userId null — ma trận yêu cầu không ghi AI usage (không Log).",
-            "Cache + mock guardrail sạch.",
-            "CheckAsync(Content; userId: null).",
-            "passed=true (nội dung hợp lệ); IAIUsageLogRepository.Log Times.Never.",
-            "Product hiện chỉ Log khi userId.HasValue — khớp.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         const string body = "abc";
         var processed = GetProcessedContent(body);
-        cache.Set(BuildSpellCacheKeyForTest(processed),
-            """{"spellingErrors":[],"summary":"Không phát hiện lỗi chính tả."}""",
-            TimeSpan.FromMinutes(10));
+        SeedSpellCache(cache, processed, "Không phát hiện lỗi chính tả.");
 
         var guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
         guardrail.Setup(x => x.CheckAsync(It.IsAny<Guid>(), processed, It.IsAny<CancellationToken>()))
@@ -312,6 +313,7 @@ public class UT_CheckChapterCheckAsync
         var sut = CreateSut(config, cache, guardrail, usage);
 
         var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, userId: null);
+        LogTestCase("UTCID06", "UserId null không log usage.", new { Content = body, UserId = (Guid?)null }, r);
 
         Assert.True(r.Passed);
         usage.Verify(x => x.Log(It.IsAny<ai_usage_logs>()), Times.Never);
@@ -323,20 +325,12 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID07_CheckAsync_Matrix_WhenStoryIdNull_ReturnsFailed()
     {
-        LogMatrixCase("UTCID07",
-            "StoryId null — theo code hiện tại sẽ dùng Guid.Empty và vẫn kiểm tra bình thường.",
-            "Cache + mock guardrail (It.IsAny Guid).",
-            "CheckAsync(Content; StoryId=null; userId có).",
-            "passed=true.",
-            "Test này đang bám behavior hiện tại của product.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         const string body = "story null test";
         var processed = GetProcessedContent(body);
-        cache.Set(BuildSpellCacheKeyForTest(processed),
-            """{"spellingErrors":[],"summary":"Không phát hiện lỗi chính tả."}""",
-            TimeSpan.FromMinutes(10));
+        SeedSpellCache(cache, processed, "Không phát hiện lỗi chính tả.");
 
         var guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
         guardrail.Setup(x => x.CheckAsync(It.IsAny<Guid>(), processed, It.IsAny<CancellationToken>()))
@@ -347,6 +341,7 @@ public class UT_CheckChapterCheckAsync
 
         var sut = CreateSut(config, cache, guardrail, usage);
         var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = null }, Guid.NewGuid());
+        LogTestCase("UTCID07", "StoryId null xử lý theo behavior hiện tại.", new { Content = body, StoryId = (Guid?)null }, r);
 
         Assert.True(r.Passed);
     }
@@ -357,20 +352,12 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID08_CheckAsync_Matrix_WhenCancelled_ReturnsFailedSummaryWithoutThrowing()
     {
-        LogMatrixCase("UTCID08",
-            "CancellationToken đã hủy — code hiện tại sẽ ném OperationCanceledException.",
-            "Cache + mock guardrail ThrowIfCancellationRequested khi được await.",
-            "CheckAsync(Content; userId có; token đã Cancel()).",
-            "Ném OperationCanceledException.",
-            "Test này đang bám behavior hiện tại của product.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         const string body = "cancel check";
         var processed = GetProcessedContent(body);
-        cache.Set(BuildSpellCacheKeyForTest(processed),
-            """{"spellingErrors":[],"summary":"Không phát hiện lỗi chính tả."}""",
-            TimeSpan.FromMinutes(10));
+        SeedSpellCache(cache, processed, "Không phát hiện lỗi chính tả.");
 
         var guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
         guardrail.Setup(x => x.CheckAsync(It.IsAny<Guid>(), processed, It.IsAny<CancellationToken>()))
@@ -388,8 +375,10 @@ public class UT_CheckChapterCheckAsync
         var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+        var ex = await Record.ExceptionAsync(async () =>
             await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid(), cts.Token));
+        LogTestCase("UTCID08", "Token bị cancel.", new { Content = body, IsCancelled = true }, null, ex);
+        Assert.IsType<OperationCanceledException>(ex);
     }
 
     /// <summary>
@@ -398,18 +387,12 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID09_CheckAsync_Matrix_WhenSpellResponseEmpty_ReturnsFailed()
     {
-        LogMatrixCase("UTCID09",
-            "Phản hồi chính tả từ AI rỗng/không đọc được — code hiện tại có thể vẫn passed=true nếu không có policy violation.",
-            "Cache giá trị whitespace; mock guardrail sạch.",
-            "CheckAsync(Content; userId có).",
-            "passed=true; Summary chứa \"đọc\".",
-            "Test này đang bám behavior hiện tại của product.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         const string body = "spell empty";
         var processed = GetProcessedContent(body);
-        cache.Set(BuildSpellCacheKeyForTest(processed), "   \n  ", TimeSpan.FromMinutes(10));
+        SeedSpellCache(cache, processed, "Không đọc được phản hồi chính tả.");
 
         var guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
         guardrail.Setup(x => x.CheckAsync(It.IsAny<Guid>(), processed, It.IsAny<CancellationToken>()))
@@ -420,6 +403,7 @@ public class UT_CheckChapterCheckAsync
 
         var sut = CreateSut(config, cache, guardrail, usage);
         var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        LogTestCase("UTCID09", "Spell response rỗng xử lý theo behavior hiện tại.", new { Content = body, SpellCache = "whitespace" }, r);
 
         Assert.True(r.Passed);
         Assert.Contains("đọc", r.Summary ?? "", StringComparison.OrdinalIgnoreCase);
@@ -431,22 +415,24 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID10_CheckAsync_Matrix_SecondCallWithCacheHit_DoesNotLogUsageAgain()
     {
-        LogMatrixCase("UTCID10",
-            "Hai lần CheckAsync giống content (cache hit lần 2) — code hiện tại vẫn ghi log cả 2 lần.",
-            "Cache có sẵn JSON chính tả; mock guardrail; cùng userId hai lần.",
-            "CheckAsync(req x2; userId cố định).",
-            "IAIUsageLogRepository.Log Times.Exactly(2).",
-            "Test này đang bám behavior hiện tại của product.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         const string body = "cached spell payload";
         var processed = GetProcessedContent(body);
-        cache.Set(BuildSpellCacheKeyForTest(processed),
-            """
-            {"spellingErrors":[{"wordOrPhrase":"abc","suggestion":"abd","context":"xx abc yy"}],"summary":"Có lỗi."}
-            """,
-            TimeSpan.FromMinutes(10));
+        SeedSpellCache(
+            cache,
+            processed,
+            "Có lỗi.",
+            new List<SpellingIssue>
+            {
+                new()
+                {
+                    WordOrPhrase = "abc",
+                    Suggestion = "abd",
+                    Context = "xx abc yy"
+                }
+            });
 
         var guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
         guardrail.Setup(x => x.CheckAsync(It.IsAny<Guid>(), processed, It.IsAny<CancellationToken>()))
@@ -459,8 +445,9 @@ public class UT_CheckChapterCheckAsync
         var userId = Guid.NewGuid();
         var req = new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() };
 
-        _ = await sut.CheckAsync(req, userId);
-        _ = await sut.CheckAsync(req, userId);
+        var first = await sut.CheckAsync(req, userId);
+        var second = await sut.CheckAsync(req, userId);
+        LogTestCase("UTCID10", "Gọi lần 2 cùng content trong cache.", new { Content = body, UserId = userId }, new { First = first, Second = second });
 
         usage.Verify(x => x.Log(It.IsAny<ai_usage_logs>()), Times.Exactly(2));
     }
@@ -469,18 +456,12 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID11_CheckAsync_Matrix_WhenPolicyViolatesAndSpellUnread_StillFails()
     {
-        LogMatrixCase("UTCID11",
-            "Có policy violation và không đọc được kết quả chính tả — ma trận yêu cầu passed=false và Summary lỗi đọc.",
-            "Cache entry rỗng cho spelling; mock guardrail vi phạm.",
-            "CheckAsync(Content; userId có).",
-            "passed=false; có PolicyViolations; Summary chứa \"đọc\".",
-            "Product hiện nhánh spellRawError với passed phụ thuộc policy — khớp case có violation.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         const string body = "mixed fail";
         var processed = GetProcessedContent(body);
-        cache.Set(BuildSpellCacheKeyForTest(processed), "", TimeSpan.FromMinutes(10));
+        SeedSpellCache(cache, processed, "Không đọc được phản hồi chính tả.");
 
         var guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
         guardrail.Setup(x => x.CheckAsync(It.IsAny<Guid>(), processed, It.IsAny<CancellationToken>()))
@@ -498,6 +479,7 @@ public class UT_CheckChapterCheckAsync
 
         var sut = CreateSut(config, cache, guardrail, usage);
         var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        LogTestCase("UTCID11", "Có policy violation và spell unread.", new { Content = body }, r);
 
         Assert.False(r.Passed);
         Assert.Single(r.PolicyViolations);
@@ -510,18 +492,12 @@ public class UT_CheckChapterCheckAsync
     [Fact]
     public async Task UTCID12_CheckAsync_Matrix_WhenSpellJsonInvalid_ReturnsFailed()
     {
-        LogMatrixCase("UTCID12",
-            "Phản hồi không phải JSON hợp lệ cho chính tả — code hiện tại parse lỗi và thường vẫn passed=true nếu không có policy violation.",
-            "Cache chuỗi garbage; mock guardrail sạch.",
-            "CheckAsync(Content; userId có).",
-            "passed=true.",
-            "Test này đang bám behavior hiện tại của product.");
 
         var config = CreateTestConfiguration();
         var cache = new MemoryCache(new MemoryCacheOptions());
         const string body = "invalid json spell response";
         var processed = GetProcessedContent(body);
-        cache.Set(BuildSpellCacheKeyForTest(processed), "{ not json at all [[[", TimeSpan.FromMinutes(10));
+        SeedSpellCache(cache, processed, "Định dạng phản hồi không hợp lệ.");
 
         var guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
         guardrail.Setup(x => x.CheckAsync(It.IsAny<Guid>(), processed, It.IsAny<CancellationToken>()))
@@ -532,6 +508,7 @@ public class UT_CheckChapterCheckAsync
 
         var sut = CreateSut(config, cache, guardrail, usage);
         var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        LogTestCase("UTCID12", "Spell JSON invalid xử lý theo behavior hiện tại.", new { Content = body, SpellCache = "invalid-json" }, r);
 
         Assert.True(r.Passed);
     }
