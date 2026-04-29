@@ -14,6 +14,7 @@ namespace AIStory.Tests;
 internal sealed class CoinPaymentTestScope : IDisposable
 {
     public StoryPlatformDbContext DbContext { get; }
+    public CoinPaymentTestStore Store { get; }
     public Mock<IPayOSClient> PayOsMock { get; }
     public Mock<INotificationHubNotifier> NotificationHubNotifierMock { get; }
     public IConfiguration Configuration { get; }
@@ -21,11 +22,13 @@ internal sealed class CoinPaymentTestScope : IDisposable
 
     public CoinPaymentTestScope(
         StoryPlatformDbContext dbContext,
+        CoinPaymentTestStore store,
         Mock<IPayOSClient> payOsMock,
         Mock<INotificationHubNotifier> notificationHubNotifierMock,
         IConfiguration configuration)
     {
         DbContext = dbContext;
+        Store = store;
         PayOsMock = payOsMock;
         NotificationHubNotifierMock = notificationHubNotifierMock;
         Configuration = configuration;
@@ -44,6 +47,67 @@ internal sealed class CoinPaymentTestScope : IDisposable
     }
 }
 
+internal sealed class CoinPaymentTestStore
+{
+    public List<users> Users { get; } = new();
+    public List<user_profiles> UserProfiles { get; } = new();
+    public List<coin_packages> CoinPackages { get; } = new();
+    public List<coin_orders> CoinOrders { get; } = new();
+    public List<wallets> Wallets { get; } = new();
+    public List<platform_wallet> PlatformWallets { get; } = new();
+    public List<donations> Donations { get; } = new();
+    public List<author_income_logs> AuthorIncomeLogs { get; } = new();
+    public List<notifications> Notifications { get; } = new();
+    public List<withdraw_requests> WithdrawRequests { get; } = new();
+
+    public void SyncFrom(StoryPlatformDbContext dbContext)
+    {
+        Replace(Users, dbContext.users.ToList());
+        Replace(UserProfiles, dbContext.user_profiles.ToList());
+        Replace(CoinPackages, dbContext.coin_packages.ToList());
+        Replace(CoinOrders, dbContext.coin_orders.ToList());
+        Replace(Wallets, dbContext.wallets.ToList());
+        Replace(PlatformWallets, dbContext.platform_wallet.ToList());
+        Replace(Donations, dbContext.donations.ToList());
+        Replace(AuthorIncomeLogs, dbContext.author_income_logs.ToList());
+        Replace(Notifications, dbContext.notifications.ToList());
+        Replace(WithdrawRequests, dbContext.withdraw_requests.ToList());
+    }
+
+    private static void Replace<T>(List<T> target, IEnumerable<T> source)
+    {
+        target.Clear();
+        target.AddRange(source);
+    }
+}
+
+internal sealed class CoinPaymentTestDbContext : StoryPlatformDbContext
+{
+    private readonly CoinPaymentTestStore _store;
+
+    public CoinPaymentTestDbContext(
+        DbContextOptions<StoryPlatformDbContext> options,
+        CoinPaymentTestStore store)
+        : base(options)
+    {
+        _store = store;
+    }
+
+    public override int SaveChanges()
+    {
+        var result = base.SaveChanges();
+        _store.SyncFrom(this);
+        return result;
+    }
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var result = await base.SaveChangesAsync(cancellationToken);
+        _store.SyncFrom(this);
+        return result;
+    }
+}
+
 internal static class CoinPaymentTestHelpers
 {
     public static CoinPaymentTestScope CreateScope(
@@ -54,6 +118,7 @@ internal static class CoinPaymentTestHelpers
             .UseInMemoryDatabase($"coin-payment-tests-{Guid.NewGuid():N}")
             .ConfigureWarnings(x => x.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
+        var store = new CoinPaymentTestStore();
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -65,7 +130,8 @@ internal static class CoinPaymentTestHelpers
             .Build();
 
         return new CoinPaymentTestScope(
-            new StoryPlatformDbContext(options),
+            new CoinPaymentTestDbContext(options, store),
+            store,
             new Mock<IPayOSClient>(mockBehavior),
             new Mock<INotificationHubNotifier>(mockBehavior),
             configuration);

@@ -384,23 +384,34 @@ namespace DataAccessObjects.DAOs
                 .Include(u => u.user_profiles)
                 .AsQueryable();
 
+            var isIdSearch = false;
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
-                var s = query.Search.Trim().ToLowerInvariant();
-                q = q.Where(u =>
-                    u.email.ToLower().Contains(s) ||
-                    (u.user_profiles != null && u.user_profiles.nickname != null && u.user_profiles.nickname.ToLower().Contains(s)) ||
-                    (u.user_profiles != null && u.user_profiles.phone != null && u.user_profiles.phone.ToLower().Contains(s)) ||
-                    (u.user_profiles != null && u.user_profiles.id_number != null && u.user_profiles.id_number.ToLower().Contains(s)));
+                var rawSearch = query.Search.Trim();
+                if (Guid.TryParse(rawSearch, out var userId))
+                {
+                    // If the input is a UUID, prioritize an exact id lookup.
+                    isIdSearch = true;
+                    q = q.Where(u => u.id == userId);
+                }
+                else
+                {
+                    var s = rawSearch.ToLowerInvariant();
+                    q = q.Where(u =>
+                        u.email.ToLower().Contains(s) ||
+                        (u.user_profiles != null && u.user_profiles.nickname != null && u.user_profiles.nickname.ToLower().Contains(s)) ||
+                        (u.user_profiles != null && u.user_profiles.phone != null && u.user_profiles.phone.ToLower().Contains(s)) ||
+                        (u.user_profiles != null && u.user_profiles.id_number != null && u.user_profiles.id_number.ToLower().Contains(s)));
+                }
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Role))
+            if (!isIdSearch && !string.IsNullOrWhiteSpace(query.Role))
             {
                 var r = query.Role.Trim().ToUpperInvariant();
                 q = q.Where(u => (u.role ?? "").ToUpper() == r);
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Status))
+            if (!isIdSearch && !string.IsNullOrWhiteSpace(query.Status))
             {
                 var st = query.Status.Trim().ToUpperInvariant();
                 q = q.Where(u => (u.status ?? "").ToUpper() == st);

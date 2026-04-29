@@ -244,9 +244,18 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
         a.remove();
         URL.revokeObjectURL(url);
     };
-    const formatDate = (iso) => {
-        const d = new Date(iso);
-        return d.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' });
+    const formatDate = (value) => {
+        if (!value) return '—';
+        const raw = String(value).trim();
+        const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+        const d = new Date(hasTimezone ? raw : `${raw}Z`);
+        if (Number.isNaN(d.getTime())) return raw;
+        return d.toLocaleString('vi-VN', {
+            timeZone: 'Asia/Ho_Chi_Minh',
+            hour12: false,
+            dateStyle: 'short',
+            timeStyle: 'short',
+        });
     };
 
     const formatSignedCoins = (value) => {
@@ -467,93 +476,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                         </div>
                     </div>
 
-                    {/* Balances + Chart */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-5">
-                            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                                <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
-                                    Phân bổ số dư ví
-                                </h2>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs text-slate-400">Thu nhập theo:</span>
-                                    <select
-                                        value={chartRange}
-                                        onChange={(e) => setChartRange(e.target.value)}
-                                        className="text-xs border border-slate-200 rounded px-2 py-1 text-slate-700"
-                                    >
-                                        <option value="7">7 ngày</option>
-                                        <option value="30">30 ngày</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <div className="flex items-center gap-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2.5">
-                                    <div className="w-9 h-9 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                                        <Wallet className="w-5 h-5 text-emerald-500" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-slate-500">Thu nhập khả dụng của tác giả</p>
-                                        <p className="text-sm font-semibold text-slate-900">
-                                            {formatCoins(summarySafe.totalIncomeBalance)}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5">
-                                    <div className="w-9 h-9 rounded-full bg-slate-500/10 flex items-center justify-center">
-                                        <Lock className="w-5 h-5 text-slate-500" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-slate-500">Số dư bị khóa</p>
-                                        <p className="text-sm font-semibold text-slate-900">
-                                            {formatCoins(summarySafe.totalFrozenBalance)}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3 rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2.5">
-                                    <div className="w-9 h-9 rounded-full bg-amber-500/10 flex items-center justify-center">
-                                        <ArrowDownCircle className="w-5 h-5 text-amber-500" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-slate-500">Coin đang treo (escrow)</p>
-                                        <p className="text-sm font-semibold text-slate-900">
-                                            {formatCoins(summarySafe.totalPendingEscrow)}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="mt-6">
-                                <p className="text-xs font-medium text-slate-500 mb-2">
-                                    Thu nhập theo ngày {chartRange === '30' ? '(30 ngày gần nhất)' : '(7 ngày)'}
-                                </p>
-                                <div className="h-52 flex items-end justify-between gap-2">
-                                    {dailyIncome.map((d) => {
-                                        const height = Math.round((d.income / maxIncome) * 100);
-                                        return (
-                                            <div
-                                                key={d.day}
-                                                className="flex-1 flex flex-col items-center gap-1"
-                                            >
-                                                <div className="relative w-full h-full flex items-end">
-                                                    <div
-                                                        className="w-full bg-primary/30 hover:bg-primary/60 rounded-t-md transition-colors cursor-pointer relative group"
-                                                        style={{ height: `${Math.max(height, 10)}%` }}
-                                                    >
-                                                        <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10">
-                                                            {formatVnd(d.income)}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <span className="text-[11px] text-slate-500">{d.day}</span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-
+                    <div className="grid grid-cols-1 gap-6">
                         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
                             <h2 className="text-sm font-semibold text-slate-900">Hoạt động ví</h2>
                             <div className="grid grid-cols-2 gap-3">
@@ -576,14 +499,6 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                     </p>
                                 </div>
                             </div>
-                            <div className="border-t border-slate-200 pt-4">
-                                <p className="text-xs font-medium text-slate-500 mb-2">Gợi ý luồng dữ liệu</p>
-                                <ul className="text-xs text-slate-500 space-y-1 list-disc pl-4">
-                                    <li>Nguồn tiền vào: PayOS/VNPAY → coin_orders (PAID) → cập nhật ví.</li>
-                                    <li>Chi tiêu: mua chương VIP → chuyển coin từ ví độc giả sang thu nhập tác giả.</li>
-                                    <li>Rút tiền: trừ income_balance, tăng frozen cho tới khi admin thanh toán.</li>
-                                </ul>
-                            </div>
                         </div>
                     </div>
 
@@ -605,7 +520,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                             <p className="text-[11px] text-slate-500">{a.stories} truyện đang bật chương VIP</p>
                                         </div>
                                         <div className="text-right">
-                                            <p className="text-sm font-semibold text-emerald-600">{formatVnd(a.income)}</p>
+                                            <p className="text-sm font-semibold text-emerald-600">{formatCoins(a.income)}</p>
                                         </div>
                                     </div>
                                 ))}

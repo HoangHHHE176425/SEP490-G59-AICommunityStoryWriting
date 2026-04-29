@@ -15,6 +15,7 @@ import {
 
 const toUtcInputString = (d) => {
     if (!(d instanceof Date)) return '';
+    if (Number.isNaN(d.getTime())) return '';
     const dt = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
     return dt.toISOString().slice(0, 16);
 };
@@ -229,7 +230,7 @@ export function AiConfig() {
         if (!raw) return '';
         const amount = Number(raw);
         if (!Number.isInteger(amount) || amount <= 0) {
-            return 'Số token cộng phải là số nguyên > 0.';
+            return 'Số token cấp phải là số nguyên > 0.';
         }
         return '';
     }, [autoGrantForm]);
@@ -241,13 +242,9 @@ export function AiConfig() {
     const applyNowFormError = useMemo(() => {
         if (hasManagedAutoGrantRule) return '';
         const amountRaw = String(autoGrantForm.grantAmount ?? '').trim();
-        if (!amountRaw) return 'Vui lòng nhập số token cộng trước khi áp dụng ngay.';
+        if (!amountRaw) return 'Vui lòng nhập số token cấp trước khi áp dụng ngay.';
         const amount = Number(amountRaw);
-        if (!Number.isInteger(amount) || amount <= 0) return 'Số token cộng phải là số nguyên > 0.';
-        const nextRunRaw = String(autoGrantForm.nextRunAtLocal ?? '').trim();
-        if (!nextRunRaw) return 'Vui lòng chọn ngày chạy kế tiếp trước khi áp dụng ngay.';
-        const dt = new Date(nextRunRaw);
-        if (Number.isNaN(dt.getTime())) return 'Ngày chạy kế tiếp không hợp lệ.';
+        if (!Number.isInteger(amount) || amount <= 0) return 'Số token cấp phải là số nguyên > 0.';
         return '';
     }, [hasManagedAutoGrantRule, autoGrantForm.grantAmount, autoGrantForm.nextRunAtLocal]);
 
@@ -313,8 +310,7 @@ export function AiConfig() {
             if (rule) {
                 setAutoGrantForm({
                     grantAmount: String(rule.grantAmount ?? 0),
-                    // Theo UX: không tự đổ ngày vào input, để admin chủ động nhập khi cần.
-                    nextRunAtLocal: '',
+                    nextRunAtLocal: toUtcInputString(new Date(rule.createdAtUtc ?? rule.lastRunAtUtc ?? '')),
                 });
             } else {
                 resetAutoGrantForm();
@@ -395,10 +391,10 @@ export function AiConfig() {
                 selectedUserIds: [],
             };
             await updateAdminAuthorAiTokenAutoGrantRule(managedAutoGrantRule.id, payload);
-            setSuccess('Đã cập nhật số token cộng cho các kỳ chạy tiếp theo.');
+            setSuccess('Đã cập nhật số token cấp cho các kỳ chạy tiếp theo.');
             await loadAutoGrantRules();
         } catch (e) {
-            setError(e?.response?.data?.message || e?.message || 'Không cập nhật được số token cộng.');
+            setError(e?.response?.data?.message || e?.message || 'Không cập nhật được số token cấp.');
         } finally {
             setSavingAutoGrant(false);
         }
@@ -431,6 +427,9 @@ export function AiConfig() {
             if (autoGrantForm.nextRunAtLocal) {
                 const dt = new Date(autoGrantForm.nextRunAtLocal);
                 if (!Number.isNaN(dt.getTime())) payload.lastRunAtUtc = dt.toISOString();
+            } else {
+                // Không còn nhập tay thời gian; khi tạo mới lần đầu dùng mốc hiện tại.
+                payload.lastRunAtUtc = new Date().toISOString();
             }
 
             let ruleId = managedAutoGrantRule?.id || '';
@@ -593,50 +592,33 @@ export function AiConfig() {
                                 </button>
                             </div>
 
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                                    <input
-                                        type="text"
-                                        value="Tháng (UTC)"
-                                        readOnly
-                                        className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700"
-                                    />
-                                    <input
-                                        type="text"
-                                        value="Tất cả tác giả"
-                                        readOnly
-                                        className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700"
-                                    />
-                                    <input
-                                        type="text"
-                                        value="Theo tháng"
-                                        readOnly
-                                        className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700"
-                                    />
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        step={1}
-                                        value={autoGrantForm.grantAmount}
-                                        onChange={(e) => setAutoGrantForm((p) => ({ ...p, grantAmount: e.target.value }))}
-                                        placeholder="Số token cộng"
-                                        className={`rounded-lg border bg-white px-3 py-2 text-xs text-slate-900 ${autoGrantFormError ? 'border-red-400' : 'border-slate-300'}`}
-                                    />
-                                </div>
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2.5">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                    <input
-                                        type="datetime-local"
-                                        value={autoGrantForm.nextRunAtLocal}
-                                        onChange={(e) => setAutoGrantForm((p) => ({ ...p, nextRunAtLocal: e.target.value }))}
-                                        disabled={hasManagedAutoGrantRule}
-                                        className={`rounded-lg border px-3 py-2 text-xs ${hasManagedAutoGrantRule ? 'border-slate-300 bg-slate-100 text-slate-500' : 'border-slate-300 bg-white text-slate-900'}`}
-                                    />
-                                    <input
-                                        type="text"
-                                        value={managedAutoGrantRule?.isEnabled ? 'Đang bật tự chạy' : 'Đang tắt tự chạy'}
-                                        readOnly
-                                        className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700"
-                                    />
+                                    <div className="space-y-1">
+                                        <label className="block text-[11px] font-semibold text-slate-600">
+                                            Số token cấp
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            step={1}
+                                            value={autoGrantForm.grantAmount}
+                                            onChange={(e) => setAutoGrantForm((p) => ({ ...p, grantAmount: e.target.value }))}
+                                            placeholder="Số token cấp"
+                                            className={`w-full rounded-lg border bg-white px-3 py-2 text-xs text-slate-900 ${autoGrantFormError ? 'border-red-400' : 'border-slate-300'}`}
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="block text-[11px] font-semibold text-slate-600">
+                                            Thời gian tạo
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={managedAutoGrantRule?.createdAtUtc ? formatDateTimeVi(managedAutoGrantRule.createdAtUtc) : '—'}
+                                            readOnly
+                                            className="w-full rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700"
+                                        />
+                                    </div>
                                 </div>
 
                                 {autoGrantFormError && (
@@ -671,7 +653,7 @@ export function AiConfig() {
                                             disabled={savingAutoGrant || !!autoGrantFormError}
                                             className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
                                         >
-                                            {savingAutoGrant ? 'Đang cập nhật…' : 'Cập nhật số token cộng'}
+                                            {savingAutoGrant ? 'Đang cập nhật…' : 'Cập nhật số token cấp'}
                                         </button>
                                     )}
                                 </div>
@@ -687,14 +669,13 @@ export function AiConfig() {
                                             <th className="px-2 py-2 text-right">+ Token</th>
                                             <th className="px-2 py-2 text-left">Phạm vi</th>
                                             <th className="px-2 py-2 text-left">Ngày chạy kế tiếp</th>
-                                            <th className="px-2 py-2 text-center">Thao tác</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {autoGrantLoading ? (
-                                            <tr><td colSpan={7} className="px-2 py-4 text-center text-slate-500">Đang tải...</td></tr>
+                                            <tr><td colSpan={6} className="px-2 py-4 text-center text-slate-500">Đang tải...</td></tr>
                                         ) : autoGrantRules.length === 0 ? (
-                                            <tr><td colSpan={7} className="px-2 py-4 text-center text-slate-500">Chưa có quy tắc nào.</td></tr>
+                                            <tr><td colSpan={6} className="px-2 py-4 text-center text-slate-500">Chưa có quy tắc nào.</td></tr>
                                         ) : autoGrantRules.slice(0, 1).map((r) => (
                                             <tr key={r.id} className="border-t border-slate-100">
                                                 <td className="px-2 py-2 text-slate-900">
@@ -715,19 +696,6 @@ export function AiConfig() {
                                                 <td className="px-2 py-2 text-right font-semibold">{fmtIntOrDash(r.grantAmount)}</td>
                                                 <td className="px-2 py-2">Tất cả tác giả</td>
                                                 <td className="px-2 py-2">{r.lastRunAtUtc ? formatDateTimeVi(r.lastRunAtUtc) : '—'}</td>
-                                                <td className="px-2 py-2 text-center">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => onRequestToggleAutoGrant(!r.isEnabled)}
-                                                        disabled={savingAutoGrant}
-                                                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${r.isEnabled ? 'bg-emerald-500' : 'bg-slate-300'} disabled:opacity-60`}
-                                                        title={r.isEnabled ? 'Tắt tự chạy' : 'Bật tự chạy'}
-                                                    >
-                                                        <span
-                                                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${r.isEnabled ? 'translate-x-6' : 'translate-x-1'}`}
-                                                        />
-                                                    </button>
-                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -774,7 +742,7 @@ export function AiConfig() {
                                         </div>
                                         <div className="px-4 py-3 space-y-3">
                                             <p className="text-xs text-slate-700">
-                                                Bạn có chắc muốn cập nhật số token cộng? Thay đổi này sẽ được áp dụng cho các kỳ chạy tự động tiếp theo.
+                                                Bạn có chắc muốn cập nhật số token cấp? Thay đổi này sẽ được áp dụng cho các kỳ chạy tự động tiếp theo.
                                             </p>
                                             <div className="flex justify-end gap-2">
                                                 <button

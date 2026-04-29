@@ -133,7 +133,7 @@ public partial class StoryPlatformDbContext : DbContext
             var connectionString =
                 Environment.GetEnvironmentVariable("ConnectionStrings__StoryPlatformDb")
                 ?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
-                ?? "Server= QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;";
+                ?? "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;";
 
             optionsBuilder.UseSqlServer(
                 connectionString,
