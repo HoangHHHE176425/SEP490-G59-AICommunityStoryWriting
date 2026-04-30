@@ -84,6 +84,7 @@ namespace AIStory.Tests
 
             storyRepoMock.Setup(x => x.GetBySlug(It.IsAny<string>()))
                 .Returns((string slug) => storyStore.FirstOrDefault(s => s.slug == slug));
+            // In-memory data store
             storyRepoMock.Setup(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()))
                 .Callback((stories s, IEnumerable<Guid> _) => storyStore.Add(s));
 
@@ -1375,10 +1376,74 @@ namespace AIStory.Tests
 
             LogStoryStore("UTCID19 (sau verify)", storyStore);
         }
+
+        /// <summary>
+        /// UTCID20 – matrix bổ sung: user đã đăng nhập role Author, slug chưa tồn tại, các field hợp lệ,
+        /// nhưng chọn trạng thái "Tạm dừng (HIATUS)" khi truyện chưa xuất bản thì phải fail.
+        /// Log kỳ vọng nghiệp vụ: "Truyện chưa được xuất bản không thể chọn trạng thái là tạm ngưng".
+        /// </summary>
+        [Fact]
+        public void UTCID20_Create_Fail_WhenAuthorChoosesHiatusForNewStory()
+        {
+            // Arrange
+            var authorId = Guid.NewGuid();
+            var categoryId = Guid.NewGuid();
+            var category = new categories
+            {
+                id = categoryId,
+                name = "Tiểu thuyết",
+                slug = "tieu-thuyet",
+                is_active = true
+            };
+
+            var storyStore = new List<stories>();
+            var sut = CreateSut(storyStore,
+                out var storyRepoMock,
+                out var chapterRepoMock,
+                out var userLookupMock,
+                out var categoryLookupMock);
+
+            categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
+
+            var request = new CreateStoryRequestDto
+            {
+                Title = "abcd - valid title under 50 chars",
+                Summary = new string('s', 60),
+                CategoryIds = new List<Guid> { categoryId },
+                AgeRating = "13+",
+                StoryProgressStatus = "HIATUS"
+            };
+            var coverImageUrl = "https://example.com/covers/utc20-hiatus.jpg";
+
+            // Act
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverImageUrl));
+            LogTestCase(
+                utcId: "UTCID20",
+                spec: "Truyện mới chưa xuất bản nhưng chọn trạng thái HIATUS -> fail.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverImageUrl
+                },
+                output: null,
+                ex: ex);
+
+            // Assert
+            Assert.NotNull(ex);
+            Assert.Empty(storyStore);
+            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
+            chapterRepoMock.VerifyNoOtherCalls();
+        }
     }
 
 }
-
-
 
 // dotnet test ".\AIStory.Tests.csproj" --no-restore --filter "FullyQualifiedName~AIStory.Tests.UT_CreateStory." --logger "console;verbosity=detailed"

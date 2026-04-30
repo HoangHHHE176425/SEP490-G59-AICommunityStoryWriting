@@ -19,6 +19,7 @@ namespace Services.Implementations
         internal const string DeleteRequiresVersionsConfirmationCode = "CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED";
         private const int MinPaidCoinPrice = 10;
         private const int MaxPaidCoinPrice = 100;
+        private const int ChapterTitleMaxLength = 255;
 
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
@@ -69,41 +70,83 @@ namespace Services.Implementations
         /// <inheritdoc cref="IChapterService.Create"/>
         public ChapterResponseDto Create(CreateChapterRequestDto request, Guid authorId)
         {
-            if (request == null) throw new ArgumentNullException(nameof(request));
+            if (request == null)
+            {
+                _logger.LogWarning("CreateChapter failed: request is null.");
+                throw new ArgumentNullException(nameof(request));
+            }
             if (authorId == Guid.Empty)
+            {
+                _logger.LogWarning("CreateChapter failed: authorId is empty. StoryId={StoryId}", request.StoryId);
                 throw new ArgumentException("Author ID is required.", nameof(authorId));
+            }
 
             var story = _storyLookup.GetById(request.StoryId);
             if (story == null)
             {
+                _logger.LogWarning("CreateChapter failed: story not found. StoryId={StoryId}, AuthorId={AuthorId}", request.StoryId, authorId);
                 throw new InvalidOperationException($"Story with ID {request.StoryId} not found.");
             }
 
-            // UTCID13/14: chỉ story.author_id được tạo chương; tác giả khác (dù có truyện khác) không được.
+            // chỉ story.author_id được tạo chương; tác giả khác (dù có truyện khác) không được.
             if (!story.author_id.HasValue || story.author_id.Value != authorId)
+            {
+                _logger.LogWarning(
+                    "CreateChapter failed: author does not own story. StoryId={StoryId}, StoryAuthorId={StoryAuthorId}, CurrentAuthorId={CurrentAuthorId}",
+                    request.StoryId,
+                    story.author_id,
+                    authorId);
                 throw new UnauthorizedAccessException("Bạn không phải tác giả của truyện này.");
+            }
 
-            return CreateChapterCore(request, story);
+            var dto = CreateChapterCore(request, story);
+            _logger.LogInformation(
+                "Tạo chương thành công: StoryId={StoryId}, ChapterId={ChapterId}, OrderIndex={OrderIndex}, AuthorId={AuthorId}",
+                request.StoryId,
+                dto.Id,
+                dto.OrderIndex,
+                authorId);
+            return dto;
         }
 
         private ChapterResponseDto CreateChapterCore(CreateChapterRequestDto request, stories story)
         {
             if (request.Id == Guid.Empty)
+            {
+                _logger.LogWarning("CreateChapter failed: chapter id is empty. StoryId={StoryId}", request.StoryId);
                 throw new ArgumentException("Id must be a non-empty Guid (do not leave empty).");
+            }
 
             EnsureStoryNotComplianceHidden(story, "tạo chương");
             if (story.author_id is Guid aid && _userLookup.IsAuthorWritingSuspended(aid))
+            {
+                _logger.LogWarning("CreateChapter failed: author writing is suspended. StoryId={StoryId}, AuthorId={AuthorId}", request.StoryId, aid);
                 throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
+            }
             EnsureStoryProgressAllowsChapterWrite(story, "tạo chương");
+            if (request.OrderIndex <= 0)
+            {
+                _logger.LogWarning("CreateChapter failed: invalid order index. StoryId={StoryId}, OrderIndex={OrderIndex}", request.StoryId, request.OrderIndex);
+                throw new ArgumentException("OrderIndex phải lớn hơn 0.");
+            }
 
             var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(request.StoryId, request.OrderIndex);
             if (existingChapter != null)
             {
+                _logger.LogWarning("CreateChapter failed: duplicate order index. StoryId={StoryId}, OrderIndex={OrderIndex}", request.StoryId, request.OrderIndex);
                 throw new InvalidOperationException($"Chapter with order index {request.OrderIndex} already exists for this story.");
             }
 
             if (string.IsNullOrWhiteSpace(request.Title))
+            {
+                _logger.LogWarning("CreateChapter failed: title is null/whitespace. StoryId={StoryId}", request.StoryId);
                 throw new ArgumentException("Tiêu đề chương là bắt buộc và không được chỉ gồm khoảng trắng.");
+            }
+            if (request.Title.Length > ChapterTitleMaxLength)
+            {
+                _logger.LogWarning("CreateChapter failed: title exceeds max length. StoryId={StoryId}, TitleLength={TitleLength}", request.StoryId, request.Title.Length);
+                throw new ArgumentException($"Title vượt quá độ dài cho phép (tối đa {ChapterTitleMaxLength} ký tự).");
+            }
 
             EnsureUniqueChapterTitleForStory(request.StoryId, request.Title, null);
 
@@ -111,21 +154,37 @@ namespace Services.Implementations
             var accessType = request.AccessType?.ToUpper() ?? "FREE";
             if (!string.IsNullOrWhiteSpace(request.AccessType) && !validAccessTypes.Contains(accessType))
             {
+                _logger.LogWarning("CreateChapter failed: invalid access type. StoryId={StoryId}, AccessType={AccessType}", request.StoryId, request.AccessType);
                 throw new ArgumentException($"Invalid access type. Must be one of: {string.Join(", ", validAccessTypes)}");
             }
 
             // Validate coin price based on access type
             var coinPrice = request.CoinPrice ?? 0;
+            if (accessType == "PAID" && !request.CoinPrice.HasValue)
+            {
+                _logger.LogWarning("CreateChapter failed: PAID chapter without coinPrice. StoryId={StoryId}", request.StoryId);
+                throw new ArgumentException("Chapter trả phí phải có coinPrice.");
+            }
+            if (accessType == "PAID" && coinPrice <= 0)
+            {
+                _logger.LogWarning("CreateChapter failed: coinPrice must be > 0 for PAID. StoryId={StoryId}, CoinPrice={CoinPrice}", request.StoryId, coinPrice);
+                throw new ArgumentException("coinPrice phải lớn hơn 0.");
+            }
             if (accessType == "PAID" && (coinPrice < MinPaidCoinPrice || coinPrice > MaxPaidCoinPrice))
             {
+                _logger.LogWarning("CreateChapter failed: coinPrice out of range. StoryId={StoryId}, CoinPrice={CoinPrice}", request.StoryId, coinPrice);
                 throw new ArgumentException($"Giá chương trả phí phải trong khoảng {MinPaidCoinPrice}-{MaxPaidCoinPrice} xu.");
             }
             if (accessType == "PAID" && (story.total_views ?? 0) < 500)
             {
+                _logger.LogWarning("CreateChapter failed: story views below paid threshold. StoryId={StoryId}, Views={Views}", request.StoryId, story.total_views ?? 0);
                 throw new InvalidOperationException("Truyện cần tối thiểu 500 lượt xem mới được thiết lập chế độ trả phí cho chương.");
             }
             if (accessType == "FREE" && coinPrice > 0)
+            {
+                _logger.LogWarning("CreateChapter failed: FREE chapter has positive coinPrice. StoryId={StoryId}, CoinPrice={CoinPrice}", request.StoryId, coinPrice);
                 throw new ArgumentException("Chương miễn phí (FREE) không được khai báo giá coin lớn hơn 0.");
+            }
 
             var content = request.Content;
             if (request.AiGeneratedContentId.HasValue)
@@ -139,11 +198,17 @@ namespace Services.Implementations
             }
 
             if (string.IsNullOrWhiteSpace(content))
+            {
+                _logger.LogWarning("CreateChapter failed: content is null/whitespace. StoryId={StoryId}", request.StoryId);
                 throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
+            }
 
             const int minChapterContentChars = 500;
             if (content.Length < minChapterContentChars)
-                throw new InvalidOperationException("Nội dung chương quá ngắn: yêu cầu tối thiểu 500 ký tự.");
+            {
+                _logger.LogWarning("CreateChapter failed: content too short. StoryId={StoryId}, ContentLength={ContentLength}", request.StoryId, content.Length);
+                throw new InvalidOperationException("Content phải có ít nhất 500 ký tự.");
+            }
 
             var wordCount = CalculateWordCount(content);
 
