@@ -7,6 +7,8 @@ namespace Services.Implementations.Lookups
     {
         public bool Exists(Guid userId) => UserDAO.Exists(userId);
 
+        public bool IsAuthor(Guid userId) => UserDAO.IsAuthor(userId);
+
         public bool IsAuthorWritingSuspended(Guid authorUserId) => UserDAO.IsAuthorWritingSuspended(authorUserId);
 
         public int CountAuthorsExcludingBanned() => UserDAO.CountAuthorsExcludingBanned();
