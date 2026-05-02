@@ -1,5 +1,6 @@
-using Moq;
+﻿using Moq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Xunit.Abstractions;
 
 namespace AIStory.Tests;
@@ -13,249 +14,269 @@ public class UT07_FunctionPayOSWebhook
         _output = output;
     }
 
-    private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        ReferenceHandler = ReferenceHandler.IgnoreCycles
+    };
+
+    private void LogTestCase(string utcId, string spec, object? input, object? output, Exception? ex = null)
     {
         _output.WriteLine("");
-        _output.WriteLine($"======== {utcId} | UT07 PayOSWebhook ========");
-        _output.WriteLine(oneLineGoal);
-        foreach (var line in details)
-            _output.WriteLine("  · " + line);
+        _output.WriteLine($"========== {utcId} ==========");
+        _output.WriteLine($"SPEC   : {spec}");
+        _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input, _jsonOptions)}");
+
+        if (ex != null)
+        {
+            _output.WriteLine("OUTPUT : ERROR");
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+        }
+        else
+        {
+            _output.WriteLine("OUTPUT : SUCCESS");
+            _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output, _jsonOptions)}");
+        }
     }
 
-    private void LogActualMessage(string message)
+    private void LogStore(string label, CoinPaymentTestStore store)
     {
-        var line = "Actual log message: " + message;
-        _output.WriteLine(line);
-        Console.WriteLine(line);
+        _output.WriteLine("");
+        _output.WriteLine($"======== {label} - store ========");
+        _output.WriteLine($"Orders={store.CoinOrders.Count}, Wallets={store.Wallets.Count}, Packages={store.CoinPackages.Count}");
+        foreach (var order in store.CoinOrders)
+        {
+            _output.WriteLine($"  order id={order.id}, status={order.status}, link={order.gateway_transaction_id}, code={order.gateway_response_code}, coins={order.coins_granted}");
+        }
+        foreach (var wallet in store.Wallets)
+        {
+            _output.WriteLine($"  wallet user_id={wallet.user_id}, balance_coin={wallet.balance_coin}");
+        }
     }
 
-    private void LogActualReturn(string value)
+    private static string BuildSignedWebhook(string paymentLinkId, string code, string signature)
     {
-        var line = "Actual return: " + JsonSerializer.Serialize(value);
-        _output.WriteLine(line);
-        Console.WriteLine(line);
+        return CoinPaymentTestHelpers.BuildWebhookBody(paymentLinkId, code)
+            .Replace("__SIGNATURE__", signature, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task UTCID01_ProcessPayOSWebhook_Fails_WhenSignatureMissing()
+    public async Task UTCID01_ProcessPayOSWebhook_Result_WhenSignatureMissing()
     {
-        LogUtcContext("UTCID01",
-            "Abnormal path: webhook thiếu signature.",
-            "Precondition: raw body có data nhưng không có signature.",
-            "Kỳ vọng: throw InvalidOperationException Missing signature.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
+        var rawBody = "{\"data\":{\"paymentLinkId\":\"plink_1\",\"code\":\"00\"}}";
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            scope.Sut.ProcessPayOSWebhookAsync("{\"data\":{\"paymentLinkId\":\"plink_1\",\"code\":\"00\"}}"));
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.ProcessPayOSWebhookAsync(rawBody));
+        LogTestCase("UTCID01", "Webhook thieu signature -> fail, khong thay doi du lieu.", new { RawBody = rawBody }, null, ex);
 
-        Assert.Equal("Missing signature", ex.Message);
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.CoinOrders);
+        Assert.Empty(scope.Store.Wallets);
+        scope.PayOsMock.VerifyNoOtherCalls();
+        LogStore("UTCID01 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID02_ProcessPayOSWebhook_Fails_WhenDataMissing()
+    public async Task UTCID02_ProcessPayOSWebhook_Result_WhenDataMissing()
     {
-        LogUtcContext("UTCID02",
-            "Abnormal path: payload thiếu data.",
-            "Precondition: raw body có signature nhưng không có property data.",
-            "Kỳ vọng: throw InvalidOperationException Missing data.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
+        var rawBody = "{\"signature\":\"anything\"}";
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            scope.Sut.ProcessPayOSWebhookAsync("{\"signature\":\"anything\"}"));
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.ProcessPayOSWebhookAsync(rawBody));
+        LogTestCase("UTCID02", "Webhook thieu data -> fail, khong thay doi du lieu.", new { RawBody = rawBody }, null, ex);
 
-        Assert.Equal("Missing data", ex.Message);
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.CoinOrders);
+        Assert.Empty(scope.Store.Wallets);
+        scope.PayOsMock.VerifyNoOtherCalls();
+        LogStore("UTCID02 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID03_ProcessPayOSWebhook_Fails_WhenSignatureInvalid()
+    public async Task UTCID03_ProcessPayOSWebhook_Result_WhenSignatureInvalid()
     {
-        LogUtcContext("UTCID03",
-            "Abnormal path: signature không khớp checksum.",
-            "Precondition: payos.ComputeWebhookSignature trả giá trị khác signature trong body.",
-            "Kỳ vọng: throw InvalidOperationException Invalid signature.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         scope.PayOsMock
             .Setup(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()))
             .Returns("expected-signature");
+        var rawBody = BuildSignedWebhook("plink_2", "00", "wrong-signature");
 
-        var rawBody = CoinPaymentTestHelpers.BuildWebhookBody("plink_2", "00")
-            .Replace("__SIGNATURE__", "wrong-signature", StringComparison.Ordinal);
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.ProcessPayOSWebhookAsync(rawBody));
+        LogTestCase("UTCID03", "Signature khong khop checksum -> fail, khong thay doi du lieu.", new { PaymentLinkId = "plink_2", Code = "00" }, null, ex);
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Sut.ProcessPayOSWebhookAsync(rawBody));
-
-        Assert.Equal("Invalid signature", ex.Message);
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.CoinOrders);
+        Assert.Empty(scope.Store.Wallets);
+        scope.PayOsMock.Verify(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()), Times.Once);
+        LogStore("UTCID03 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID04_ProcessPayOSWebhook_Fails_WhenPaymentLinkIdMissing()
+    public async Task UTCID04_ProcessPayOSWebhook_Result_WhenPaymentLinkIdMissing()
     {
-        LogUtcContext("UTCID04",
-            "Abnormal path: payload không có paymentLinkId.",
-            "Precondition: signature hợp lệ nhưng data thiếu paymentLinkId.",
-            "Kỳ vọng: throw InvalidOperationException Missing paymentLinkId.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         scope.PayOsMock
             .Setup(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()))
             .Returns("valid-signature");
-
         var rawBody = "{\"signature\":\"valid-signature\",\"data\":{\"code\":\"00\"}}";
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Sut.ProcessPayOSWebhookAsync(rawBody));
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.ProcessPayOSWebhookAsync(rawBody));
+        LogTestCase("UTCID04", "Signature hop le nhung thieu paymentLinkId -> fail, khong update order.", new { RawBody = rawBody }, null, ex);
 
-        Assert.Equal("Missing paymentLinkId", ex.Message);
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.CoinOrders);
+        Assert.Empty(scope.Store.Wallets);
+        scope.PayOsMock.Verify(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()), Times.Once);
+        LogStore("UTCID04 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID05_ProcessPayOSWebhook_ReturnsIgnoredUnknownOrder_WhenNoMatchingOrder()
+    public async Task UTCID05_ProcessPayOSWebhook_Result_WhenNoMatchingOrder()
     {
-        LogUtcContext("UTCID05",
-            "Boundary path: webhook hợp lệ nhưng không match coin order nào.",
-            "Precondition: DB không có order với paymentLinkId tương ứng.",
-            "Kỳ vọng: trả IGNORED_UNKNOWN_ORDER.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         scope.PayOsMock
             .Setup(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()))
             .Returns("sig-ok");
+        var rawBody = BuildSignedWebhook("plink_unknown", "00", "sig-ok");
 
-        var rawBody = CoinPaymentTestHelpers.BuildWebhookBody("plink_unknown", "00")
-            .Replace("__SIGNATURE__", "sig-ok", StringComparison.Ordinal);
-
+        // Act
         var result = await scope.Sut.ProcessPayOSWebhookAsync(rawBody);
+        LogTestCase("UTCID05", "Webhook hop le nhung khong match order nao -> ignored.", new { PaymentLinkId = "plink_unknown", Code = "00" }, result);
 
+        // Assert
         Assert.Equal("IGNORED_UNKNOWN_ORDER", result);
-        LogActualReturn(result);
+        Assert.Empty(scope.Store.CoinOrders);
+        Assert.Empty(scope.Store.Wallets);
+        scope.PayOsMock.Verify(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()), Times.Once);
+        LogStore("UTCID05 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID06_ProcessPayOSWebhook_ReturnsOkAlreadyPaid_WhenOrderAlreadyPaid()
+    public async Task UTCID06_ProcessPayOSWebhook_Result_WhenOrderAlreadyPaid()
     {
-        LogUtcContext("UTCID06",
-            "Idempotent path: order đã PAID trước đó.",
-            "Precondition: DB có order status PAID cùng paymentLinkId.",
-            "Kỳ vọng: trả OK_ALREADY_PAID và không cộng coin lần nữa.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var package = CoinPaymentTestHelpers.CreatePackage();
         var userId = Guid.NewGuid();
         var order = CoinPaymentTestHelpers.CreateOrder(userId, package.id, status: "PAID", paymentLinkId: "plink_paid");
         var wallet = CoinPaymentTestHelpers.CreateWallet(userId, balanceCoin: 500);
         CoinPaymentTestHelpers.Seed(scope.DbContext, package, order, wallet);
-
         scope.PayOsMock
             .Setup(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()))
             .Returns("sig-paid");
+        var rawBody = BuildSignedWebhook("plink_paid", "00", "sig-paid");
 
-        var rawBody = CoinPaymentTestHelpers.BuildWebhookBody("plink_paid", "00")
-            .Replace("__SIGNATURE__", "sig-paid", StringComparison.Ordinal);
-
+        // Act
         var result = await scope.Sut.ProcessPayOSWebhookAsync(rawBody);
+        LogTestCase("UTCID06", "Order da PAID -> idempotent, khong cong coin lan nua.", new { PaymentLinkId = "plink_paid", Code = "00" }, result);
 
+        // Assert
         Assert.Equal("OK_ALREADY_PAID", result);
-        Assert.Equal(500, scope.DbContext.wallets.Single().balance_coin);
-        LogActualReturn(result);
+        Assert.Equal(500, scope.Store.Wallets.Single().balance_coin);
+        Assert.Equal("PAID", scope.Store.CoinOrders.Single().status);
+        scope.PayOsMock.Verify(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()), Times.Once);
+        LogStore("UTCID06 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID07_ProcessPayOSWebhook_ReturnsOkFailed_WhenPayOSCodeIsNotSuccess()
+    public async Task UTCID07_ProcessPayOSWebhook_Result_WhenPayOSCodeIsNotSuccess()
     {
-        LogUtcContext("UTCID07",
-            "Abnormal path: webhook hợp lệ nhưng code khác 00.",
-            "Precondition: order đang PENDING.",
-            "Kỳ vọng: order chuyển FAILED và trả OK_FAILED.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var package = CoinPaymentTestHelpers.CreatePackage();
         var order = CoinPaymentTestHelpers.CreateOrder(Guid.NewGuid(), package.id, status: "PENDING", paymentLinkId: "plink_failed");
         CoinPaymentTestHelpers.Seed(scope.DbContext, package, order);
-
         scope.PayOsMock
             .Setup(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()))
             .Returns("sig-failed");
+        var rawBody = BuildSignedWebhook("plink_failed", "99", "sig-failed");
 
-        var rawBody = CoinPaymentTestHelpers.BuildWebhookBody("plink_failed", "99")
-            .Replace("__SIGNATURE__", "sig-failed", StringComparison.Ordinal);
-
+        // Act
         var result = await scope.Sut.ProcessPayOSWebhookAsync(rawBody);
-        var savedOrder = scope.DbContext.coin_orders.Single(x => x.id == order.id);
+        LogTestCase("UTCID07", "Webhook code khac 00 -> order FAILED, khong tao wallet.", new { PaymentLinkId = "plink_failed", Code = "99" }, result);
 
+        // Assert
+        var savedOrder = Assert.Single(scope.Store.CoinOrders, x => x.id == order.id);
         Assert.Equal("OK_FAILED", result);
         Assert.Equal("FAILED", savedOrder.status);
         Assert.Equal("99", savedOrder.gateway_response_code);
-        LogActualReturn(result);
+        Assert.Empty(scope.Store.Wallets);
+        scope.PayOsMock.Verify(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()), Times.Once);
+        LogStore("UTCID07 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID08_ProcessPayOSWebhook_ReturnsOkPaid_AndCreatesWallet_WhenWebhookPaidWithoutExistingWallet()
+    public async Task UTCID08_ProcessPayOSWebhook_Result_WhenPaidWithoutExistingWallet()
     {
-        LogUtcContext("UTCID08",
-            "Happy path: webhook code 00 thì order PAID và cộng coin vào wallet.",
-            "Precondition: order PENDING, wallet chưa tồn tại.",
-            "Kỳ vọng: trả OK_PAID, tạo wallet và cộng đúng số coin.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var userId = Guid.NewGuid();
         var package = CoinPaymentTestHelpers.CreatePackage();
         var order = CoinPaymentTestHelpers.CreateOrder(userId, package.id, status: "PENDING", coinsGranted: 230, paymentLinkId: "plink_success");
         CoinPaymentTestHelpers.Seed(scope.DbContext, package, order);
-
         scope.PayOsMock
             .Setup(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()))
             .Returns("sig-success");
+        var rawBody = BuildSignedWebhook("plink_success", "00", "sig-success");
 
-        var rawBody = CoinPaymentTestHelpers.BuildWebhookBody("plink_success", "00")
-            .Replace("__SIGNATURE__", "sig-success", StringComparison.Ordinal);
-
+        // Act
         var result = await scope.Sut.ProcessPayOSWebhookAsync(rawBody);
-        var wallet = scope.DbContext.wallets.Single(x => x.user_id == userId);
-        var savedOrder = scope.DbContext.coin_orders.Single(x => x.id == order.id);
+        LogTestCase("UTCID08", "Webhook paid khi chua co wallet -> tao wallet va cong coin.", new { PaymentLinkId = "plink_success", Code = "00" }, result);
 
+        // Assert
+        var wallet = Assert.Single(scope.Store.Wallets, x => x.user_id == userId);
+        var savedOrder = Assert.Single(scope.Store.CoinOrders, x => x.id == order.id);
         Assert.Equal("OK_PAID", result);
         Assert.Equal(230, wallet.balance_coin);
         Assert.Equal("PAID", savedOrder.status);
         Assert.Equal("00", savedOrder.gateway_response_code);
-        LogActualReturn(result);
+        scope.PayOsMock.Verify(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()), Times.Once);
+        LogStore("UTCID08 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID09_ProcessPayOSWebhook_ReturnsOkPaid_AndCreditsExistingWallet_WhenWebhookPaid()
+    public async Task UTCID09_ProcessPayOSWebhook_Result_WhenPaidWithExistingWallet()
     {
-        LogUtcContext("UTCID09",
-            "Happy path: webhook code 00 thì cộng coin vào wallet đã tồn tại.",
-            "Precondition: order PENDING và user đã có wallet entry.",
-            "Kỳ vọng: trả OK_PAID, không tạo wallet mới, balance_coin tăng đúng coins_granted.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var userId = Guid.NewGuid();
         var package = CoinPaymentTestHelpers.CreatePackage();
         var order = CoinPaymentTestHelpers.CreateOrder(userId, package.id, status: "PENDING", coinsGranted: 120, paymentLinkId: "plink_existing_wallet");
         var wallet = CoinPaymentTestHelpers.CreateWallet(userId, balanceCoin: 80);
         CoinPaymentTestHelpers.Seed(scope.DbContext, package, order, wallet);
-
         scope.PayOsMock
             .Setup(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()))
             .Returns("sig-existing-wallet");
+        var rawBody = BuildSignedWebhook("plink_existing_wallet", "00", "sig-existing-wallet");
 
-        var rawBody = CoinPaymentTestHelpers.BuildWebhookBody("plink_existing_wallet", "00")
-            .Replace("__SIGNATURE__", "sig-existing-wallet", StringComparison.Ordinal);
-
+        // Act
         var result = await scope.Sut.ProcessPayOSWebhookAsync(rawBody);
-        var savedWallet = scope.DbContext.wallets.Single(x => x.user_id == userId);
-        var savedOrder = scope.DbContext.coin_orders.Single(x => x.id == order.id);
+        LogTestCase("UTCID09", "Webhook paid voi wallet co san -> cong coin vao wallet hien co.", new { PaymentLinkId = "plink_existing_wallet", Code = "00" }, result);
 
+        // Assert
+        var savedWallet = Assert.Single(scope.Store.Wallets, x => x.user_id == userId);
+        var savedOrder = Assert.Single(scope.Store.CoinOrders, x => x.id == order.id);
         Assert.Equal("OK_PAID", result);
         Assert.Equal(200, savedWallet.balance_coin);
         Assert.Equal("PAID", savedOrder.status);
         Assert.Equal("00", savedOrder.gateway_response_code);
-        Assert.Single(scope.DbContext.wallets);
-        LogActualReturn(result);
+        Assert.Single(scope.Store.Wallets);
+        scope.PayOsMock.Verify(x => x.ComputeWebhookSignature(It.IsAny<System.Text.Json.JsonElement>()), Times.Once);
+        LogStore("UTCID09 (sau verify)", scope.Store);
     }
 }
