@@ -256,10 +256,8 @@ namespace AIStory.API.Controllers
                 return Unauthorized(new { message = "Cần đăng nhập để báo cáo." });
             try
             {
-                var reportId = await _storyReportService.CreateStoryReportAsync(id, userId.Value, request);
-                if (reportId == Guid.Empty)
-                    return Conflict(new { message = "Bạn đã báo cáo truyện này trước đó." });
-                return Ok(new { id = reportId, message = "Đã gửi báo cáo." });
+                var result = await _storyReportService.CreateStoryReportAsync(id, userId.Value, request);
+                return Ok(new { id = result.ReportId, message = result.Message });
             }
             catch (ArgumentException ex)
             {

@@ -51,7 +51,7 @@ function mapStoryFromApi(item) {
         : categoryNamesArr.map((name) => ({ id: name, name })); // fallback: chỉ có tên
     const updatedAt = item.updatedAt || item.UpdatedAt;
     const lastUpdate = updatedAt
-        ? new Date(updatedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        ? new Date(updatedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
         : '';
     const coverPath = item.coverImage ?? item.CoverImage;
     const summary = item.summary ?? item.Summary ?? '';
@@ -2486,7 +2486,9 @@ export function AuthorStoryManagement({ onBack }) {
                                                                 {story.title}
                                                             </h3>
                                                             <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
-                                                                {story.lastUpdate}
+                                                                {story.lastUpdate === 'Chưa cập nhật'
+                                                                    ? 'Chưa cập nhật'
+                                                                    : `Tạo lúc: ${story.lastUpdate}`}
                                                             </div>
                                                             {story.isComplianceHidden ? (
                                                                 (() => {

@@ -6,7 +6,7 @@ namespace Services.StoryReporting;
 public static class UserReportDescriptionRules
 {
     public const int MinWords = 50;
-    public const int MaxLength = 8000;
+    public const int MaxLength = 200;
 
     public static int CountWords(string trimmedText)
     {

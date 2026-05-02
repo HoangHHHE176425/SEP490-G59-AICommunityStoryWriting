@@ -1,34 +1,66 @@
-﻿using AIStory.API.Controllers;
-using AIStory.API.Services;
-using BusinessObjects.Entities;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
+﻿using BusinessObjects.Entities;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Logging;
 using Moq;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
 using Repositories;
 using Services.DTOs.Stories;
 using Services.Implementations;
 using Services.Interfaces;
+using System.Linq;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Xunit.Abstractions;
 
 namespace AIStory.Tests
 {
     public class UT_CreateStory
     {
+        public class TestLogger<T> : ILogger<T>
+        {
+            private readonly ITestOutputHelper _output;
+            public TestLogger(ITestOutputHelper output) => _output = output;
+            public IDisposable BeginScope<TState>(TState state) => null!;
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+                => _output.WriteLine(formatter(state, exception));
+        }
+
         private readonly ITestOutputHelper _output;
 
         public UT_CreateStory(ITestOutputHelper output) => _output = output;
 
-        private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
+        private static readonly JsonSerializerOptions _jsonOptions = new()
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            ReferenceHandler = ReferenceHandler.IgnoreCycles,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        };
+
+        private void LogTestCase(
+            string utcId,
+            string spec,
+            object? input,
+            object? output,
+            Exception? ex = null)
         {
             _output.WriteLine("");
-            _output.WriteLine($"======== {utcId} ========");
-            _output.WriteLine(oneLineGoal);
-            foreach (var line in details)
-                _output.WriteLine("  · " + line);
+            _output.WriteLine($"========== {utcId} ==========");
+            _output.WriteLine($"SPEC   : {spec}");
+            _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input, _jsonOptions)}");
+
+            if (ex != null)
+            {
+                _output.WriteLine("OUTPUT : ERROR");
+                _output.WriteLine($"Exception type: {ex.GetType().Name}");
+                _output.WriteLine($"Message: {ex.Message}");
+            }
+            else
+            {
+                _output.WriteLine("OUTPUT : SUCCESS");
+                _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output, _jsonOptions)}");
+            }
         }
 
         /// <summary>In-memory <c>List&lt;stories&gt;</c> do mock <c>IStoryRepository.Add</c> ghi vào — xem sau khi gọi <c>CreateSut</c> + <c>StoryService.Create</c> (cần <c>--logger \"console;verbosity=detailed\"</c> trên CLI).</summary>
@@ -51,7 +83,7 @@ namespace AIStory.Tests
             }
         }
 
-        private static StoryService CreateSut(
+        private StoryService CreateSut(
             List<stories> storyStore,
             out Mock<IStoryRepository> storyRepoMock,
             out Mock<IChapterRepository> chapterRepoMock,
@@ -65,13 +97,15 @@ namespace AIStory.Tests
 
             storyRepoMock.Setup(x => x.GetBySlug(It.IsAny<string>()))
                 .Returns((string slug) => storyStore.FirstOrDefault(s => s.slug == slug));
+            // In-memory data store
             storyRepoMock.Setup(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()))
                 .Callback((stories s, IEnumerable<Guid> _) => storyStore.Add(s));
 
             userLookupMock.Setup(x => x.Exists(It.IsAny<Guid>())).Returns(true);
+            userLookupMock.Setup(x => x.IsAuthor(It.IsAny<Guid>())).Returns(true);
             userLookupMock.Setup(x => x.IsAuthorWritingSuspended(It.IsAny<Guid>())).Returns(false);
 
-            var logger = NullLogger<StoryService>.Instance;
+            var logger = new TestLogger<StoryService>(_output);
             var cache = new MemoryCache(new MemoryCacheOptions());
             return new StoryService(
                 storyRepoMock.Object,
@@ -87,8 +121,9 @@ namespace AIStory.Tests
         /// Gọi trực tiếp <see cref="StoryService.Create"/> (instance <see cref="StoryService"/> như tầng service thật).
         /// </summary>
         [Fact]
-        public void UTCID01_CreateStory_Succeeds_WhenAllInputsValid_HappyPath()
+        public void UTCID01_Create_Success_WhenAllInputsValid()
         {
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -108,8 +143,11 @@ namespace AIStory.Tests
 
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
 
-            var title = new string('a', 50);
-            var summary = new string('b', 50);
+            var title = "Tiên Kiếm Ký: Hành Trình Mở Cõi";
+            var summary = "Vào một buổi sớm mùa thu, Lục Vân rời ngôi làng nhỏ ven núi để tìm tung tích thanh kiếm cổ mà cha để lại trước khi mất tích. " +
+                          "Trên đường đi, cậu kết bạn với một dược sư trẻ và một nữ hiệp luôn che giấu thân phận thật. " +
+                          "Mỗi chặng đường đều mở ra những bí mật về các tông môn, lời nguyền cũ và cuộc chiến giữa chính đạo và ma đạo. " +
+                          "Dù còn non trẻ, Lục Vân buộc phải học cách lựa chọn giữa thù hận cá nhân và trách nhiệm bảo vệ những người vô tội.";
             var coverImageUrl = "https://example.com/covers/valid-story-cover.jpg";
 
             var request = new CreateStoryRequestDto
@@ -121,17 +159,25 @@ namespace AIStory.Tests
                 StoryProgressStatus = "ONGOING"
             };
 
+            // Act
             var dto = storyService.Create(request, authorId, coverImageUrl);
+            LogTestCase(
+                utcId: "UTCID01",
+                spec: "Tạo truyện thành công với Author hợp lệ, không bị ban, slug chưa tồn tại.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverImageUrl
+                },
+                output: dto,
+                ex: null);
 
-            _output.WriteLine("");
-            _output.WriteLine("======== UTCID01 — kết quả StoryService.Create ========");
-            _output.WriteLine($"Id: {dto.Id}");
-            _output.WriteLine($"Status: {dto.Status}; StoryProgressStatus: {dto.StoryProgressStatus}; AgeRating: {dto.AgeRating}");
-            _output.WriteLine($"AuthorId: {dto.AuthorId}");
-            _output.WriteLine($"Title length: {dto.Title?.Length ?? 0}; Summary length: {dto.Summary?.Length ?? 0}");
-            _output.WriteLine($"CoverImage: {dto.CoverImage}");
-            _output.WriteLine($"CategoryIds: [{string.Join(", ", dto.CategoryIds ?? Enumerable.Empty<Guid>())}]");
-
+            // Assert
             Assert.NotNull(dto);
             Assert.Equal(title, dto.Title);
             Assert.Equal(summary, dto.Summary);
@@ -150,7 +196,6 @@ namespace AIStory.Tests
             categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
             chapterRepoMock.VerifyNoOtherCalls();
 
-            LogStoryStore("UTCID01 (sau verify)", storyStore);
         }
 
         /// <summary>
@@ -159,16 +204,11 @@ namespace AIStory.Tests
         /// Không assert đúng từng chữ log.
         /// </summary>
         [Fact]
-        public void UTCID02_CreateStory_Succeeds_WhenTitleDuplicatesExistingStory_DisplayNameAllowed()
+        public void UTCID02_Create_Success_WhenTitleDuplicatesExistingStory()
         {
-            LogUtcContext("UTCID02",
-                "Spec: trùng Title (khác author/story) vẫn tạo được — title không là unique key.",
-                "Precondition: user/author hợp lệ; category hợp lệ; đã có 1 story với Title = T (hoặc tạo story đầu rồi tạo story thứ hai cùng T).",
-                "Input: lần 2 giữ nguyên Title T, các field khác hợp lệ (author B, summary khác, …).",
-                "Kỳ vọng spec: Success cả hai; 2 bản ghi; cùng title string; không assert message log.");
-
-            var authorA = Guid.NewGuid();
-            var authorB = Guid.NewGuid();
+            // Arrange
+            var existingAuthorId = Guid.NewGuid();
+            var currentAuthorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
             {
@@ -178,12 +218,30 @@ namespace AIStory.Tests
                 is_active = true
             };
 
-            var sharedTitle = new string('h', 50);
-            var summaryA = new string('a', 50);
-            var summaryB = new string('b', 50);
+            var duplicatedTitle = "Tiên Kiếm Hiệp";
+            var summary =
+                "Giữa thời loạn lạc, một thiếu niên mang huyết mạch cổ xưa bước vào giang hồ với thanh kiếm gãy và lời hứa chưa kịp hoàn thành của cha mình. " +
+                "Trên hành trình tìm lại chân tướng về vụ thảm sát năm xưa, cậu phải đối mặt với những môn phái tranh quyền, những kẻ săn lùng bí kíp và cả " +
+                "những lựa chọn khiến lòng người đổi thay. Cùng các đồng đội mới quen, cậu dần khám phá bí mật về thanh kiếm, về thân thế thật sự của bản thân " +
+                "và về trận chiến có thể làm thay đổi vận mệnh của cả võ lâm.";
             var coverUrl = "https://example.com/covers/cover-utc02.jpg";
 
-            var storyStore = new List<stories>();
+            var storyStore = new List<stories>
+            {
+                new()
+                {
+                    id = Guid.NewGuid(),
+                    title = duplicatedTitle,
+                    slug = "tien-kiem-hiep",
+                    summary = "Story đã tồn tại để tạo xung đột slug.",
+                    author_id = existingAuthorId,
+                    status = "DRAFT",
+                    story_progress_status = "ONGOING",
+                    age_rating = "13+",
+                    created_at = DateTime.Now,
+                    updated_at = DateTime.Now
+                }
+            };
             var sut = CreateSut(storyStore,
                 out var storyRepoMock,
                 out var chapterRepoMock,
@@ -191,44 +249,48 @@ namespace AIStory.Tests
                 out var categoryLookupMock);
 
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
-
-            var requestA = new CreateStoryRequestDto
+            var request = new CreateStoryRequestDto
             {
-                Title = sharedTitle,
-                Summary = summaryA,
-                CategoryIds = new List<Guid> { categoryId },
-                AgeRating = "13+",
-                StoryProgressStatus = "ONGOING"
-            };
-            var requestB = new CreateStoryRequestDto
-            {
-                Title = sharedTitle,
-                Summary = summaryB,
+                Title = duplicatedTitle,
+                Summary = summary,
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
                 StoryProgressStatus = "ONGOING"
             };
 
-            var dtoA = sut.Create(requestA, authorA, coverUrl);
-            var dtoB = sut.Create(requestB, authorB, coverUrl);
+            // Act
+            var dto = sut.Create(request, currentAuthorId, coverUrl);
+            LogTestCase(
+                utcId: "UTCID02",
+                spec: "Title trùng, slug gốc đã tồn tại thì hệ thống tự generate slug unique và vẫn tạo thành công.",
+                input: new
+                {
+                    ExistingSlug = "tien-kiem-hiep",
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = currentAuthorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: dto,
+                ex: null);
 
-            Assert.NotNull(dtoA);
-            Assert.NotNull(dtoB);
-            Assert.Equal(sharedTitle, dtoA.Title);
-            Assert.Equal(sharedTitle, dtoB.Title);
-            Assert.NotEqual(dtoA.Id, dtoB.Id);
-            Assert.Equal(authorA, dtoA.AuthorId);
-            Assert.Equal(authorB, dtoB.AuthorId);
-            Assert.Equal(summaryA, dtoA.Summary);
-            Assert.Equal(summaryB, dtoB.Summary);
+            // Assert
+            Assert.NotNull(dto);
+            Assert.Equal(duplicatedTitle, dto.Title);
+            Assert.Equal(currentAuthorId, dto.AuthorId);
+            Assert.Equal(summary, dto.Summary);
+            Assert.StartsWith("tien-kiem-hiep", dto.Slug);
+            Assert.NotEqual("tien-kiem-hiep", dto.Slug);
+            Assert.True(dto.Slug == "tien-kiem-hiep-1" || dto.Slug == "tien-kiem-hiep-2" || dto.Slug.StartsWith("tien-kiem-hiep-"));
             Assert.Equal(2, storyStore.Count);
 
-            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Exactly(2));
-            userLookupMock.Verify(x => x.Exists(authorA), Times.Once);
-            userLookupMock.Verify(x => x.Exists(authorB), Times.Once);
-            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorA), Times.Once);
-            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorB), Times.Once);
-            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Exactly(2));
+            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Once);
+            userLookupMock.Verify(x => x.Exists(currentAuthorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(currentAuthorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
             chapterRepoMock.VerifyNoOtherCalls();
         }
 
@@ -239,14 +301,10 @@ namespace AIStory.Tests
         /// Bảng spec ghi Title &lt; 50 ký tự vẫn hợp lệ; Create hiện không validate độ dài title — dùng title ngắn cho đúng matrix.
         /// </summary>
         [Fact]
-        public void UTCID03_CreateStory_Fails_WhenAuthorIdIsEmptyOrMissing()
+        public void UTCID03_Create_Fail_WhenAuthorNotFoundInSystem()
         {
-            LogUtcContext("UTCID03",
-                "Spec: không có author hợp lệ → fail, không Add story.",
-                "Mô phỏng: Create(req, Guid.Empty, cover) với Exists(Empty) = false.",
-                "Các field khác hợp lệ (summary >= 50, category, age 13+, status ONGOING, cover URL).",
-                "Kỳ vọng: exception; không assert message từng chữ.");
-
+            // Arrange
+            var missingAuthorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
             {
@@ -266,10 +324,14 @@ namespace AIStory.Tests
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
 
             userLookupMock.Reset();
-            userLookupMock.Setup(x => x.Exists(Guid.Empty)).Returns(false);
+            userLookupMock.Setup(x => x.Exists(missingAuthorId)).Returns(false);
 
-            var title = new string('c', 12);
-            var summary = new string('d', 52);
+            var title = "Tiên Kiếm Phong Vân";
+            var summary =
+                "Sau biến cố tại biên trấn, một kiếm khách trẻ tuổi lên đường tìm lại tung tích người thầy đã biến mất giữa đêm mưa. " +
+                "Trên hành trình qua các thành trấn và sơn môn, cậu liên tục vướng vào những ân oán giang hồ tưởng chừng không liên quan nhưng lại " +
+                "dần hé lộ một âm mưu lớn hơn nhắm vào cả võ lâm. Dù nhiều lần đứng trước lựa chọn khó khăn, cậu vẫn quyết giữ lời thề bảo vệ người yếu thế " +
+                "và truy ra sự thật phía sau thanh cổ kiếm đang thức tỉnh từng ngày trong tay mình.";
             var request = new CreateStoryRequestDto
             {
                 Title = title,
@@ -279,28 +341,42 @@ namespace AIStory.Tests
                 StoryProgressStatus = "ONGOING"
             };
 
-            Assert.Throws<InvalidOperationException>(() => sut.Create(request, Guid.Empty, "https://example.com/covers/x.jpg"));
+            // Act
+            var coverUrl = "https://example.com/covers/x.jpg";
+            var ex = Record.Exception(() => sut.Create(request, missingAuthorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID03",
+                spec: "Không tìm thấy Author trong hệ thống thì fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = missingAuthorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
+            // Assert
+            Assert.NotNull(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
-            userLookupMock.Verify(x => x.Exists(Guid.Empty), Times.Once);
+            userLookupMock.Verify(x => x.Exists(missingAuthorId), Times.Once);
             userLookupMock.Verify(x => x.IsAuthorWritingSuspended(It.IsAny<Guid>()), Times.Never);
             categoryLookupMock.Verify(x => x.GetById(It.IsAny<Guid>()), Times.Never);
             chapterRepoMock.VerifyNoOtherCalls();
         }
 
         /// <summary>
-        /// UTCID04 – StoryProgressStatus (tiến độ truyện: Đang ra / Hoàn thành / Tạm dừng) không hợp lệ → spec: fail, không tạo story.
-        /// Product: ONGOING, COMPLETED, HIATUS — giá trị khác → ArgumentException. Không assert đúng từng chữ ("Trạng thái không tồn tại").
+        /// UTCID04 – StoryProgressStatus không thuộc danh sách hợp lệ (ONGOING/COMPLETED/HIATUS) → fail, không tạo story.
         /// </summary>
         [Fact]
-        public void UTCID04_CreateStory_Fails_WhenStoryProgressStatusInvalid()
+        public void UTCID04_Create_Fail_WhenStoryProgressStatusInvalid()
         {
-            LogUtcContext("UTCID04",
-                "Spec: Status/tiến độ truyện không thuộc tập hợp cho phép → fail.",
-                "Input: StoryProgressStatus = giá trị lạ (không phải ONGOING/COMPLETED/HIATUS); các field khác hợp lệ.",
-                "Kỳ vọng: exception + không Add; không assert message từng chữ.");
-
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -320,17 +396,43 @@ namespace AIStory.Tests
 
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
 
+            var title = "Tiên Kiếm Minh Không";
+            var summary =
+                "Trong một đêm trăng mờ, cổ kiếm trong tủ gỗ đột nhiên rung nhẹ như gọi chủ nhân đến một nhiệm vụ chưa hoàn thành. " +
+                "Thiếu niên mang họ Lục quyết lên đường tìm lại bí kíp thất truyền và lời giải cho cái chết bí ẩn của sư phụ. " +
+                "Trên đường đi, cậu gặp những kẻ thù giả làm bạn, những minh chứng bị che giấu và cả những lựa chọn khiến lương tri rung chuyển. " +
+                "Mỗi bước chân đều đưa cậu gần hơn tới chân tướng, nhưng cũng khiến cậu phải trả giá bằng niềm tin và máu của chính mình.";
             var request = new CreateStoryRequestDto
             {
-                Title = new string('e', 20),
-                Summary = new string('f', 52),
+                Title = title,
+                Summary = summary,
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
-                StoryProgressStatus = "NOT_A_VALID_PROGRESS"
+                StoryProgressStatus = "ABC"
             };
 
-            Assert.Throws<ArgumentException>(() => sut.Create(request, authorId, "https://example.com/covers/utc04.jpg"));
+            // Act
+            var coverUrl = "https://example.com/covers/utc04-tien-kiem.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID04",
+                spec: "StoryProgressStatus không hợp lệ (ví dụ ABC) → ArgumentException, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<ArgumentException>(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
             userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
@@ -340,16 +442,13 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID05 – StoryProgressStatus null/whitespace: bắt buộc; <see cref="StoryService.Create"/> ném <c>InvalidOperationException</c> (vd. đầy đủ thông tin).
+        /// UTCID05 – StoryProgressStatus null (DTO cho phép null): service bắt buộc → fail.
+        /// Ma trận có thể ghi “Vui lòng điền đầy đủ thông tin” — không assert khớp từng chữ.
         /// </summary>
         [Fact]
-        public void UTCID05_CreateStory_Fails_WhenStoryProgressStatusIsNull()
+        public void UTCID05_Create_Fail_WhenStoryProgressStatusNull()
         {
-            LogUtcContext("UTCID05",
-                "Spec: Status/tiến độ truyện null → fail, không tạo story.",
-                "Input: StoryProgressStatus = null; các field khác hợp lệ.",
-                "Kỳ vọng: exception + không Add.");
-
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -369,35 +468,60 @@ namespace AIStory.Tests
 
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
 
+            var title = "Tiên Kiếm Minh Không";
+            var summary =
+                "Trong một đêm trăng mờ, cổ kiếm trong tủ gỗ đột nhiên rung nhẹ như gọi chủ nhân đến một nhiệm vụ chưa hoàn thành. " +
+                "Thiếu niên mang họ Lục quyết lên đường tìm lại bí kíp thất truyền và lời giải cho cái chết bí ẩn của sư phụ. " +
+                "Trên đường đi, cậu gặp những kẻ thù giả làm bạn, những minh chứng bị che giấu và cả những lựa chọn khiến lương tri rung chuyển. " +
+                "Mỗi bước chân đều đưa cậu gần hơn tới chân tướng, nhưng cũng khiến cậu phải trả giá bằng niềm tin và máu của chính mình.";
             var request = new CreateStoryRequestDto
             {
-                Title = new string('g', 18),
-                Summary = new string('h', 52),
+                Title = title,
+                Summary = summary,
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
                 StoryProgressStatus = null
             };
 
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc05.jpg"));
-            Assert.NotNull(ex);
+            // Act
+            var coverUrl = "https://example.com/covers/utc05-tien-kiem.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID05",
+                spec: "StoryProgressStatus = null → InvalidOperationException, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<InvalidOperationException>(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
             chapterRepoMock.VerifyNoOtherCalls();
         }
 
         /// <summary>
         /// UTCID06 – CategoryId không tồn tại trong hệ thống → spec: fail, không tạo story.
-        /// Product: GetById null → InvalidOperationException. Không assert đúng từng chữ ("Thể loại không tồn tại").
+        /// Input giống payload thật (tiêu đề/mô tả tiếng Việt, 13+, ONGOING, URL ảnh); chỉ <c>CategoryIds</c> trỏ Guid chưa có trong lookup.
+        /// Product: GetById null → InvalidOperationException. Không assert đúng từng chữ message.
         /// </summary>
         [Fact]
-        public void UTCID06_CreateStory_Fails_WhenCategoryIdDoesNotExist()
+        public void UTCID06_Create_Fail_WhenCategoryIdDoesNotExist()
         {
-            LogUtcContext("UTCID06",
-                "Spec: CategoryId không map tới thể loại thật → fail.",
-                "Input: CategoryIds chứa Guid không có trong lookup; các field khác hợp lệ.",
-                "Kỳ vọng: exception + không Add; không assert message từng chữ.");
-
+            // Arrange
             var authorId = Guid.NewGuid();
             var missingCategoryId = Guid.NewGuid();
 
@@ -410,17 +534,42 @@ namespace AIStory.Tests
 
             categoryLookupMock.Setup(x => x.GetById(missingCategoryId)).Returns((categories?)null);
 
+            var title = "Hỏa Long Kiếm Ấn";
+            var summary =
+                "Giang hồ đồn thổi về một ấn kiếm chôn dưới nền miếu hoang, ai chạm vào là mang họa cho cả môn phái. " +
+                "Nữ hiệp trẻ tuổi từ giang nam ra bắc, chỉ vì một lá thư mực nhòe, phải đối mặt với minh chứng giả và lòng người khó đoán. " +
+                "Cô không cần danh tiếng, chỉ cần sự thật: ai đã giết cha cô, và vì sao ấn kiếm lại mang họ của nhà họ Diệp. " +
+                "Trên con đường đó, tình nghĩa sư muội, lời thề bang hội và những đêm mưa gió đều thử thách xem cô còn giữ được lưỡi kiếm thẳng hay không.";
             var request = new CreateStoryRequestDto
             {
-                Title = new string('k', 22),
-                Summary = new string('m', 52),
+                Title = title,
+                Summary = summary,
                 CategoryIds = new List<Guid> { missingCategoryId },
                 AgeRating = "13+",
                 StoryProgressStatus = "ONGOING"
             };
 
-            Assert.Throws<InvalidOperationException>(() => sut.Create(request, authorId, "https://example.com/covers/utc06.jpg"));
+            // Act
+            var coverUrl = "https://example.com/covers/utc06-hoa-long.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID06",
+                spec: "CategoryId không tồn tại → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
+            // Assert
+            Assert.NotNull(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
             userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
@@ -431,18 +580,13 @@ namespace AIStory.Tests
 
         /// <summary>
         /// UTCID07 – CategoryIds null (thiếu thể loại): spec yêu cầu fail, không tạo story.
+        /// Input dùng dữ liệu thật (tiêu đề/mô tả tiếng Việt, 13+, ONGOING, ảnh hợp lệ), chỉ thiếu CategoryIds.
         /// Product: <c>CategoryIds == null || !Any()</c> → InvalidOperationException ("Chọn ít nhất một thể loại.").
-        /// Không assert đúng từng chữ ("Vui lòng điền đầy đủ thông tin").
+        /// Không assert đúng từng chữ message.
         /// </summary>
         [Fact]
-        public void UTCID07_CreateStory_Fails_WhenCategoryIdsIsNull()
+        public void UTCID07_Create_Fail_WhenCategoryIdsNull()
         {
-            LogUtcContext("UTCID07",
-                "Spec: CategoryId / danh sách thể loại null → fail.",
-                "Input: CategoryIds = null; các field khác hợp lệ.",
-                "Kỳ vọng: exception + không Add; không gọi GetById category.",
-                "Ghi chú: List rỗng cũng fail cùng nhánh product — case này dùng null theo matrix.");
-
             var authorId = Guid.NewGuid();
             var storyStore = new List<stories>();
             var sut = CreateSut(storyStore,
@@ -451,17 +595,42 @@ namespace AIStory.Tests
                 out var userLookupMock,
                 out var categoryLookupMock);
 
+            var title = "Bạch Nguyệt Sơn Hà";
+            var summary =
+                "Từ ngôi làng ven sông bị thiêu rụi trong một đêm không trăng, thiếu niên họ Trần bước vào thế giới tu chân với lời thề phải tìm ra kẻ chủ mưu. " +
+                "Mỗi cánh cửa tông môn mở ra lại kéo theo một bí mật cũ, nơi bằng hữu và phản đồ chỉ cách nhau một lời hứa. " +
+                "Giữa những trận pháp cổ và thư tịch thất truyền, cậu nhận ra vận mệnh của mình gắn chặt với thanh kiếm trắng trong truyền thuyết. " +
+                "Hành trình báo thù dần biến thành cuộc chiến bảo vệ những người còn sống, ngay cả khi phải đánh đổi danh tiếng và tuổi trẻ.";
             var request = new CreateStoryRequestDto
             {
-                Title = new string('p', 20),
-                Summary = new string('q', 52),
+                Title = title,
+                Summary = summary,
                 CategoryIds = null!,
                 AgeRating = "13+",
                 StoryProgressStatus = "ONGOING"
             };
 
-            Assert.Throws<InvalidOperationException>(() => sut.Create(request, authorId, "https://example.com/covers/utc07.jpg"));
+            // Act
+            var coverUrl = "https://example.com/covers/utc07-bach-nguyet.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID07",
+                spec: "CategoryIds = null → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
+            // Assert
+            Assert.NotNull(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
             userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
@@ -471,17 +640,12 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID08 – không còn dùng/bắt buộc Summary: <c>Summary = null</c> vẫn tạo truyện thành công.
-        /// Create không validate Summary; lưu <c>null</c> vào entity và trả DTO.
+        /// UTCID08 – Summary null: thiếu dữ liệu bắt buộc, phải fail và không tạo story.
         /// </summary>
         [Fact]
-        public void UTCID08_CreateStory_Succeeds_WhenSummaryIsNull()
+        public void UTCID08_Create_Fail_WhenSummaryNull()
         {
-            LogUtcContext("UTCID08",
-                "Summary không còn bắt buộc: null vẫn tạo story thành công.",
-                "Input: Summary = null; title, category, age, status, cover hợp lệ.",
-                "Kỳ vọng: DTO + Add một lần; không exception.");
-
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -501,8 +665,8 @@ namespace AIStory.Tests
 
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
 
-            var title = new string('r', 24);
-            var coverUrl = "https://example.com/covers/utc08.jpg";
+            var title = "Phong Vân Kiếm Lục";
+            var coverUrl = "https://example.com/covers/utc08-phong-van.jpg";
             var request = new CreateStoryRequestDto
             {
                 Title = title,
@@ -512,16 +676,32 @@ namespace AIStory.Tests
                 StoryProgressStatus = "ONGOING"
             };
 
-            var dto = sut.Create(request, authorId, coverUrl);
+            // Act
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID08",
+                spec: "Summary = null → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
-            Assert.NotNull(dto);
-            Assert.Equal(title, dto.Title);
-            Assert.Null(dto.Summary);
-            Assert.Equal(coverUrl, dto.CoverImage);
-            Assert.Single(storyStore);
-            Assert.Null(storyStore[0].summary);
-
-            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Once);
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<InvalidOperationException>(ex);
+            Assert.Empty(storyStore);
+            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
             chapterRepoMock.VerifyNoOtherCalls();
         }
 
@@ -529,14 +709,9 @@ namespace AIStory.Tests
         /// UTCID09 – Title vượt giới hạn nghiệp vụ (max 50 ký tự khi tạo): fail, không Add.
         /// </summary>
         [Fact]
-        public void UTCID09_CreateStory_Fails_WhenInputExceedsMaxLength()
+        public void UTCID09_Create_Fail_WhenTitleExceeds50Characters()
         {
-            LogUtcContext("UTCID09",
-                "Spec: ít nhất một field vượt độ dài/giới hạn cho phép → fail.",
-                "Input: Title rất dài (mô phỏng vượt max); Summary hợp lệ; category/age/status/cover hợp lệ; slug chưa trùng (store rỗng).",
-                "Kỳ vọng: ArgumentException + không Add.");
-
-            const int titleOverLimitChars = 20_000;
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -556,159 +731,55 @@ namespace AIStory.Tests
 
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
 
+            var titleOverLimit = "Huyền Thiên Kiếm Khúc Và Bí Ẩn Long Mạch Đế Vương Triều";
+            var summary =
+                "Giữa thời loạn lạc, một bản kiếm phổ cổ xuất hiện khiến các môn phái tranh đoạt bằng mọi giá. " +
+                "Người giữ bản đồ long mạch lại là một thư sinh từng thề rời xa giang hồ sau biến cố gia tộc. " +
+                "Khi từng manh mối dẫn về triều đình mục nát, chàng buộc phải chọn giữa báo thù và cứu dân khỏi chiến hỏa. " +
+                "Mỗi bước đi đều có thể đổi lấy mạng sống của bằng hữu, nhưng cũng mở ra cơ hội chấm dứt vòng lặp máu và quyền lực.";
             var request = new CreateStoryRequestDto
             {
-                Title = new string('w', titleOverLimitChars),
-                Summary = new string('v', 52),
+                Title = titleOverLimit,
+                Summary = summary,
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
                 StoryProgressStatus = "ONGOING"
             };
 
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc09.jpg"));
-            Assert.NotNull(ex);
-
-            Assert.Empty(storyStore);
-            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
-            chapterRepoMock.VerifyNoOtherCalls();
-        }
-
-        /// <summary>
-        /// UTCID10 – sai định dạng (ví dụ AgeRating không đúng chuẩn hệ thống): spec yêu cầu fail, không tạo story.
-        /// Ma trận có thể ghi log "Lỗi định dạng" — không assert đúng từng chữ.
-        /// Product hiện tại: Create whitelist AgeRating (ALL / 13+ / 16+ / 18+) → giá trị như "PG13" ném <see cref="ArgumentException"/>.
-        /// </summary>
-        [Fact]
-        public void UTCID10_CreateStory_Fails_WhenInputHasInvalidFormat()
-        {
-            LogUtcContext("UTCID10",
-                "Spec: ít nhất một field sai format/pattern theo rule hệ thống → fail.",
-                "Input: Title/Summary đủ dài; Category ONGOING hợp lệ; Status ONGOING; cover URL hợp lệ; slug chưa trùng.",
-                "Vi phạm: AgeRating = \"PG13\" (không thuộc tập mã cho phép — mô phỏng sai định dạng so với \"13+\").",
-                "Kỳ vọng spec: exception + không Add. Không assert đúng từng chữ message.");
-
-            var authorId = Guid.NewGuid();
-            var categoryId = Guid.NewGuid();
-            var category = new categories
-            {
-                id = categoryId,
-                name = "Tiểu thuyết",
-                slug = "tieu-thuyet",
-                is_active = true
-            };
-
-            var storyStore = new List<stories>();
-            var sut = CreateSut(storyStore,
-                out var storyRepoMock,
-                out var chapterRepoMock,
-                out var userLookupMock,
-                out var categoryLookupMock);
-
-            categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
-
-            var request = new CreateStoryRequestDto
-            {
-                Title = new string('a', 24),
-                Summary = new string('b', 52),
-                CategoryIds = new List<Guid> { categoryId },
-                AgeRating = "PG13",
-                StoryProgressStatus = "ONGOING"
-            };
-
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc10.jpg"));
-            Assert.NotNull(ex);
-
-            Assert.Empty(storyStore);
-            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
-            chapterRepoMock.VerifyNoOtherCalls();
-        }
-
-        /// <summary>
-        /// UTCID11 – ảnh bìa upload vượt giới hạn dung lượng → không tạo story.
-        /// Ma trận có thể ghi "Kích thước file quá lớn" — không assert đúng từng chữ.
-        /// Product: kiểm tra ở <see cref="StoriesController.Create"/> (CoverImage.Length &gt; 5MB → BadRequest), không nằm trong <see cref="StoryService.Create"/>.
-        /// </summary>
-        [Fact]
-        public async Task UTCID11_CreateStory_ReturnsBadRequest_WhenCoverImageFileTooLarge()
-        {
-            LogUtcContext("UTCID11",
-                "Spec: file ảnh quá lớn → fail, không tạo story.",
-                "Product: StoriesController từ chối trước khi gọi StoryService (giới hạn 5MB).",
-                "Kỳ vọng: BadRequest; IStoryService.Create không được gọi. Không assert đúng từng chữ message.");
-
-            const long maxBytes = 5L * 1024 * 1024;
-            var authorId = Guid.NewGuid();
-
-            var coverFile = new Mock<IFormFile>(MockBehavior.Strict);
-            coverFile.Setup(f => f.Length).Returns(maxBytes + 1);
-            coverFile.Setup(f => f.FileName).Returns("huge-cover.jpg");
-            coverFile.Setup(f => f.CopyToAsync(It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-                .Returns(Task.CompletedTask);
-
-            var storyServiceMock = new Mock<IStoryService>(MockBehavior.Strict);
-            var guardMock = new Mock<IContentGuardrailService>();
-            var reportMock = new Mock<IStoryReportService>();
-            var notifMock = new Mock<INotificationHubNotifier>();
-            var commentPostMock = new Mock<IStoryCommentPostService>(MockBehavior.Strict);
-            var cloudinaryMock = new Mock<ICloudinaryImageService>(MockBehavior.Loose);
-            cloudinaryMock.Setup(c => c.IsConfigured).Returns(true);
-            var logger = NullLogger<StoriesController>.Instance;
-
-            var controller = new StoriesController(
-                storyServiceMock.Object,
-                guardMock.Object,
-                reportMock.Object,
-                notifMock.Object,
-                commentPostMock.Object,
-                cloudinaryMock.Object,
-                logger);
-
-            var claims = new List<Claim>
-            {
-                new Claim(JwtRegisteredClaimNames.Sub, authorId.ToString()),
-                new Claim(ClaimTypes.Role, "AUTHOR")
-            };
-            controller.ControllerContext = new ControllerContext
-            {
-                HttpContext = new DefaultHttpContext
+            // Act
+            var coverUrl = "https://example.com/covers/utc09.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID09",
+                spec: "Title vượt giới hạn → fail, không Add.",
+                input: new
                 {
-                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
-                }
-            };
+                    TitleLength = request.Title?.Length ?? 0,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
-            var categoryId = Guid.NewGuid();
-            var request = new CreateStoryRequestDto
-            {
-                Title = new string('c', 24),
-                Summary = new string('d', 52),
-                CategoryIds = new List<Guid> { categoryId },
-                AgeRating = "13+",
-                StoryProgressStatus = "ONGOING",
-                CoverImage = coverFile.Object
-            };
-
-            var result = await controller.Create(request);
-
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.NotNull(badRequest.Value);
-
-            storyServiceMock.Verify(
-                s => s.Create(It.IsAny<CreateStoryRequestDto>(), It.IsAny<Guid>(), It.IsAny<string?>()),
-                Times.Never);
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<ArgumentException>(ex);
+            Assert.Empty(storyStore);
+            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            chapterRepoMock.VerifyNoOtherCalls();
         }
 
         /// <summary>
-        /// UTCID12 – Title vượt giới hạn nghiệp vụ (ma trận: &gt; 50 ký tự).
+        /// UTCID10 – ảnh bìa sai định dạng: spec yêu cầu fail, không tạo story.
+        /// Ma trận có thể ghi "Lỗi định dạng" — không assert đúng từng chữ.
         /// </summary>
         [Fact]
-        public void UTCID12_CreateStory_Fails_WhenTitleExceedsMaxLength()
+        public void UTCID10_Create_Fail_WhenCoverImageFormatInvalid()
         {
-            LogUtcContext("UTCID12",
-                "Spec: Title vượt giới hạn ký tự → fail, không tạo story.",
-                "Input: Title dài hơn 50 (ma trận); Summary/category/age/status/cover hợp lệ; slug chưa trùng.",
-                "Kỳ vọng: ArgumentException + không Add.");
-
-            const int specMaxTitleLength = 50;
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -730,36 +801,192 @@ namespace AIStory.Tests
 
             var request = new CreateStoryRequestDto
             {
-                Title = new string('x', specMaxTitleLength + 1),
-                Summary = new string('y', 52),
+                Title = "Vân Hải Dị Kiếm",
+                Summary =
+                    "Đại lục chia cắt bởi biển mây và chiến tranh kéo dài nhiều thế hệ, nơi mỗi tộc người đều giữ một mảnh bí thuật cổ xưa. " +
+                    "Khi thanh dị kiếm thất lạc tái xuất, một tiểu đội lữ khách bất đắc dĩ phải hợp tác để truy tìm chân tướng trước khi các thế lực lớn ra tay. " +
+                    "Từ thành trì sương trắng đến vực lửa phương nam, họ dần nhận ra kẻ thù thật sự không chỉ là triều đình mà còn là nỗi sợ bên trong mỗi người. " +
+                    "Cuộc hành trình buộc họ chọn giữa quyền lực tuyệt đối và cái giá của lòng nhân còn sót lại.",
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
                 StoryProgressStatus = "ONGOING"
             };
 
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc12.jpg"));
-            Assert.IsType<ArgumentException>(ex);
-            Assert.NotNull(ex);
+            // Act
+            var coverUrl = "https://example.com/covers/utc10-invalid.bmp";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID10",
+                spec: "CoverImageUrl sai định dạng ảnh hợp lệ (jpg/jpeg/png/gif/webp) → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<ArgumentException>(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
             chapterRepoMock.VerifyNoOtherCalls();
         }
 
         /// <summary>
-        /// UTCID13 – Title null: spec yêu cầu fail, không tạo story.
-        /// Ma trận có thể ghi "Vui lòng điền đầy đủ thông tin" — không assert đúng từng chữ.
-        /// Product: không có validate required Title rõ ràng; <see cref="StoryService.Create"/> gọi <c>GenerateSlug(request.Title)</c> →
-        /// <c>Title == null</c> thường ném <see cref="NullReferenceException"/> trước khi Add (fail + không lưu, nhưng không phải thông báo nghiệp vụ có chủ đích).
+        /// UTCID11 – ảnh bìa vượt giới hạn dung lượng (MB): fail, không tạo story.
         /// </summary>
         [Fact]
-        public void UTCID13_CreateStory_Fails_WhenTitleIsNull()
+        public void UTCID11_Create_Fail_WhenCoverImageTooLarge()
         {
-            LogUtcContext("UTCID13",
-                "Spec: Title null → fail, không tạo story.",
-                "Input: Title = null; summary/category/age/status/cover hợp lệ; slug chưa trùng.",
-                "Kỳ vọng spec: exception + không Add. Không assert đúng từng chữ message.");
+            // Arrange
+            var authorId = Guid.NewGuid();
+            var categoryId = Guid.NewGuid();
+            var category = new categories
+            {
+                id = categoryId,
+                name = "Tiểu thuyết",
+                slug = "tieu-thuyet",
+                is_active = true
+            };
 
+            var storyStore = new List<stories>();
+            var sut = CreateSut(storyStore,
+                out var storyRepoMock,
+                out var chapterRepoMock,
+                out var userLookupMock,
+                out var categoryLookupMock);
+
+            categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
+
+            var request = new CreateStoryRequestDto
+            {
+                Title = "Thiên Mệnh Kiếm Đồ",
+                Summary =
+                    "Một bản đồ cổ ghi lại đường đi đến kiếm trận tối thượng vô tình rơi vào tay thiếu chủ của môn phái đã suy tàn. " +
+                    "Để bảo vệ người thân, anh buộc phải liên minh với những kẻ từng là cừu địch và bước vào cuộc truy sát khắp ba châu. " +
+                    "Mỗi tọa độ trên bản đồ đều đổi bằng máu, nhưng càng tiến gần đích đến, anh càng nhận ra bí mật lớn nhất lại liên quan trực tiếp đến thân thế của mình. " +
+                    "Giữa tham vọng thống nhất võ lâm và lời hứa với sư phụ, anh chỉ có một con đường để chọn.",
+                CategoryIds = new List<Guid> { categoryId },
+                AgeRating = "13+",
+                StoryProgressStatus = "ONGOING"
+            };
+
+            // Act
+            var coverUrl = "https://example.com/covers/utc11-large.jpg?sizeMb=6";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID11",
+                spec: "Cover image size > 5MB (sizeMb=6) → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    CoverSizeMb = 6,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
+
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<ArgumentException>(ex);
+            Assert.Empty(storyStore);
+            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
+            chapterRepoMock.VerifyNoOtherCalls();
+        }
+
+        /// <summary>
+        /// UTCID12 – dữ liệu vượt quá giới hạn: Summary quá dài so với ngưỡng cho phép của service.
+        /// </summary>
+        [Fact]
+        public void UTCID12_Create_Fail_WhenSummaryExceedsMaxLength()
+        {
+            // Arrange
+            var authorId = Guid.NewGuid();
+            var categoryId = Guid.NewGuid();
+            var category = new categories
+            {
+                id = categoryId,
+                name = "Tiểu thuyết",
+                slug = "tieu-thuyet",
+                is_active = true
+            };
+
+            var storyStore = new List<stories>();
+            var sut = CreateSut(storyStore,
+                out var storyRepoMock,
+                out var chapterRepoMock,
+                out var userLookupMock,
+                out var categoryLookupMock);
+
+            categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
+            var summaryOverLimit = string.Concat(Enumerable.Repeat(
+                "Hành trình qua cửu vực mở ra từng bí mật cổ xưa, nơi mỗi quyết định đều đổi bằng danh dự, máu và lời thề của cả một môn phái. ",
+                40));
+
+            var request = new CreateStoryRequestDto
+            {
+                Title = "Huyết Ảnh Kiếm Tông",
+                Summary = summaryOverLimit,
+                CategoryIds = new List<Guid> { categoryId },
+                AgeRating = "13+",
+                StoryProgressStatus = "ONGOING"
+            };
+
+            // Act
+            var coverUrl = "https://example.com/covers/utc12.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID12",
+                spec: "Summary vượt quá giới hạn cho phép → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    SummaryLength = request.Summary?.Length ?? 0,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
+
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<ArgumentException>(ex);
+            Assert.Empty(storyStore);
+            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
+            chapterRepoMock.VerifyNoOtherCalls();
+        }
+
+        /// <summary>
+        /// UTCID13 – Title null: thiếu dữ liệu bắt buộc, fail và không tạo story.
+        /// </summary>
+        [Fact]
+        public void UTCID13_Create_Fail_WhenTitleNull()
+        {
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -782,34 +1009,53 @@ namespace AIStory.Tests
             var request = new CreateStoryRequestDto
             {
                 Title = null!,
-                Summary = new string('z', 52),
+                Summary =
+                    "Dưới chân thành cổ, một lời nguyền bị phong ấn suốt trăm năm bất ngờ thức tỉnh, kéo theo hàng loạt cái chết bí ẩn của những người canh mộ. " +
+                    "Nữ hiệp trẻ phải bước vào mê cung ngầm để tìm chân tướng và cứu lấy sư môn trước khi triều đình đổ toàn bộ tội lỗi lên đầu họ. " +
+                    "Mỗi dấu tích khắc trên vách đá đều dẫn về một bí mật bị xóa khỏi chính sử, nơi công lý bị đổi lấy quyền lực. " +
+                    "Nếu thất bại, không chỉ một tông môn sụp đổ mà cả biên cương sẽ chìm trong loạn chiến.",
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
                 StoryProgressStatus = "ONGOING"
             };
 
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc13.jpg"));
-            Assert.NotNull(ex);
+            // Act
+            var coverUrl = "https://example.com/covers/utc13.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID13",
+                spec: "Title = null → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<InvalidOperationException>(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
             chapterRepoMock.VerifyNoOtherCalls();
         }
 
         /// <summary>
-        /// UTCID14 – người thực hiện không phải tác giả hợp lệ trong hệ thống: spec yêu cầu fail, không tạo story.
-        /// Ma trận có thể ghi "Bạn không phải là tác giả" — không assert đúng từng chữ.
-        /// Product: <see cref="StoryService.Create"/> gọi <see cref="IUserLookup.Exists"/> trước; user không tồn tại → <see cref="InvalidOperationException"/> (message hiện tại nói AuthorId không có trong bảng users).
-        /// Khác UTCID03: dùng Guid không rỗng nhưng <c>Exists == false</c> (mô phỏng định danh không gắn user/tác giả thật trong DB).
+        /// UTCID14 – tài khoản đã đăng nhập nhưng không phải Author: phải fail và không tạo story.
         /// </summary>
         [Fact]
-        public void UTCID14_CreateStory_Fails_WhenCallerIsNotRegisteredAuthor()
+        public void UTCID14_Create_Fail_WhenLoggedInUserIsNotAuthor()
         {
-            LogUtcContext("UTCID14",
-                "Spec: user không được xác định là tác giả hợp lệ → fail, không Add.",
-                "Mô phỏng: authorId = Guid có thật (không Empty) nhưng IUserLookup.Exists(authorId) = false.",
-                "Input story hợp lệ; slug chưa trùng. Kỳ vọng: exception + không Add; không assert message từng chữ.");
-
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -828,44 +1074,61 @@ namespace AIStory.Tests
                 out var categoryLookupMock);
 
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
-
-            userLookupMock.Reset();
-            userLookupMock.Setup(x => x.Exists(authorId)).Returns(false);
+            userLookupMock.Setup(x => x.Exists(authorId)).Returns(true);
+            userLookupMock.Setup(x => x.IsAuthor(authorId)).Returns(false);
 
             var request = new CreateStoryRequestDto
             {
-                Title = new string('e', 20),
-                Summary = new string('f', 52),
+                Title = "Lam Nguyệt Kiếm Ca",
+                Summary =
+                    "Sau biến cố tại biên trấn, một thiếu hiệp mang thân phận thường dân bị cuốn vào vòng tranh đoạt bí pháp giữa các tông môn lớn. " +
+                    "Dù có thiên phú kiếm đạo hiếm gặp, cậu vẫn không thể bước vào đường tu nếu thiếu danh phận được công nhận bởi giới giang hồ. " +
+                    "Khi âm mưu của triều đình lộ diện, cậu buộc phải hợp tác với những người từng coi thường mình để bảo vệ dân chúng khỏi một cuộc thảm sát. " +
+                    "Con đường trở thành kiếm khách thực thụ bắt đầu từ việc đối diện sự thật rằng tài năng không thay thế được tư cách hợp lệ.",
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
                 StoryProgressStatus = "ONGOING"
             };
 
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc14.jpg"));
-            Assert.NotNull(ex);
+            // Act
+            var coverUrl = "https://example.com/covers/utc14.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID14",
+                spec: "User đã đăng nhập nhưng role != Author → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<InvalidOperationException>(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
             userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthor(authorId), Times.Once);
             userLookupMock.Verify(x => x.IsAuthorWritingSuspended(It.IsAny<Guid>()), Times.Never);
             categoryLookupMock.Verify(x => x.GetById(It.IsAny<Guid>()), Times.Never);
             chapterRepoMock.VerifyNoOtherCalls();
         }
 
         /// <summary>
-        /// UTCID15 – Title chỉ gồm khoảng trắng: spec yêu cầu fail (tương đương <c>string.IsNullOrWhiteSpace</c>), không tạo story.
+        /// UTCID15 – Title input chỉ chứa khoảng trắng: fail, không tạo story.
         /// Ma trận có thể ghi "Vui lòng điền đầy đủ thông tin" — không assert đúng từng chữ.
-        /// Product hiện tại: Create không gọi <c>IsNullOrWhiteSpace(Title)</c>; slug rỗng vẫn có thể Add → test FAIL cho đến khi product validate.
         /// </summary>
         [Fact]
-        public void UTCID15_CreateStory_Fails_WhenTitleIsWhitespaceOnly()
+        public void UTCID15_Create_Fail_WhenTitleIsWhitespace()
         {
-            LogUtcContext("UTCID15",
-                "Spec: Title chỉ chứa khoảng trắng → fail, không Add.",
-                "Input: Title = spaces/tabs; summary/category/age/status/cover hợp lệ; slug chưa trùng.",
-                "Kỳ vọng spec: exception + không Add. Không assert đúng từng chữ message.",
-                "Ghi chú: product có thể vẫn tạo story với slug rỗng — test có thể FAIL.");
-
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -888,93 +1151,55 @@ namespace AIStory.Tests
             var request = new CreateStoryRequestDto
             {
                 Title = "   \t  \r\n  ",
-                Summary = new string('g', 52),
+                Summary =
+                    "Một thanh niên vô danh tìm được mảnh ngọc cổ trong đêm mưa, từ đó bị kéo vào cuộc truy đuổi của nhiều thế lực giang hồ. " +
+                    "Mỗi dấu vết để lại đều dẫn đến một bí mật của triều đại đã mất, nơi danh vọng và phản bội luôn đi cùng nhau. " +
+                    "Khi chân tướng dần lộ ra, cậu phải quyết định bảo vệ người thân hay giữ lời thề với sư môn trước cơn bão sắp đến. " +
+                    "Con đường kiếm đạo bắt đầu bằng việc học cách đối diện chính mình giữa những lựa chọn không có đáp án trọn vẹn.",
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
                 StoryProgressStatus = "ONGOING"
             };
 
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc15.jpg"));
+            // Act
+            var coverUrl = "https://example.com/covers/utc15.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID15",
+                spec: "Title chỉ chứa khoảng trắng → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
+
+            // Assert
             Assert.NotNull(ex);
-
-            Assert.Empty(storyStore);
-            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
-            chapterRepoMock.VerifyNoOtherCalls();
-        }
-
-        /// <summary>
-        /// UTCID16 – tác giả bị chặn tạo nội dung (spec: BAN): fail, không tạo story.
-        /// Ma trận có thể ghi "Author đã bị BAN" — không assert đúng từng chữ.
-        /// Product: <see cref="StoryService.Create"/> gọi <see cref="IUserLookup.IsAuthorWritingSuspended"/>; khi true → <see cref="InvalidOperationException"/>
-        /// (message hiện tại: tạm khóa chức năng viết truyện). Không có kiểm tra <c>users.status == BANNED</c> trong Create — mô phỏng "bị chặn" bằng suspend viết.
-        /// </summary>
-        [Fact]
-        public void UTCID16_CreateStory_Fails_WhenAuthorWritingIsBlocked()
-        {
-            LogUtcContext("UTCID16",
-                "Spec: author bị BAN / chặn tạo truyện → fail, không Add.",
-                "Product: IsAuthorWritingSuspended = true (tạm khóa viết compliance/admin).",
-                "Input story hợp lệ; slug chưa trùng. Kỳ vọng: exception + không Add; không assert message từng chữ.",
-                "Ghi chú: trạng thái BANNED trên user có thể chưa được Create kiểm tra riêng.");
-
-            var authorId = Guid.NewGuid();
-            var categoryId = Guid.NewGuid();
-            var category = new categories
-            {
-                id = categoryId,
-                name = "Tiểu thuyết",
-                slug = "tieu-thuyet",
-                is_active = true
-            };
-
-            var storyStore = new List<stories>();
-            var sut = CreateSut(storyStore,
-                out var storyRepoMock,
-                out var chapterRepoMock,
-                out var userLookupMock,
-                out var categoryLookupMock);
-
-            categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
-
-            userLookupMock.Reset();
-            userLookupMock.Setup(x => x.Exists(authorId)).Returns(true);
-            userLookupMock.Setup(x => x.IsAuthorWritingSuspended(authorId)).Returns(true);
-
-            var request = new CreateStoryRequestDto
-            {
-                Title = new string('h', 20),
-                Summary = new string('i', 52),
-                CategoryIds = new List<Guid> { categoryId },
-                AgeRating = "13+",
-                StoryProgressStatus = "ONGOING"
-            };
-
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc16.jpg"));
-            Assert.NotNull(ex);
-
+            Assert.IsType<InvalidOperationException>(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
             userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthor(authorId), Times.Once);
             userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
-            categoryLookupMock.Verify(x => x.GetById(It.IsAny<Guid>()), Times.Never);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
             chapterRepoMock.VerifyNoOtherCalls();
         }
 
         /// <summary>
-        /// UTCID17 – thiếu ảnh bìa (Image / cover null): spec yêu cầu fail, không tạo story.
-        /// Ma trận có thể ghi "Vui lòng điền đầy đủ thông tin" — không assert đúng từng chữ.
-        /// Product hiện tại: <see cref="StoriesController.Create"/> chỉ upload khi <c>CoverImage</c> có dữ liệu; không có thì <c>coverUrl</c> null và vẫn gọi
-        /// <see cref="StoryService.Create"/>; service gán <c>cover_image</c> null — không validate bắt buộc ảnh. Test FAIL cho đến khi product yêu cầu cover.
+        /// UTCID16 – author bị ban (không còn đủ điều kiện Author): fail, không tạo story.
+        /// Ma trận có thể ghi "Author đã bị BAN" — không assert đúng từng chữ.
         /// </summary>
         [Fact]
-        public void UTCID17_CreateStory_Fails_WhenCoverImageIsNull()
+        public void UTCID16_Create_Fail_WhenAuthorIsBanned()
         {
-            LogUtcContext("UTCID17",
-                "Spec: không có ảnh đại diện (cover null) → fail, không Add.",
-                "Mô phỏng API: StoryService.Create(..., coverImageUrl: null); các field khác hợp lệ; slug chưa trùng.",
-                "Kỳ vọng spec: exception + không Add. Không assert đúng từng chữ message.",
-                "Ghi chú: product hiện cho phép tạo truyện không ảnh bìa — test có thể FAIL.");
-
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -992,89 +1217,62 @@ namespace AIStory.Tests
                 out var userLookupMock,
                 out var categoryLookupMock);
 
-            categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
+            userLookupMock.Setup(x => x.Exists(authorId)).Returns(true);
+            userLookupMock.Setup(x => x.IsAuthor(authorId)).Returns(false);
 
             var request = new CreateStoryRequestDto
             {
-                Title = new string('j', 20),
-                Summary = new string('k', 52),
+                Title = "Tàn Kiếm Mộ Vân",
+                Summary =
+                    "Trong đêm tuyết phủ, cựu kiếm sĩ từng một thời lừng danh bị vu oan phản quốc và truy nã khắp thiên hạ. " +
+                    "Khi trở về cố hương để minh oan, anh phát hiện cả tông môn đã bị biến thành quân cờ trong một kế hoạch thao túng triều chính kéo dài nhiều năm. " +
+                    "Mỗi bằng chứng thu được đều kéo theo một sự hi sinh, buộc anh đối diện với những người bạn cũ nay đứng ở chiến tuyến đối nghịch. " +
+                    "Con đường lấy lại danh dự cũng là hành trình chuộc lại lỗi lầm của chính mình trước những người đã ngã xuống.",
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
                 StoryProgressStatus = "ONGOING",
                 CoverImage = null
             };
 
-            var ex = Record.Exception(() => sut.Create(request, authorId, coverImageUrl: null));
-            Assert.NotNull(ex);
+            // Act
+            var coverUrl = "https://example.com/covers/utc16-tan-kiem.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverImageUrl: coverUrl));
+            LogTestCase(
+                utcId: "UTCID16",
+                spec: "Author bị ban (IsAuthor = false) → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
 
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<InvalidOperationException>(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthor(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(It.IsAny<Guid>()), Times.Never);
+            categoryLookupMock.Verify(x => x.GetById(It.IsAny<Guid>()), Times.Never);
             chapterRepoMock.VerifyNoOtherCalls();
         }
 
         /// <summary>
-        /// UTCID18 – AgeRating không thuộc danh mục cho phép: spec yêu cầu fail, không tạo story.
-        /// Ma trận có thể ghi "Độ tuổi không tồn tại" — không assert đúng từng chữ.
-        /// Product: whitelist <c>ALL</c>, <c>13+</c>, <c>16+</c>, <c>18+</c> (so khớp không phân biệt hoa thường) → giá trị khác ném <see cref="ArgumentException"/>.
-        /// </summary>
-        [Fact]
-        public void UTCID18_CreateStory_Fails_WhenAgeRatingIsInvalid()
-        {
-            LogUtcContext("UTCID18",
-                "Spec: Age không hợp lệ (ngoài tập mức độ tuổi) → fail, không Add.",
-                "Input: AgeRating = \"21+\" (không có trong ALL/13+/16+/18+); các field khác hợp lệ; slug chưa trùng.",
-                "Kỳ vọng: exception + không Add. Không assert đúng từng chữ message.");
-
-            var authorId = Guid.NewGuid();
-            var categoryId = Guid.NewGuid();
-            var category = new categories
-            {
-                id = categoryId,
-                name = "Tiểu thuyết",
-                slug = "tieu-thuyet",
-                is_active = true
-            };
-
-            var storyStore = new List<stories>();
-            var sut = CreateSut(storyStore,
-                out var storyRepoMock,
-                out var chapterRepoMock,
-                out var userLookupMock,
-                out var categoryLookupMock);
-
-            categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
-
-            var request = new CreateStoryRequestDto
-            {
-                Title = new string('m', 20),
-                Summary = new string('n', 52),
-                CategoryIds = new List<Guid> { categoryId },
-                AgeRating = "21+",
-                StoryProgressStatus = "ONGOING"
-            };
-
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc18.jpg"));
-            Assert.NotNull(ex);
-
-            Assert.Empty(storyStore);
-            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
-            chapterRepoMock.VerifyNoOtherCalls();
-        }
-
-        /// <summary>
-        /// UTCID19 – AgeRating null: spec yêu cầu fail, không tạo story.
+        /// UTCID17 – Image bị null: thiếu dữ liệu bắt buộc, phải fail và không tạo story.
         /// Ma trận có thể ghi "Vui lòng điền đầy đủ thông tin" — không assert đúng từng chữ.
-        /// Product: <c>validAgeRatings.Contains(request.AgeRating?.ToUpper())</c> với null → false → <see cref="ArgumentException"/> (message tiếng Anh về invalid age),
-        /// không phải thông báo "thiếu field" riêng nhưng vẫn chặn Create và không Add.
         /// </summary>
         [Fact]
-        public void UTCID19_CreateStory_Fails_WhenAgeRatingIsNull()
+        public void UTCID17_Create_Fail_WhenImageIsNull()
         {
-            LogUtcContext("UTCID19",
-                "Spec: Age null / thiếu → fail, không Add.",
-                "Input: AgeRating = null; các field khác hợp lệ; slug chưa trùng.",
-                "Kỳ vọng: exception + không Add. Không assert đúng từng chữ message.");
-
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -1096,29 +1294,55 @@ namespace AIStory.Tests
 
             var request = new CreateStoryRequestDto
             {
-                Title = new string('o', 20),
-                Summary = new string('p', 52),
+                Title = "Huyết Vân Lục",
+                Summary =
+                    "Giữa thời cuộc phân tranh, một đội hiệp khách vô tình giải phong ấn cổ trận dưới lòng đất, kéo theo những điềm báo đẫm máu trên khắp cửu châu. " +
+                    "Người thủ lĩnh trẻ tuổi buộc phải chọn giữa bảo toàn môn phái và ngăn chặn đại họa có thể xóa sổ hàng ngàn sinh mạng vô tội. " +
+                    "Càng lần theo dấu tích của cổ trận, họ càng phát hiện những liên minh tưởng như chính nghĩa lại che giấu tham vọng thâu tóm thiên hạ. " +
+                    "Mỗi quyết định đều đổi bằng sinh mạng đồng đội, nhưng rút lui lúc này đồng nghĩa để tai ương nuốt trọn thế gian.",
                 CategoryIds = new List<Guid> { categoryId },
-                AgeRating = null!,
+                AgeRating = "13+",
                 StoryProgressStatus = "ONGOING"
             };
 
-            var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc19.jpg"));
-            Assert.NotNull(ex);
+            // Act
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverImageUrl: null));
+            LogTestCase(
+                utcId: "UTCID17",
+                spec: "CoverImageUrl = null → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = (string?)null
+                },
+                output: null,
+                ex: ex);
 
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<InvalidOperationException>(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthor(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
             chapterRepoMock.VerifyNoOtherCalls();
         }
 
         /// <summary>
-        /// UTCID20 – truyện mới (chưa xuất bản, <c>DRAFT</c>) không được chọn tiến độ <c>HIATUS</c> (tạm ngưng): spec yêu cầu fail.
-        /// Ma trận có thể ghi "Truyện chưa được xuất bản không thể chọn trạng thái là tạm ngưng" — không assert đúng từng chữ.
-        /// Product: <see cref="StoryService.Create"/> chỉ cho <c>ONGOING</c> lúc tạo mới; <c>HIATUS</c> → <see cref="InvalidOperationException"/>.
+        /// UTCID18 – AgeRating không hợp lệ: spec yêu cầu fail, không tạo story.
+        /// Ma trận có thể ghi "Độ tuổi không hợp lệ" — không assert đúng từng chữ.
         /// </summary>
         [Fact]
-        public void UTCID20_CreateStory_Fails_WhenHiatusOnUnpublishedNewStory()
+        public void UTCID18_Create_Fail_WhenAgeRatingInvalid()
         {
+            // Arrange
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -1138,42 +1362,198 @@ namespace AIStory.Tests
 
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
 
-            var title = new string('q', 20);
-            var summary = new string('r', 52);
-            var coverImageUrl = "https://example.com/covers/utc20.jpg";
+            var request = new CreateStoryRequestDto
+            {
+                Title = "Trường Sinh Lạc Ấn",
+                Summary =
+                    "Một phù ấn trường sinh xuất hiện giữa chợ đen khiến các gia tộc lớn cùng truy tìm người sở hữu thật sự. " +
+                    "Thiếu nữ giữ bí mật ấy phải bôn tẩu qua nhiều thành trì, vừa trốn sát thủ vừa học cách kiểm soát sức mạnh có thể phá vỡ cân bằng tam giới. " +
+                    "Càng đi sâu vào âm mưu, cô càng nhận ra người đứng sau mọi biến cố lại chính là ân nhân từng cứu mạng mình thuở nhỏ. " +
+                    "Lựa chọn cuối cùng sẽ quyết định vận mệnh của cả tông môn lẫn những người đã đặt niềm tin vào cô.",
+                CategoryIds = new List<Guid> { categoryId },
+                AgeRating = "15+",
+                StoryProgressStatus = "ONGOING"
+            };
+
+            // Act
+            var coverUrl = "https://example.com/covers/utc18.jpg";
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverUrl));
+            LogTestCase(
+                utcId: "UTCID18",
+                spec: "AgeRating không thuộc whitelist (ALL/13+/16+/18+) → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverUrl
+                },
+                output: null,
+                ex: ex);
+
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<ArgumentException>(ex);
+            Assert.Empty(storyStore);
+            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthor(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
+            chapterRepoMock.VerifyNoOtherCalls();
+        }
+
+        /// <summary>
+        /// UTCID19 – input age null: thiếu/không hợp lệ AgeRating, phải fail và không tạo story.
+        /// Ma trận có thể ghi "Độ tuổi không hợp lệ" — không assert đúng từng chữ.
+        /// </summary>
+        [Fact]
+        public void UTCID19_Create_Fail_WhenAgeRatingNull()
+        {
+            // Arrange
+            var authorId = Guid.NewGuid();
+            var categoryId = Guid.NewGuid();
+            var category = new categories
+            {
+                id = categoryId,
+                name = "Tiểu thuyết",
+                slug = "tieu-thuyet",
+                is_active = true
+            };
+
+            var storyStore = new List<stories>();
+            var sut = CreateSut(storyStore,
+                out var storyRepoMock,
+                out var chapterRepoMock,
+                out var userLookupMock,
+                out var categoryLookupMock);
+
+            categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
+
+            var title = "Thiên Địa Huyền Ca";
+            var summary =
+                "Tại vùng biên ải quanh năm sương phủ, một thiếu niên vô danh vô tình mở được cổ thư bị phong ấn từ thời thượng cổ. " +
+                "Từ đó, cậu bị đẩy vào cuộc săn đuổi của nhiều thế lực muốn chiếm đoạt bí thuật khống chế thiên tượng để thay đổi cục diện chiến tranh. " +
+                "Trên hành trình tìm minh sư và đồng đội, cậu dần hiểu rằng quyền năng càng lớn thì trách nhiệm càng nặng, và sai lầm nhỏ có thể đổi bằng mạng sống của cả một thành trì. " +
+                "Để bảo vệ người thân, cậu buộc phải trưởng thành giữa những trận chiến không có chỗ cho lòng do dự.";
+            var coverImageUrl = "https://example.com/covers/utc19-age-null.jpg";
 
             var request = new CreateStoryRequestDto
             {
                 Title = title,
                 Summary = summary,
                 CategoryIds = new List<Guid> { categoryId },
-                AgeRating = "13+",
-                StoryProgressStatus = "  HIATUS  "
+                AgeRating = null!,
+                StoryProgressStatus = "ONGOING"
             };
+
+            // Act
             var ex = Record.Exception(() => sut.Create(request, authorId, coverImageUrl));
+            LogTestCase(
+                utcId: "UTCID19",
+                spec: "AgeRating = null → fail, không Add.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverImageUrl
+                },
+                output: null,
+                ex: ex);
 
-            _output.WriteLine("");
-            _output.WriteLine("======== UTCID20 — kết quả sut.Create (Record.Exception) ========");
-            if (ex == null)
-                _output.WriteLine("Exception: (null — không ném)");
-            else
-            {
-                _output.WriteLine($"Exception type: {ex.GetType().FullName}");
-                _output.WriteLine($"Message: {ex.Message}");
-            }
-
+            // Assert
             Assert.NotNull(ex);
-
+            Assert.IsType<ArgumentException>(ex);
             Assert.Empty(storyStore);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthor(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
             chapterRepoMock.VerifyNoOtherCalls();
 
-            LogStoryStore("UTCID20 (sau verify)", storyStore);
+        }
+
+        /// <summary>
+        /// UTCID20 – matrix bổ sung: user đã đăng nhập role Author, slug chưa tồn tại, các field hợp lệ,
+        /// nhưng chọn trạng thái "Tạm dừng (HIATUS)" khi truyện chưa xuất bản thì phải fail.
+        /// Log kỳ vọng nghiệp vụ: "Truyện chưa được xuất bản không thể chọn trạng thái là tạm ngưng".
+        /// </summary>
+        [Fact]
+        public void UTCID20_Create_Fail_WhenAuthorChoosesHiatusForNewStory()
+        {
+            // Arrange
+            var authorId = Guid.NewGuid();
+            var categoryId = Guid.NewGuid();
+            var category = new categories
+            {
+                id = categoryId,
+                name = "Tiểu thuyết",
+                slug = "tieu-thuyet",
+                is_active = true
+            };
+
+            var storyStore = new List<stories>();
+            var sut = CreateSut(storyStore,
+                out var storyRepoMock,
+                out var chapterRepoMock,
+                out var userLookupMock,
+                out var categoryLookupMock);
+
+            categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
+
+            var request = new CreateStoryRequestDto
+            {
+                Title = "Hàn Kiếm Tầm Long",
+                Summary =
+                    "Sau khi triều đình ban lệnh truy sát các môn phái cũ, một nhóm kiếm khách lưu vong phát hiện dấu vết long mạch có thể xoay chuyển cục diện thiên hạ. " +
+                    "Người thủ lĩnh trẻ tuổi buộc phải dẫn đồng đội vượt qua vùng băng nguyên và thành cổ đổ nát để tìm bí mật trước khi kẻ thù nắm được. " +
+                    "Mỗi bước đi đều đối mặt phản bội, bởi kẻ đứng sau màn sương lại là người từng kết nghĩa sinh tử với anh năm xưa. " +
+                    "Nếu thất bại, không chỉ môn phái tan rã mà biên cương cũng chìm vào hỗn chiến kéo dài nhiều thế hệ.",
+                CategoryIds = new List<Guid> { categoryId },
+                AgeRating = "13+",
+                StoryProgressStatus = "HIATUS"
+            };
+            var coverImageUrl = "https://example.com/covers/utc20-hiatus.jpg";
+
+            // Act
+            var ex = Record.Exception(() => sut.Create(request, authorId, coverImageUrl));
+            LogTestCase(
+                utcId: "UTCID20",
+                spec: "Truyện mới chưa xuất bản nhưng chọn trạng thái HIATUS -> fail.",
+                input: new
+                {
+                    request.Title,
+                    request.Summary,
+                    request.CategoryIds,
+                    request.AgeRating,
+                    request.StoryProgressStatus,
+                    AuthorId = authorId,
+                    CoverImageUrl = coverImageUrl
+                },
+                output: null,
+                ex: ex);
+
+            // Assert
+            Assert.NotNull(ex);
+            Assert.IsType<InvalidOperationException>(ex);
+            Assert.Empty(storyStore);
+            storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
+            userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthor(authorId), Times.Once);
+            userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
+            chapterRepoMock.VerifyNoOtherCalls();
         }
     }
+
 }
 
-
-
-
-// dotnet test ".\AIStory.Tests.csproj" --no-restore --filter "FullyQualifiedName~AIStory.Tests.UT_CreateStory" --logger "console;verbosity=detailed"
+// dotnet test ".\AIStory.Tests.csproj" --no-restore --filter "FullyQualifiedName~AIStory.Tests.UT_CreateStory." --logger "console;verbosity=detailed"
