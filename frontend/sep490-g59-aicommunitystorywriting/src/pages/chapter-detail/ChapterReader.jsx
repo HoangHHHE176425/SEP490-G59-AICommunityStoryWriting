@@ -14,6 +14,7 @@ import { getChapterById, getChapters, getChapterComments, addChapterComment, set
 import { getCommentReportReasons, reportChapterComment } from '../../api/report/reportApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
+import { countChapterWords } from '../../utils/chapterWordCount';
 
 function formatTimeAgo(dateStr) {
     if (!dateStr) return '';
@@ -137,7 +138,7 @@ export function ChapterReader({ onBack }) {
                     const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && !isUnlocked;
                     const contentRaw = chapterRes?.content ?? chapterRes?.Content ?? '';
                     const content = isPaidLocked ? '' : (contentRaw || 'Chưa có nội dung.');
-                    const wordCount = (content.trim().split(/\s+/).filter(Boolean).length) || 0;
+                    const wordCount = isPaidLocked ? 0 : countChapterWords(contentRaw);
                     setChapter({
                         number: orderIndex + 1,
                         title: chapterRes?.title ?? chapterRes?.Title ?? 'Không có tiêu đề',
@@ -311,7 +312,7 @@ export function ChapterReader({ onBack }) {
             const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && !isUnlocked;
             const contentRaw = chapterRes?.content ?? chapterRes?.Content ?? '';
             const content = isPaidLocked ? '' : (contentRaw || 'Chưa có nội dung.');
-            const wordCount = (content.trim().split(/\s+/).filter(Boolean).length) || 0;
+            const wordCount = isPaidLocked ? 0 : countChapterWords(contentRaw);
             setChapter((prev) => ({
                 ...(prev ?? {}),
                 number: orderIndex + 1,
