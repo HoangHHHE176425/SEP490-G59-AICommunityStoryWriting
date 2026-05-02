@@ -1,7 +1,7 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using AIStory.API.Controllers;
 using AIStory.API.Services;
+using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -9,266 +9,331 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Repositories;
+using Repositories.Interfaces;
 using Services;
 using Services.DTOs.AI;
 using Services.DTOs.Admin;
+using Services.Implementations;
 using Services.Interfaces;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Xunit.Abstractions;
 
-namespace AIStory.Tests;
-
-public class UT_SuggestNextChapter
+namespace AIStory.Tests
 {
-    private readonly ITestOutputHelper _output;
-    private static readonly JsonSerializerOptions _jsonOptions = new()
+    public class UT_SuggestNextChapter
     {
-        WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        ReferenceHandler = ReferenceHandler.IgnoreCycles
-    };
+        private readonly ITestOutputHelper _output;
 
-    public UT_SuggestNextChapter(ITestOutputHelper output) => _output = output;
+        private static readonly Guid StoryId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        private static readonly Guid AuthorId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
-    private void LogTestCase(
-        string utcId,
-        string spec,
-        object? input,
-        object? output,
-        Exception? ex = null)
-    {
-        _output.WriteLine("");
-        _output.WriteLine($"========== {utcId} ==========");
-        _output.WriteLine($"SPEC   : {spec}");
-        _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input, _jsonOptions)}");
-
-        if (ex != null)
+        private static readonly JsonSerializerOptions _jsonOptions = new()
         {
-            _output.WriteLine("OUTPUT : ERROR");
-            _output.WriteLine($"TYPE   : {ex.GetType().Name}");
-            _output.WriteLine($"MSG    : {ex.Message}");
-        }
-        else
-        {
-            _output.WriteLine("OUTPUT : SUCCESS");
-            _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output, _jsonOptions)}");
-        }
-    }
-
-    private static AIController CreateSut(
-        IConfiguration? configuration = null,
-        bool isDevelopment = false,
-        ClaimsPrincipal? user = null,
-        Mock<IAINextChapterService>? aiNextChapterServiceMock = null,
-        Mock<IAuthorAiTokenBudgetService>? authorBudgetMock = null)
-    {
-        aiNextChapterServiceMock ??= new Mock<IAINextChapterService>(MockBehavior.Strict);
-        authorBudgetMock ??= new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Strict);
-
-        var coCreateMock = new Mock<IAICoCreationService>(MockBehavior.Strict);
-        var chapterCheckMock = new Mock<IChapterCheckService>(MockBehavior.Strict);
-        var chapterCompareMock = new Mock<IChapterCompareService>(MockBehavior.Strict);
-        var chapterVersionCompareMock = new Mock<IChapterVersionAiCompareService>(MockBehavior.Strict);
-        var ragServiceMock = new Mock<IStoryRagService>(MockBehavior.Strict);
-        var storyRepoMock = new Mock<IStoryRepository>(MockBehavior.Strict);
-        var rateLimitMock = new Mock<IAISuggestRateLimitService>(MockBehavior.Strict);
-
-        var envMock = new Mock<IWebHostEnvironment>(MockBehavior.Strict);
-        envMock.SetupGet(x => x.EnvironmentName).Returns(isDevelopment ? "Development" : "Production");
-
-        configuration ??= new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["AI:SuggestMinRequiredTokens"] = "3800"
-        }).Build();
-
-        var controller = new AIController(
-            aiNextChapterServiceMock.Object,
-            coCreateMock.Object,
-            chapterCheckMock.Object,
-            chapterCompareMock.Object,
-            chapterVersionCompareMock.Object,
-            ragServiceMock.Object,
-            storyRepoMock.Object,
-            rateLimitMock.Object,
-            authorBudgetMock.Object,
-            configuration,
-            envMock.Object,
-            NullLogger<AIController>.Instance);
-
-        controller.ControllerContext = new ControllerContext
-        {
-            HttpContext = new DefaultHttpContext
-            {
-                User = user ?? new ClaimsPrincipal(new ClaimsIdentity())
-            }
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            ReferenceHandler = ReferenceHandler.IgnoreCycles
         };
 
-        return controller;
-    }
+        public UT_SuggestNextChapter(ITestOutputHelper output) => _output = output;
 
-    private static ClaimsPrincipal BuildUser(Guid userId)
-    {
-        var identity = new ClaimsIdentity(new[]
+        private void LogTestCase(
+            string utcId,
+            string spec,
+            object? input,
+            object? output,
+            Exception? ex = null)
         {
-            new Claim(JwtRegisteredClaimNames.Sub, userId.ToString())
-        }, "Test");
-        return new ClaimsPrincipal(identity);
-    }
+            _output.WriteLine("");
+            _output.WriteLine($"========== {utcId} ==========");
+            _output.WriteLine($"SPEC   : {spec}");
+            _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input, _jsonOptions)}");
 
-    private static T? GetProp<T>(object? obj, string name)
-    {
-        if (obj == null) return default;
-        var p = obj.GetType().GetProperty(name);
-        if (p == null) return default;
-        var val = p.GetValue(obj);
-        if (val is T t) return t;
-        return default;
-    }
-
-    [Fact]
-    // Case 01: StoryId rỗng thì API phải trả về 400 BadRequest.
-    public async Task UTCID01_SuggestNextChapter_ReturnsBadRequest_WhenStoryIdEmpty()
-    {
-        var authorBudgetMock = new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Strict);
-        var aiMock = new Mock<IAINextChapterService>(MockBehavior.Strict);
-        var user = BuildUser(Guid.NewGuid());
-        var sut = CreateSut(user: user, aiNextChapterServiceMock: aiMock, authorBudgetMock: authorBudgetMock);
-
-        var result = await sut.SuggestNextChapter(new SuggestNextChapterRequest { StoryId = Guid.Empty }, CancellationToken.None);
-
-        var bad = Assert.IsType<BadRequestObjectResult>(result);
-        LogTestCase("UTCID01", "StoryId rỗng trả 400.", new { StoryId = Guid.Empty, UserId = user.FindFirstValue(JwtRegisteredClaimNames.Sub) }, bad.Value);
-        Assert.Equal("StoryId là bắt buộc.", GetProp<string>(bad.Value, "message"));
-        aiMock.Verify(x => x.SuggestNextChapterAsync(It.IsAny<SuggestNextChapterRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-        authorBudgetMock.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    // Case 02: Không có claim user hợp lệ thì API phải trả về 401 Unauthorized.
-    public async Task UTCID02_SuggestNextChapter_ReturnsUnauthorized_WhenNoValidUserClaim()
-    {
-        var authorBudgetMock = new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Strict);
-        var aiMock = new Mock<IAINextChapterService>(MockBehavior.Strict);
-        var sut = CreateSut(user: new ClaimsPrincipal(new ClaimsIdentity()), aiNextChapterServiceMock: aiMock, authorBudgetMock: authorBudgetMock);
-
-        var result = await sut.SuggestNextChapter(new SuggestNextChapterRequest { StoryId = Guid.NewGuid() }, CancellationToken.None);
-
-        var unauthorized = Assert.IsType<UnauthorizedObjectResult>(result);
-        LogTestCase("UTCID02", "Thiếu claim user trả 401.", new { StoryId = "valid", User = "anonymous" }, unauthorized.Value);
-        Assert.Equal("Không xác định được người dùng. Vui lòng đăng nhập lại.", GetProp<string>(unauthorized.Value, "message"));
-        aiMock.Verify(x => x.SuggestNextChapterAsync(It.IsAny<SuggestNextChapterRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-        authorBudgetMock.VerifyNoOtherCalls();
-    }
-
-    [Fact]
-    // Case 03: Vượt token budget của tác giả thì API phải trả về 403.
-    public async Task UTCID03_SuggestNextChapter_Returns403_WhenOverTokenBudget()
-    {
-        var userId = Guid.NewGuid();
-        var authorBudgetMock = new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Strict);
-        var aiMock = new Mock<IAINextChapterService>(MockBehavior.Strict);
-        authorBudgetMock
-            .Setup(x => x.EnsureWithinBudgetAsync(userId, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new AuthorAiTokenBudgetExceededException(4500, 4000, AuthorAiTokenBudgetPeriodKind.PerDayUtc));
-
-        var sut = CreateSut(user: BuildUser(userId), aiNextChapterServiceMock: aiMock, authorBudgetMock: authorBudgetMock);
-
-        var result = await sut.SuggestNextChapter(new SuggestNextChapterRequest { StoryId = Guid.NewGuid() }, CancellationToken.None);
-
-        var obj = Assert.IsType<ObjectResult>(result);
-        LogTestCase("UTCID03", "Vượt token budget trả 403.", new { UserId = userId, StoryId = "valid" }, obj.Value);
-        Assert.Equal(403, obj.StatusCode);
-        Assert.Contains("giới hạn token", GetProp<string>(obj.Value, "message") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        aiMock.Verify(x => x.SuggestNextChapterAsync(It.IsAny<SuggestNextChapterRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-        authorBudgetMock.VerifyAll();
-    }
-
-    [Fact]
-    // Case 04: Token còn lại thấp hơn mức tối thiểu ước tính thì API phải trả về 403.
-    public async Task UTCID04_SuggestNextChapter_Returns403_WhenEstimatedTokenInsufficient()
-    {
-        var userId = Guid.NewGuid();
-        var authorBudgetMock = new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Strict);
-        var aiMock = new Mock<IAINextChapterService>(MockBehavior.Strict);
-        authorBudgetMock
-            .Setup(x => x.EnsureWithinBudgetAsync(userId, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        authorBudgetMock
-            .Setup(x => x.GetBudgetAsync(userId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AuthorAiTokenBudgetDto { TokensRemaining = 1000 });
-
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["AI:SuggestMinRequiredTokens"] = "3800"
-        }).Build();
-        var sut = CreateSut(configuration: config, user: BuildUser(userId), aiNextChapterServiceMock: aiMock, authorBudgetMock: authorBudgetMock);
-
-        var result = await sut.SuggestNextChapter(new SuggestNextChapterRequest { StoryId = Guid.NewGuid() }, CancellationToken.None);
-
-        var obj = Assert.IsType<ObjectResult>(result);
-        LogTestCase("UTCID04", "Token còn lại không đủ trả 403.", new { UserId = userId, StoryId = "valid", Remaining = 1000 }, obj.Value);
-        Assert.Equal(403, obj.StatusCode);
-        Assert.Contains("không đủ", GetProp<string>(obj.Value, "message") ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-        aiMock.Verify(x => x.SuggestNextChapterAsync(It.IsAny<SuggestNextChapterRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-        authorBudgetMock.VerifyAll();
-    }
-
-    [Fact]
-    // Case 05: Luồng hợp lệ, service trả dữ liệu gợi ý thì API phải trả về 200 Ok.
-    public async Task UTCID05_SuggestNextChapter_ReturnsOk_WhenServiceSucceeds()
-    {
-        var userId = Guid.NewGuid();
-        var req = new SuggestNextChapterRequest { StoryId = Guid.NewGuid() };
-        var expected = new SuggestNextChapterResponse
-        {
-            Suggestions = new List<NextChapterSuggestionItemDto>
+            if (ex != null)
             {
-                new() { Title = "Hướng 1", Summary = "Tóm tắt", Direction = "Diễn biến" }
+                _output.WriteLine("OUTPUT : ERROR");
+                _output.WriteLine($"TYPE   : {ex.GetType().Name}");
+                _output.WriteLine($"MSG    : {ex.Message}");
             }
-        };
+            else
+            {
+                _output.WriteLine("OUTPUT : SUCCESS");
+                _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output, _jsonOptions)}");
+            }
+        }
 
-        var authorBudgetMock = new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Strict);
-        var aiMock = new Mock<IAINextChapterService>(MockBehavior.Strict);
-        authorBudgetMock.Setup(x => x.EnsureWithinBudgetAsync(userId, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-        authorBudgetMock.Setup(x => x.GetBudgetAsync(userId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AuthorAiTokenBudgetDto { TokensRemaining = 9000 });
-        aiMock.Setup(x => x.SuggestNextChapterAsync(req, userId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(expected);
+        private static AINextChapterService CreateService(
+            out Mock<IStoryRepository> storyRepo,
+            out Mock<IChapterRepository> chapterRepo,
+            out Mock<IStoryRagService> ragService,
+            out Mock<IStoryMemoryEngine> memoryEngine,
+            out Mock<IAIUsageLogRepository> usageLog,
+            out Mock<IUserLookup> userLookup,
+            out Mock<IAuthorAiTokenBudgetService> budgetMock,
+            IConfiguration? configuration = null)
+        {
+            storyRepo = new Mock<IStoryRepository>(MockBehavior.Strict);
+            chapterRepo = new Mock<IChapterRepository>(MockBehavior.Strict);
+            ragService = new Mock<IStoryRagService>(MockBehavior.Strict);
+            memoryEngine = new Mock<IStoryMemoryEngine>(MockBehavior.Strict);
+            usageLog = new Mock<IAIUsageLogRepository>(MockBehavior.Strict);
+            userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
+            budgetMock = new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Strict);
+            configuration ??= new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AI:SuggestMinRequiredTokens"] = "3800"
+            }).Build();
 
-        var sut = CreateSut(user: BuildUser(userId), aiNextChapterServiceMock: aiMock, authorBudgetMock: authorBudgetMock);
+            return new AINextChapterService(
+                storyRepo.Object,
+                chapterRepo.Object,
+                ragService.Object,
+                memoryEngine.Object,
+                usageLog.Object,
+                configuration,
+                userLookup.Object,
+                budgetMock.Object,
+                NullLogger<AINextChapterService>.Instance);
+        }
 
-        var result = await sut.SuggestNextChapter(req, CancellationToken.None);
+        private static (AIController sut, Mock<IAINextChapterService> nextChapterServiceMock) CreateAiControllerForSuggest()
+        {
+            var nextChapterService = new Mock<IAINextChapterService>(MockBehavior.Strict);
+            var coCreateService = new Mock<IAICoCreationService>(MockBehavior.Strict);
+            var chapterCheckService = new Mock<IChapterCheckService>(MockBehavior.Strict);
+            var chapterCompareService = new Mock<IChapterCompareService>(MockBehavior.Strict);
+            var chapterVersionCompareService = new Mock<IChapterVersionAiCompareService>(MockBehavior.Strict);
+            var ragService = new Mock<IStoryRagService>(MockBehavior.Strict);
+            var storyRepository = new Mock<IStoryRepository>(MockBehavior.Strict);
+            var rateLimitService = new Mock<IAISuggestRateLimitService>(MockBehavior.Strict);
+            var budgetService = new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Loose);
+            var env = new Mock<IWebHostEnvironment>(MockBehavior.Strict);
+            env.Setup(x => x.EnvironmentName).Returns("Production");
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
+            var sut = new AIController(
+                nextChapterService.Object,
+                coCreateService.Object,
+                chapterCheckService.Object,
+                chapterCompareService.Object,
+                chapterVersionCompareService.Object,
+                ragService.Object,
+                storyRepository.Object,
+                rateLimitService.Object,
+                budgetService.Object,
+                configuration,
+                env.Object,
+                NullLogger<AIController>.Instance);
+            var identity = new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, AuthorId.ToString()) }, "test-auth");
+            sut.ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+            };
+            return (sut, nextChapterService);
+        }
 
-        var ok = Assert.IsType<OkObjectResult>(result);
-        var payload = Assert.IsType<SuggestNextChapterResponse>(ok.Value);
-        LogTestCase("UTCID05", "Input hợp lệ trả 200.", new { req.StoryId, UserId = userId }, payload);
-        Assert.Single(payload.Suggestions);
-        Assert.Equal("Hướng 1", payload.Suggestions[0].Title);
-        aiMock.VerifyAll();
-        authorBudgetMock.VerifyAll();
-    }
+        /// <summary>
+        /// UTCID01 — request StoryId rỗng: <see cref="AINextChapterService.SuggestNextChapterAsync"/> ném <see cref="ArgumentException"/>.
+        /// </summary>
+        [Fact]
+        public async Task UTCID01_SuggestNextChapterAsync_ThrowsArgumentException_WhenStoryIdEmpty()
+        {
+            // Arrange
+            var sut = CreateService(out var storyRepo, out _, out _, out _, out _, out _, out _);
 
-    [Fact]
-    // Case 06: Service báo không phải tác giả truyện thì API phải trả về 403.
-    public async Task UTCID06_SuggestNextChapter_Returns403_WhenCallerIsNotStoryAuthor()
-    {
-        var userId = Guid.NewGuid();
-        var req = new SuggestNextChapterRequest { StoryId = Guid.NewGuid() };
-        var authorBudgetMock = new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Strict);
-        var aiMock = new Mock<IAINextChapterService>(MockBehavior.Strict);
-        authorBudgetMock.Setup(x => x.EnsureWithinBudgetAsync(userId, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-        authorBudgetMock.Setup(x => x.GetBudgetAsync(userId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AuthorAiTokenBudgetDto { TokensRemaining = 9000 });
-        aiMock.Setup(x => x.SuggestNextChapterAsync(req, userId, It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new UnauthorizedAccessException("Bạn không phải là tác giả của truyện này."));
+            // Act
+            var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+                sut.SuggestNextChapterAsync(new SuggestNextChapterRequest { StoryId = Guid.Empty }, AuthorId, CancellationToken.None));
 
-        var sut = CreateSut(user: BuildUser(userId), aiNextChapterServiceMock: aiMock, authorBudgetMock: authorBudgetMock);
-        var result = await sut.SuggestNextChapter(req, CancellationToken.None);
+            LogTestCase(
+                utcId: "UTCID01",
+                spec: "StoryId rỗng.",
+                input: new { StoryId = Guid.Empty, AuthorId },
+                output: null,
+                ex: ex);
 
-        var forbidden = Assert.IsType<ObjectResult>(result);
-        LogTestCase("UTCID06", "Không phải tác giả trả 403.", new { req.StoryId, UserId = userId }, forbidden.Value);
-        Assert.Equal(403, forbidden.StatusCode);
-        Assert.Equal("Bạn không phải là tác giả của truyện này.", GetProp<string>(forbidden.Value, "message"));
+            // Assert
+            Assert.Equal("StoryId là bắt buộc.", ex.Message);
+            storyRepo.Verify(x => x.GetById(It.IsAny<Guid>()), Times.Never);
+        }
+
+        /// <summary>
+        /// UTCID02 — <c>authorUserId</c> không xác định (UT: <see cref="Guid.Empty"/>): chặn trước budget/repo; <see cref="UnauthorizedAccessException"/>.
+        /// </summary>
+        [Fact]
+        public async Task UTCID02_SuggestNextChapterAsync_ThrowsUnauthorized_WhenAuthorIdMissing()
+        {
+            // Arrange
+            var sut = CreateService(out var storyRepo, out var chapterRepo, out _, out _, out _, out _, out var budgetMock);
+
+            // Act
+            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                sut.SuggestNextChapterAsync(new SuggestNextChapterRequest { StoryId = StoryId }, Guid.Empty, CancellationToken.None));
+
+            LogTestCase(
+                utcId: "UTCID02",
+                spec: "authorUserId không xác định (Guid.Empty): không gọi budget hay đọc truyện.",
+                input: new { StoryId, authorUserId = (Guid?)null },
+                output: null,
+                ex: ex);
+
+            // Assert
+            Assert.Equal("Không xác định được người dùng. Vui lòng đăng nhập lại.", ex.Message);
+            storyRepo.Verify(x => x.GetById(It.IsAny<Guid>()), Times.Never);
+            budgetMock.Verify(x => x.EnsureWithinBudgetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+            chapterRepo.Verify(x => x.GetByStoryId(It.IsAny<Guid>()), Times.Never);
+        }
+
+        /// <summary>
+        /// UTCID03 — <see cref="IAuthorAiTokenBudgetService.EnsureWithinBudgetAsync"/> ném <see cref="AuthorAiTokenBudgetExceededException"/>; không đọc truyện.
+        /// </summary>
+        [Fact]
+        public async Task UTCID03_SuggestNextChapterAsync_ThrowsWhenTokenBudgetExceeded()
+        {
+            // Arrange
+            var sut = CreateService(out var storyRepo, out _, out _, out _, out _, out _, out var budgetMock);
+            budgetMock
+                .Setup(x => x.EnsureWithinBudgetAsync(AuthorId, It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new AuthorAiTokenBudgetExceededException(4500, 4000, AuthorAiTokenBudgetPeriodKind.PerDayUtc));
+
+            // Act
+            await Assert.ThrowsAsync<AuthorAiTokenBudgetExceededException>(() =>
+                sut.SuggestNextChapterAsync(new SuggestNextChapterRequest { StoryId = StoryId }, AuthorId, CancellationToken.None));
+
+            LogTestCase(
+                utcId: "UTCID03",
+                spec: "Vượt hạn mức token (EnsureWithinBudgetAsync → AuthorAiTokenBudgetExceededException).",
+                input: new { StoryId, AuthorId },
+                output: new { thrown = nameof(AuthorAiTokenBudgetExceededException) },
+                ex: null);
+
+            // Assert
+            budgetMock.Verify(x => x.EnsureWithinBudgetAsync(AuthorId, It.IsAny<CancellationToken>()), Times.Once);
+            storyRepo.Verify(x => x.GetById(It.IsAny<Guid>()), Times.Never);
+        }
+
+        /// <summary>
+        /// UTCID04 — <c>tokensRemaining</c> &lt; <c>AI:SuggestMinRequiredTokens</c>: <see cref="AuthorAiEstimatedTokensInsufficientException"/>; chưa đọc truyện.
+        /// </summary>
+        [Fact]
+        public async Task UTCID04_SuggestNextChapterAsync_ThrowsWhenEstimatedTokensInsufficient()
+        {
+            // Arrange
+            var sut = CreateService(out var storyRepo, out _, out _, out _, out _, out _, out var budgetMock);
+            budgetMock.Setup(x => x.EnsureWithinBudgetAsync(AuthorId, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            budgetMock
+                .Setup(x => x.GetBudgetAsync(AuthorId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new AuthorAiTokenBudgetDto { TokensRemaining = 1000 });
+
+            // Act
+            var ex = await Assert.ThrowsAsync<AuthorAiEstimatedTokensInsufficientException>(() =>
+                sut.SuggestNextChapterAsync(new SuggestNextChapterRequest { StoryId = StoryId }, AuthorId, CancellationToken.None));
+
+            LogTestCase(
+                utcId: "UTCID04",
+                spec: "Không đủ hạn mức tối thiểu ước tính (tokensRemaining nhỏ hơn AI:SuggestMinRequiredTokens).",
+                input: new { StoryId, AuthorId, Remaining = 1000 },
+                output: null,
+                ex: ex);
+
+            // Assert
+            Assert.Equal(3800, ex.MinRequiredTokens);
+            budgetMock.Verify(x => x.EnsureWithinBudgetAsync(AuthorId, It.IsAny<CancellationToken>()), Times.Once);
+            budgetMock.Verify(x => x.GetBudgetAsync(AuthorId, It.IsAny<CancellationToken>()), Times.Once);
+            storyRepo.Verify(x => x.GetById(It.IsAny<Guid>()), Times.Never);
+        }
+
+        /// <summary>
+        /// UTCID05 — happy path: các trường request hợp lệ; JWT có tác giả → <see cref="AIController.SuggestNextChapter"/> <c>200</c> và <see cref="SuggestNextChapterResponse"/> (mock <see cref="IAINextChapterService"/>, không chạy pipeline AI).
+        /// </summary>
+        [Fact]
+        public async Task UTCID05_SuggestNextChapter_Returns200_WhenAllRequestFieldsValid()
+        {
+            // Arrange
+            var (sut, nextMock) = CreateAiControllerForSuggest();
+            var request = new SuggestNextChapterRequest { StoryId = StoryId, ChapterId = null, UpToChapterId = null };
+            var expected = new SuggestNextChapterResponse
+            {
+                Suggestions =
+                {
+                    new NextChapterSuggestionItemDto
+                    {
+                        Title = "Hướng A",
+                        Summary = "Tóm tắt",
+                        Direction = "Chi tiết",
+                        KeyEvents = "Sự kiện",
+                        CharactersInvolved = "NV"
+                    }
+                },
+                ContextUsed = new SuggestNextChapterContextDto { StoryTitle = "Truyện mẫu", ChaptersIncluded = 1 },
+                ContextWarning = null
+            };
+            nextMock
+                .Setup(x => x.SuggestNextChapterAsync(request, AuthorId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(expected);
+
+            // Act
+            var result = await sut.SuggestNextChapter(request, CancellationToken.None);
+            var ok = Assert.IsType<OkObjectResult>(result);
+            var payload = Assert.IsType<SuggestNextChapterResponse>(ok.Value);
+
+            LogTestCase(
+                utcId: "UTCID05",
+                spec: "Tất cả trường hợp lệ → HTTP 200 và SuggestNextChapterResponse (mock service; pipeline AI không chạy trong UT).",
+                input: request,
+                output: payload,
+                ex: null);
+
+            // Assert
+            Assert.Single(payload.Suggestions);
+            Assert.Equal("Hướng A", payload.Suggestions[0].Title);
+            nextMock.Verify(x => x.SuggestNextChapterAsync(request, AuthorId, It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        /// <summary>
+        /// UTCID06 — người gọi không phải tác giả truyện (<c>story.author_id</c> ≠ caller) → <see cref="UnauthorizedAccessException"/>; không <c>GetByStoryId</c>.
+        /// </summary>
+        [Fact]
+        public async Task UTCID06_SuggestNextChapterAsync_ThrowsUnauthorized_WhenCallerIsNotStoryAuthor()
+        {
+            // Arrange
+            var otherAuthor = Guid.Parse("33333333-3333-3333-3333-333333333333");
+            var sut = CreateService(out var storyRepo, out var chapterRepo, out _, out _, out _, out _, out var budgetMock);
+            budgetMock.Setup(x => x.EnsureWithinBudgetAsync(AuthorId, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            budgetMock
+                .Setup(x => x.GetBudgetAsync(AuthorId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new AuthorAiTokenBudgetDto { TokensRemaining = 9000 });
+            storyRepo.Setup(x => x.GetById(StoryId)).Returns(new stories
+            {
+                id = StoryId,
+                author_id = otherAuthor,
+                title = "T",
+                slug = "t",
+                story_progress_status = "ongoing"
+            });
+
+            // Act
+            var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                sut.SuggestNextChapterAsync(new SuggestNextChapterRequest { StoryId = StoryId }, AuthorId, CancellationToken.None));
+
+            LogTestCase(
+                utcId: "UTCID06",
+                spec: "Caller không phải tác giả của truyện (author_id khác).",
+                input: new { StoryId, storyAuthorId = otherAuthor, callerAuthorId = AuthorId },
+                output: null,
+                ex: ex);
+
+            // Assert
+            Assert.Contains("gợi ý chương", ex.Message, StringComparison.OrdinalIgnoreCase);
+            budgetMock.Verify(x => x.EnsureWithinBudgetAsync(AuthorId, It.IsAny<CancellationToken>()), Times.Once);
+            budgetMock.Verify(x => x.GetBudgetAsync(AuthorId, It.IsAny<CancellationToken>()), Times.Once);
+            storyRepo.Verify(x => x.GetById(StoryId), Times.Once);
+            chapterRepo.Verify(x => x.GetByStoryId(It.IsAny<Guid>()), Times.Never);
+        }
     }
 }
+
+
+//
+//dotnet test "f:\DA\SEP490-G59-AICommunityStoryWriting\backend\SEP490-G59-AICommunityStoryWriting\AIStory.Tests\AIStory.Tests.csproj" --filter "FullyQualifiedName~AIStory.Tests.UT_SuggestNextChapter" --logger "console;verbosity=detailed" -v:n

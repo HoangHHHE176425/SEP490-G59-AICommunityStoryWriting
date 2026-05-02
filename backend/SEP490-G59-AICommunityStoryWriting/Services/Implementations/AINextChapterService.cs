@@ -4,12 +4,14 @@ using System.ClientModel;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using OpenAI.Chat;
 using Repositories;
 using Repositories.Interfaces;
 using Services.DTOs.AI;
 using Services.Helpers;
 using Services.Interfaces;
+using Services;
 
 namespace Services.Implementations
 {
@@ -34,6 +36,8 @@ Quy tắc bắt buộc:
         private readonly IAIUsageLogRepository _aiUsageLogRepository;
         private readonly IConfiguration _configuration;
         private readonly IUserLookup _userLookup;
+        private readonly IAuthorAiTokenBudgetService _authorAiTokenBudget;
+        private readonly ILogger<AINextChapterService> _logger;
 
         public AINextChapterService(
             IStoryRepository storyRepository,
@@ -42,7 +46,9 @@ Quy tắc bắt buộc:
             IStoryMemoryEngine memoryEngine,
             IAIUsageLogRepository aiUsageLogRepository,
             IConfiguration configuration,
-            IUserLookup userLookup)
+            IUserLookup userLookup,
+            IAuthorAiTokenBudgetService authorAiTokenBudget,
+            ILogger<AINextChapterService> logger)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
@@ -51,6 +57,8 @@ Quy tắc bắt buộc:
             _aiUsageLogRepository = aiUsageLogRepository;
             _configuration = configuration;
             _userLookup = userLookup;
+            _authorAiTokenBudget = authorAiTokenBudget;
+            _logger = logger;
         }
 
         public async Task<SuggestNextChapterResponse> SuggestNextChapterAsync(
@@ -58,6 +66,37 @@ Quy tắc bắt buộc:
             Guid authorUserId,
             CancellationToken cancellationToken = default)
         {
+            if (request.StoryId == Guid.Empty)
+                throw new ArgumentException("StoryId là bắt buộc.");
+
+            if (authorUserId == Guid.Empty)
+                throw new UnauthorizedAccessException("Không xác định được người dùng. Vui lòng đăng nhập lại.");
+
+            try
+            {
+                await _authorAiTokenBudget.EnsureWithinBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (AuthorAiTokenBudgetExceededException ex)
+            {
+                _logger.LogWarning(ex, "Đã vượt hạn mức token. AuthorUserId={AuthorUserId} StoryId={StoryId}", authorUserId, request.StoryId);
+                throw;
+            }
+
+            var minSuggestTokens = _configuration.GetValue("AI:SuggestMinRequiredTokens", 3800);
+            if (minSuggestTokens > 0)
+            {
+                var budgetDto = await _authorAiTokenBudget.GetBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
+                var remaining = budgetDto?.TokensRemaining;
+                if ((remaining ?? long.MaxValue) < minSuggestTokens)
+                {
+                    var ex = new AuthorAiEstimatedTokensInsufficientException(remaining, minSuggestTokens);
+                    _logger.LogWarning(
+                        "Không đủ hạn mức token tối thiểu. AuthorUserId={AuthorUserId} StoryId={StoryId} TokensRemaining={TokensRemaining} MinRequired={MinRequired}",
+                        authorUserId, request.StoryId, remaining, minSuggestTokens);
+                    throw ex;
+                }
+            }
+
             var story = _storyRepository.GetById(request.StoryId);
             if (story == null)
                 throw new InvalidOperationException("Truyện không tồn tại.");
@@ -67,11 +106,12 @@ Quy tắc bắt buộc:
 
             if (_userLookup.IsAuthorWritingSuspended(authorUserId))
                 throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể dùng gợi ý AI.");
-
+            //lấy toàn bộ chapter theo thứ tự
             var allChaptersOrdered = _chapterRepository.GetByStoryId(request.StoryId).OrderBy(c => c.order_index).ToList();
+            //xác định order_index mục tiêu để gợi ý (thường là sau chương mới nhất, hoặc sau chapter được chỉ định trong request), rồi kiểm tra nếu có cảnh báo ngữ cảnh nào cần hiển thị dựa trên order_index đó (vd. nếu gợi ý sau một chapter có sự kiện quan trọng thì có thể cảnh báo "Gợi ý sẽ dựa trên ngữ cảnh sau chapter X, nơi có sự kiện Y. Nếu muốn gợi ý dựa trên ngữ cảnh khác, hãy chọn lại chapter đích.")
             var targetOrderForWarning = ResolveSuggestTargetOrderIndex(request, allChaptersOrdered);
             var contextWarning = ChapterAiContextWarningHelper.GetWarningIfApplicable(allChaptersOrdered, targetOrderForWarning);
-
+            //lấy chapter đã publish 
             var chapters = _chapterRepository.GetPublishedByStoryId(request.StoryId).ToList();
             var hasContent = chapters.Any(c => !string.IsNullOrWhiteSpace(c.content));
             if (!hasContent)
@@ -83,43 +123,49 @@ Quy tắc bắt buộc:
                 throw new InvalidOperationException(
                     "Chưa cấu hình embedding: cần AI:EmbeddingBaseUrl (vd. https://openrouter.ai/api/v1), AI:EmbeddingModel (vd. openai/text-embedding-3-small) và API key AI:ApiKey hoặc AI:EmbeddingApiKey. Với OpenRouter thường dùng cùng key với chat; đặt trong appsettings.Local.json hoặc biến môi trường trên server.");
             }
-
+            //nếu truyện chưa được index thì tiến hành index (chunk + embedding) trước khi retrieve để đảm bảo có ngữ cảnh RAG cho gợi ý. Nếu đã index rồi thì không làm gì.
             await _ragService.TryEnsureIndexedAsync(request.StoryId, upToChapterId: request.UpToChapterId, cancellationToken);
             if (!_ragService.IsRagAvailableForStory(request.StoryId))
             {
                 throw new InvalidOperationException(
                     "Truyện chưa có chỉ mục RAG (chưa có chunk vector). Đảm bảo chương PUBLISHED có nội dung sau khi chunk, rồi gọi POST /api/ai/index-rag hoặc thử lại — kiểm tra thư mục VectorStore (Data/faiss) có quyền ghi trên server.");
             }
-
+            //lấy nội dung chương gần nhất
+            //dùng nội dung đó để làm truy vấn RAG
             var lastChapterContent = chapters.LastOrDefault()?.content ?? "";
             var ragQuery = lastChapterContent.Trim();
             var contextBlock = await _memoryEngine.BuildContextForSuggestAsync(request.StoryId, ragQuery, cancellationToken);
 
             var languageInstruction = StoryLanguageHelper.VietnameseOnlyInstruction;
-
+            //lấy cấu hình model chat cho agent planner
             var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlanner);
-            //tạo client 
+            //tạo AI từ config đó
             var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
-
+            //tạo system promt và user promt
             var systemPrompt = GetSystemPrompt();
             var userPrompt = GetUserPrompt(story, contextBlock, languageInstruction);
+            //gộp thành danh sách message gửi cho model
             var messages = new List<ChatMessage>
             {
                 new SystemChatMessage(systemPrompt),
                 new UserChatMessage(userPrompt)
             };
-
+            //lấy số token còn lại của user để set max token cho response (cộng thêm reserve cho input tokens), nếu số dư token còn lại quá thấp so với reserved thì throw lỗi yêu cầu nạp thêm token.
             var balanceNow = Math.Max(0L, UserDAO.GetAiTokenLimit(authorUserId));
-            // Prompt/input thực tế đang quanh ~2.5k token, reserve mặc định cao hơn để tránh vượt số dư.
+            // lấy số token dự trữ cho input
             var reservedInputTokens = _configuration.GetValue("AI:SuggestReservedInputTokens", 2600);
+            //tính số token tối đa có thể dùng cho output (còn lại sau khi trừ đi reserved input tokens), đảm bảo tối thiểu 64 token cho output để tránh lỗi model trả về quá ít token.
             var cappedOutputTokens = (int)Math.Max(64, balanceNow - reservedInputTokens);
             var options = AIClientHelper.GetCompletionOptions(_configuration, null, cappedOutputTokens);
+            //khai báo biến chứa kết quả của completion để ghi log sau khi gọi, và danh sách các completion (cả lần gọi chính và lần retry nếu có) để tổng hợp usage token và cost cho log.
             ChatCompletion completion;
+            //tạo list để lưu tất cả completion (cả lần chính và lần retry nếu có) để ghi log usage sau cùng. Nếu lần chính có lỗi thì sẽ không có completion nào, nhưng vẫn ghi log với status "FAILURE" trong catch.
             var completionsForUsage = new List<ChatCompletion>();
             try
             {
                 //Gọi modal để sinh gợi ý chương tiếp theo dựa trên ngữ cảnh đã xây dựng. Nếu có lỗi kết nối hoặc lỗi từ provider, catch và throw với thông điệp rõ ràng.
                 completion = await client.CompleteChatAsync(messages, options);
+                //nếu thnanhf công thì mới add vào list để ghi log usage sau cùng, nếu lỗi thì sẽ không có completion nào và sẽ ghi log với status "FAILURE" trong catch.
                 completionsForUsage.Add(completion);
             }
             catch (Exception ex)
@@ -128,12 +174,13 @@ Quy tắc bắt buộc:
                     "Không thể kết nối dịch vụ AI. Vui lòng thử lại sau hoặc kiểm tra cấu hình API key.",
                     ex);
             }
-
+            //lấy text từ kết quả completion,nếu không có text hoặc text rỗng thì throw lỗi. Nếu có text thì parse JSON để lấy danh sách gợi ý. Nếu parse lỗi hoặc không có gợi ý nào thì thử gọi lại với prompt đã được sửa chữa để hướng dẫn model trả về đúng JSON (thường do model trả về thêm markdown hoặc giải thích ngoài JSON nên parse lỗi).
             var text = completion.Content?.Count > 0 ? completion.Content[0].Text : null;
             if (string.IsNullOrWhiteSpace(text))
                 throw new InvalidOperationException("AI không trả về nội dung gợi ý.");
-
+            //parse JSON để lấy danh sách gợi ý
             var suggestions = ParseSuggestions(text);
+            //nếu parse xong mà không có gợi ý nào thì thử gọi lại với prompt đã được sửa chữa để hướng dẫn model trả về đúng JSON (thường do model trả về thêm markdown hoặc giải thích ngoài JSON nên parse lỗi). Nếu vẫn không có gợi ý nào sau lần sửa chữa thì throw lỗi.
             if (suggestions.Count == 0)
             {
                 var repaired = await RetryNormalizeSuggestionsJsonAsync(
@@ -152,14 +199,14 @@ Quy tắc bắt buộc:
                         "Không thể đọc được gợi ý từ phản hồi AI. Kiểm tra model trả về đúng JSON với mảng \"suggestions\" (title, summary, direction, key_events, characters_involved). Phản hồi AI (rút gọn): " + snippet);
                 }
             }
-
+            //loại trùng tiêu đề với chapter cũ
             var existingTitles = allChaptersOrdered
                 .Select(c => c.title?.Trim())
                 .Where(t => !string.IsNullOrWhiteSpace(t))
                 .Select(t => t!)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var dtoList = BuildUniqueSuggestionDtos(suggestions, existingTitles);
-
+            //lấy chapter id để ghi log usage: ưu tiên chapter id từ request.ChapterId (chương đang soạn), nếu không có thì lấy chapter id của chương đã publish gần nhất (chapters đã được filter chỉ lấy chương published ở trên).
             Guid? usageLogChapterId = chapters.LastOrDefault()?.id;
             if (request.ChapterId.HasValue)
             {
@@ -169,7 +216,8 @@ Quy tắc bắt buộc:
                 if (targetChapter != null)
                     usageLogChapterId = targetChapter.id;
             }
-
+            //Ghi token  
+            //cộng tổng input/output token từ tất cả completion (lần chính và lần retry nếu có) để ghi log usage. Lấy generation id từ completion cuối cùng (nếu có) để ghi log. Tính tổng cost USD từ tất cả completion (nếu có) để ghi log.
             var promptTokens = completionsForUsage.Sum(c => c.Usage?.InputTokenCount ?? 0);
             var completionTokens = completionsForUsage.Sum(c => c.Usage?.OutputTokenCount ?? 0);
             var usageCompletion = completionsForUsage.Count > 0 ? completionsForUsage[^1] : completion;
@@ -180,7 +228,7 @@ Quy tắc bắt buộc:
                 if (piece.HasValue)
                     costUsd = (costUsd ?? 0m) + piece.Value;
             }
-
+            //ghi log sử dụng AI
             _aiUsageLogRepository.Log(new ai_usage_logs
             {
                 user_id = authorUserId,
@@ -199,7 +247,7 @@ Quy tắc bắt buộc:
 
             // Debit token balance (clamp >= 0).
             try { UserDAO.DebitAiTokenLimit(authorUserId, promptTokens + completionTokens); } catch { /* best-effort */ }
-
+            //trả kết quả cuối 
             return new SuggestNextChapterResponse
             {
                 Suggestions = dtoList,

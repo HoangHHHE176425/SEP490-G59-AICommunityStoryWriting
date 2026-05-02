@@ -970,6 +970,8 @@ namespace Services.Implementations
                     _ = PushStoryFollowNotificationsAsync(authorNotifications);
                 }
                 TriggerRagIndexInBackground(chapter.story_id.Value, chapterId);
+
+                //chạy AI analysis cho chapter vừa duyệt xong 
                 if (!string.IsNullOrWhiteSpace(chapter.content))
                 {
                     ChapterMemoryAnalysisScheduler.TrySchedule(
