@@ -259,11 +259,5 @@ namespace Services.Implementations
                 AiSimilarityPercent = v.ai_similarity_percent
             };
         }
-
-        private static int CalculateWordCount(string? content)
-        {
-            if (string.IsNullOrWhiteSpace(content)) return 0;
-            return content.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
-        }
     }
 }

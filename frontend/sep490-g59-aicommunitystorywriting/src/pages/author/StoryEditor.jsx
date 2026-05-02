@@ -9,14 +9,10 @@ import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useAuth } from '../../contexts/AuthContext';
 import { checkBannedWords, checkChapterSpelling } from '../../api/ai/aiApi';
+import { countChapterWords } from '../../utils/chapterWordCount';
 import { stripHtmlToText } from '../../utils/richText';
 
-// Helper function to count words
-const countWords = (text) => {
-    const plain = stripHtmlToText(text);
-    if (!plain) return 0;
-    return plain.split(/\s+/).filter(word => word.length > 0).length;
-};
+const countWords = countChapterWords;
 const MIN_STORY_SUMMARY_WORDS = 50;
 
 export function StoryEditor({ story, onSave, onCancel }) {
