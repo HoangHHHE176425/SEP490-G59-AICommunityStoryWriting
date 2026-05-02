@@ -5,13 +5,9 @@ import { indexRag, suggestNextChapter, coCreate, pickAiContextWarning } from '..
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { translateCoCreateOutlineLabels } from '../../../utils/coCreateOutlineLabelsVi';
 import { RichTextEditor } from '../../common/RichTextEditor';
-import { stripHtmlToText } from '../../../utils/richText';
+import { countChapterWords } from '../../../utils/chapterWordCount';
 
-const countWords = (text) => {
-    const plain = stripHtmlToText(text);
-    if (!plain) return 0;
-    return plain.split(/\s+/).filter(word => word.length > 0).length;
-};
+const countWords = countChapterWords;
 
 const MIN_PAID_COIN_PRICE = 10;
 const MAX_PAID_COIN_PRICE = 100;

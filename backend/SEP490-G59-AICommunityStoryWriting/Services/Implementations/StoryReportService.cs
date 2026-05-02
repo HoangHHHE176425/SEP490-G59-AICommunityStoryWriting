@@ -5,6 +5,8 @@ using BusinessObjects;
 using DataAccessObjects;
 using DataAccessObjects.DAOs;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Services;
 using Services.DTOs.Notifications;
 using Services.DTOs.StoryReports;
@@ -15,6 +17,43 @@ namespace Services.Implementations;
 
 public class StoryReportService : IStoryReportService
 {
+    public interface ICreateStoryReportGateway
+    {
+        stories? GetStoryById(Guid storyId);
+        Guid AppendStoryReportAggregated(Guid storyId, Guid reporterId, string reasonCode, string descriptionTrimmed);
+    }
+
+    private sealed class EfCreateStoryReportGateway : ICreateStoryReportGateway
+    {
+        public stories? GetStoryById(Guid storyId) => StoryDAO.GetById(storyId);
+        public Guid AppendStoryReportAggregated(Guid storyId, Guid reporterId, string reasonCode, string descriptionTrimmed) =>
+            StoryReportDAO.AppendStoryReportAggregated(storyId, reporterId, reasonCode, descriptionTrimmed);
+    }
+
+    public interface IAdminComplianceAdminActionGateway
+    {
+        compliance_admin_action_requests? GetTrackedById(Guid requestId);
+        stories? GetStoryById(Guid storyId);
+        void MarkResolved(Guid requestId, Guid adminId, string finalStatus, string? adminNote, string resolutionAction);
+        void SetUserAccountStatus(Guid userId, string status);
+        void RunBannedAuthorModerationSweep();
+        void InsertViolationLog(Guid actorId, Guid violatorId, string targetType, Guid targetId, string penaltyType, string? reason, string? policyReference);
+        void SetAuthorWritingSuspendedUntil(Guid userId, DateTime? untilUtc);
+    }
+
+    private sealed class DefaultAdminComplianceAdminActionGateway : IAdminComplianceAdminActionGateway
+    {
+        public compliance_admin_action_requests? GetTrackedById(Guid requestId) => ComplianceAdminActionRequestDAO.GetTrackedById(requestId);
+        public stories? GetStoryById(Guid storyId) => StoryDAO.GetById(storyId);
+        public void MarkResolved(Guid requestId, Guid adminId, string finalStatus, string? adminNote, string resolutionAction) =>
+            ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId, finalStatus, adminNote, resolutionAction);
+        public void SetUserAccountStatus(Guid userId, string status) => UserDAO.SetUserAccountStatus(userId, status);
+        public void RunBannedAuthorModerationSweep() => BannedAuthorModerationSweep.Run();
+        public void InsertViolationLog(Guid actorId, Guid violatorId, string targetType, Guid targetId, string penaltyType, string? reason, string? policyReference) =>
+            ViolationLogDAO.Insert(actorId, violatorId, targetType, targetId, penaltyType, reason, policyReference);
+        public void SetAuthorWritingSuspendedUntil(Guid userId, DateTime? untilUtc) => UserDAO.SetAuthorWritingSuspendedUntil(userId, untilUtc);
+    }
+
     private static readonly string ComplianceTargetType = ReviewAssignmentDAO.TargetTypeComplianceStoryReports;
 
     private static void EnsureNotBlockedByPendingStoryLockRelease(Guid storyId, bool actorIsAdmin)
@@ -27,17 +66,32 @@ public class StoryReportService : IStoryReportService
     private readonly IUserActivityLookup _userActivityLookup;
     private readonly INotificationHubNotifier? _notificationHubNotifier;
     private readonly IEmailService? _emailService;
+    private readonly IAdminComplianceAdminActionGateway _adminComplianceGateway;
+    private readonly ICreateStoryReportGateway _createStoryReportGateway;
+    private readonly bool _enableCreateStoryReportNotifications;
+    private readonly bool _enableAdminActionNotifications;
+    private readonly ILogger<StoryReportService> _logger;
 
     public StoryReportService(
         IUserLookup userLookup,
         IUserActivityLookup userActivityLookup,
         INotificationHubNotifier? notificationHubNotifier = null,
-        IEmailService? emailService = null)
+        IEmailService? emailService = null,
+        ICreateStoryReportGateway? createStoryReportGateway = null,
+        bool enableCreateStoryReportNotifications = true,
+        IAdminComplianceAdminActionGateway? adminComplianceGateway = null,
+        bool enableAdminActionNotifications = true,
+        ILogger<StoryReportService>? logger = null)
     {
         _userLookup = userLookup;
         _userActivityLookup = userActivityLookup;
         _notificationHubNotifier = notificationHubNotifier;
         _emailService = emailService;
+        _createStoryReportGateway = createStoryReportGateway ?? new EfCreateStoryReportGateway();
+        _enableCreateStoryReportNotifications = enableCreateStoryReportNotifications;
+        _adminComplianceGateway = adminComplianceGateway ?? new DefaultAdminComplianceAdminActionGateway();
+        _enableAdminActionNotifications = enableAdminActionNotifications;
+        _logger = logger ?? NullLogger<StoryReportService>.Instance;
     }
 
     public IReadOnlyList<StoryReportReasonOptionDto> GetReasonOptions()
@@ -54,41 +108,84 @@ public class StoryReportService : IStoryReportService
             .ToList();
     }
 
-    public Task<Guid> CreateStoryReportAsync(Guid storyId, Guid reporterId, CreateStoryReportRequestDto request)
+    public Task<CreateStoryReportResultDto> CreateStoryReportAsync(Guid storyId, Guid reporterId, CreateStoryReportRequestDto request)
     {
         if (!StoryReportReasonCatalog.TryGet(request.ReasonCode, out _))
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: reason code không hợp lệ. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
             throw new ArgumentException("Invalid reason code.");
+        }
 
-        UserReportDescriptionRules.ValidateDescription(request.Description);
+        try
+        {
+            UserReportDescriptionRules.ValidateDescription(request.Description);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(
+                "Tạo báo cáo thất bại: mô tả báo cáo không hợp lệ. StoryId={StoryId}, ReporterId={ReporterId}, Message={Message}",
+                storyId,
+                reporterId,
+                ex.Message);
+            throw;
+        }
         var descriptionTrimmed = (request.Description ?? "").Trim();
 
         if (reporterId == Guid.Empty || !_userLookup.Exists(reporterId))
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: reporter không tồn tại. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
             throw new InvalidOperationException("USER không tồn tại.");
+        }
 
-        var story = StoryDAO.GetById(storyId)
-                    ?? throw new InvalidOperationException("Story not found.");
+        var story = _createStoryReportGateway.GetStoryById(storyId);
+        if (story == null)
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: không tìm thấy story. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
+            throw new InvalidOperationException("Story not found.");
+        }
 
         var st = (story.status ?? "").Trim().ToUpperInvariant();
         if (st != "PUBLISHED")
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: story chưa PUBLISHED. StoryId={StoryId}, ReporterId={ReporterId}, Status={Status}", storyId, reporterId, story.status);
             throw new InvalidOperationException("Chỉ có thể báo cáo truyện đã PUBLISHED.");
+        }
 
         // Giống đánh giá: yêu cầu có log READ_CHAPTER cho truyện.
         if (!_userActivityLookup.HasReadAnyChapterOfStory(reporterId, storyId))
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: reporter chưa đọc chapter nào. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
             throw new InvalidOperationException("Bạn cần đọc ít nhất một chapter trước khi gửi báo cáo.");
+        }
 
         if (story.author_id == reporterId)
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: tác giả tự báo cáo truyện mình. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
             throw new InvalidOperationException("Bạn không thể báo cáo truyện của chính mình.");
+        }
 
         var code = request.ReasonCode.Trim().ToUpperInvariant();
-        var id = StoryReportDAO.AppendStoryReportAggregated(
+        var id = _createStoryReportGateway.AppendStoryReportAggregated(
             storyId,
             reporterId,
             code,
             descriptionTrimmed);
-        // Mỗi người báo cáo mới (1 lần / truyện / user) = 1 thông báo cho tác giả; trùng trả về Guid.Empty.
-        if (id != Guid.Empty)
+        // Duplicate reporter on same story: DAO trả Guid.Empty -> coi là vi phạm precondition "chưa report trước đó".
+        if (id == Guid.Empty)
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: reporter đã báo cáo story trước đó. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
+            throw new InvalidOperationException("Bạn đã báo cáo truyện này trước đó.");
+        }
+        // Chỉ gửi thông báo khi ghi nhận báo cáo mới thành công.
+        if (_enableCreateStoryReportNotifications)
             _ = NotifyStoryAuthorReportedAsync(story, reporterId, request.ReasonCode, descriptionTrimmed);
-        return Task.FromResult(id);
+        var result = new CreateStoryReportResultDto
+        {
+            ReportId = id,
+            Message = "Tạo báo cáo thành công"
+        };
+        _logger.LogInformation("CreateStoryReport succeeded: ReportId={ReportId}, StoryId={StoryId}, ReporterId={ReporterId}, ReasonCode={ReasonCode}", id, storyId, reporterId, code);
+        return Task.FromResult(result);
     }
 
     private async Task NotifyStoryAuthorReportedAsync(stories story, Guid reporterId, string? reasonCode, string? description)
@@ -1116,7 +1213,7 @@ public class StoryReportService : IStoryReportService
         if (decision is not ("APPROVE" or "REJECT"))
             throw new ArgumentException("Decision phải là APPROVE hoặc REJECT.");
 
-        var row = ComplianceAdminActionRequestDAO.GetTrackedById(requestId)
+        var row = _adminComplianceGateway.GetTrackedById(requestId)
                   ?? throw new InvalidOperationException("Yêu cầu không tồn tại.");
         if (row.status != ComplianceAdminActionRequestDAO.StatusPending)
             throw new InvalidOperationException("Yêu cầu đã xử lý.");
@@ -1125,7 +1222,7 @@ public class StoryReportService : IStoryReportService
         if (row.requester_id == row.target_user_id)
             throw new InvalidOperationException("Không thể tự báo cáo chính mình");
 
-        var story = StoryDAO.GetById(row.story_id);
+        var story = _adminComplianceGateway.GetStoryById(row.story_id);
         if (story is null)
             throw new InvalidOperationException("Không tìm thấy truyện.");
 
@@ -1136,7 +1233,7 @@ public class StoryReportService : IStoryReportService
 
         if (decision == "REJECT")
         {
-            ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,
+            _adminComplianceGateway.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusRejected, dto.AdminNote, "REJECT");
             return;
         }
@@ -1144,24 +1241,27 @@ public class StoryReportService : IStoryReportService
         var kind = (row.request_kind ?? "").Trim().ToUpperInvariant();
         if (kind == ComplianceAdminActionRequestDAO.KindBanUser)
         {
-            UserDAO.SetUserAccountStatus(row.target_user_id, "BANNED");
-            BannedAuthorModerationSweep.Run();
-            ViolationLogDAO.Insert(adminId, row.target_user_id, "USER", row.target_user_id, "BAN",
+            _adminComplianceGateway.SetUserAccountStatus(row.target_user_id, "BANNED");
+            _adminComplianceGateway.RunBannedAuthorModerationSweep();
+            _adminComplianceGateway.InsertViolationLog(adminId, row.target_user_id, "USER", row.target_user_id, "BAN",
                 dto.AdminNote ?? row.message, "ADMIN_APPROVE_COMPLIANCE_REQUEST");
-            ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,
+            _adminComplianceGateway.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusApproved, dto.AdminNote, "BAN_USER");
-            await TrySendAccountBannedByAdminApprovalEmailAsync(
-                row.target_user_id,
-                story.title,
-                story.summary,
-                row.message,
-                row.story_id);
-            await NotifyTargetUserComplianceAdminActionApprovedAsync(
-                targetUserId: row.target_user_id,
-                storyId: row.story_id,
-                requestKind: kind,
-                suspendUntilUtc: null,
-                complianceMessage: row.message);
+            if (_enableAdminActionNotifications)
+            {
+                await TrySendAccountBannedByAdminApprovalEmailAsync(
+                    row.target_user_id,
+                    story.title,
+                    story.summary,
+                    row.message,
+                    row.story_id);
+                await NotifyTargetUserComplianceAdminActionApprovedAsync(
+                    targetUserId: row.target_user_id,
+                    storyId: row.story_id,
+                    requestKind: kind,
+                    suspendUntilUtc: null,
+                    complianceMessage: row.message);
+            }
             return;
         }
 
@@ -1175,17 +1275,20 @@ public class StoryReportService : IStoryReportService
                 u = DateTime.SpecifyKind(u, DateTimeKind.Utc);
             else if (u.Kind == DateTimeKind.Local)
                 u = u.ToUniversalTime();
-            UserDAO.SetAuthorWritingSuspendedUntil(row.target_user_id, u);
-            ViolationLogDAO.Insert(adminId, row.target_user_id, "USER", row.target_user_id, "SUSPEND_AUTHOR_WRITING",
+            _adminComplianceGateway.SetAuthorWritingSuspendedUntil(row.target_user_id, u);
+            _adminComplianceGateway.InsertViolationLog(adminId, row.target_user_id, "USER", row.target_user_id, "SUSPEND_AUTHOR_WRITING",
                 dto.AdminNote ?? row.message, until.Value.ToString("O"));
-            ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,
+            _adminComplianceGateway.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusApproved, dto.AdminNote, "SUSPEND_WRITING");
-            await NotifyTargetUserComplianceAdminActionApprovedAsync(
-                targetUserId: row.target_user_id,
-                storyId: row.story_id,
-                requestKind: kind,
-                suspendUntilUtc: u,
-                complianceMessage: row.message);
+            if (_enableAdminActionNotifications)
+            {
+                await NotifyTargetUserComplianceAdminActionApprovedAsync(
+                    targetUserId: row.target_user_id,
+                    storyId: row.story_id,
+                    requestKind: kind,
+                    suspendUntilUtc: u,
+                    complianceMessage: row.message);
+            }
             return;
         }
 

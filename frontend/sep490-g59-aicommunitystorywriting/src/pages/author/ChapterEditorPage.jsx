@@ -9,13 +9,7 @@ import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 import { refresh as refreshAuth } from '../../api/auth/authApi';
 import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
 import { stripHtmlToText } from '../../utils/richText';
-
-// Helper function to count words
-const countWords = (text) => {
-    const plain = stripHtmlToText(text);
-    if (!plain) return 0;
-    return plain.split(/\s+/).filter(word => word.length > 0).length;
-};
+import { countChapterWords as countWords } from '../../utils/chapterWordCount';
 
 const MIN_PAID_COIN_PRICE = 10;
 const MAX_PAID_COIN_PRICE = 100;
