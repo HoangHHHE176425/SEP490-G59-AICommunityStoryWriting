@@ -40,24 +40,33 @@ public class FaissVectorStore : IVectorStore
         if (File.Exists(path))
             File.Delete(path);
     }
-
+    //add vector đã embed vào file (ghi đè nếu đã có), format: [version][numIndexedChapters][indexedChapterIds...][numChunks][chunkId, chapterId, vecLen, vec..., contentLen, content...]. Sau khi ghi xong thì load vào cache luôn để lần sau đọc nhanh.
     public void AddVectors(Guid storyId, IReadOnlyList<Guid> chunkIds, IReadOnlyList<Guid> chapterIds, IReadOnlyList<float[]> vectors, IReadOnlyList<string> contents, IReadOnlyList<Guid> indexedChapterIds)
     {
         if (chunkIds.Count == 0 || chunkIds.Count != vectors.Count || chunkIds.Count != contents.Count || chunkIds.Count != chapterIds.Count)
             return;
+        //lấy đường dẫn file lưu vector vào theo storyId
         var path = GetFilePath(storyId);
+        //lấy thư mục cha của file
         var dir = Path.GetDirectoryName(path);
+        //nếu thư mục cha không tồn tại thì tạo mới
         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             Directory.CreateDirectory(dir);
-
+        //mở/tạo file để ghi đè
         using (var fs = File.Create(path))
+        //tạo BinaryWriter để ghi dữ liệu vào file theo format đã định, tự động đóng stream sau khi xong
         using (var bw = new BinaryWriter(fs, Encoding.UTF8, leaveOpen: false))
         {
+            //ghi version để sau này nếu format thay đổi thì có thể đọc được hoặc bỏ qua file cũ
             bw.Write(FileFormatVersion);
+            //ghi số lượng chapter đã index và danh sách chapterId đã index (để lần sau chỉ cần index thêm chương mới)
             bw.Write(indexedChapterIds.Count);
+            //duyệt từng chapterId đã index và ghi vào file dưới dạng byte[16] (format của Guid)
             foreach (var id in indexedChapterIds)
                 bw.Write(id.ToByteArray());
+            //ghi số lượng chunk mới được thêm vào (có thể là tất cả nếu index lần đầu, hoặc chỉ chunk của chương mới nếu index tăng dần)
             bw.Write(chunkIds.Count);
+            //duyệt từng chunk mới và ghi chunkId, chapterId, vector, content vào file theo format đã định
             for (int i = 0; i < chunkIds.Count; i++)
             {
                 bw.Write(chunkIds[i].ToByteArray());
@@ -72,7 +81,7 @@ public class FaissVectorStore : IVectorStore
                 bw.Write(contentBytes);
             }
         }
-
+        //sau khi ghi xong thì load toàn bộ file vào cache để lần sau đọc nhanh, tránh phải đọc file nhiều lần nếu có nhiều truy vấn liên tiếp
         LoadIntoCache(storyId);
     }
 
@@ -143,13 +152,17 @@ public class FaissVectorStore : IVectorStore
         var c = GetOrLoadFull(storyId);
         return (c.Ids, c.ChapterIds, c.Vectors, c.Contents);
     }
-    //Tính cosine similarity giữa queryVector và tất cả vector đã lưu, trả về top-k chunkId có điểm cao nhất. Nếu không có vector nào hoặc queryVector rỗng thì trả về rỗng.
+    //tìm các chunk liên quan đến queryVector bằng cách tính cosine similarity giữa queryVector và vector của từng chunk trong cache, sau đó sắp xếp theo điểm số và trả về topK chunkId cùng điểm số. Nếu cache trống hoặc queryVector rỗng thì trả về danh sách rỗng.
     public IReadOnlyList<(Guid ChunkId, float Score)> Search(Guid storyId, float[] queryVector, int topK)
     {
+        //lấy toàn bộ dữ liệu đã cache cho truyện(danh sách idChunk,danh sách vector tương ứng), nếu chưa có thì load từ file vào cache.
         var c = GetOrLoadFull(storyId);
+        //nếu kh có dữ liệu thì trả danh sách rỗng
         if (c.Ids.Length == 0 || queryVector.Length == 0)
             return Array.Empty<(Guid, float)>();
+        //tạo list tạm để chứa cặp chunkId và điểm
         var scored = new List<(Guid id, float score)>();
+        //duyệt từng chunk trong truyện, tính cosine similarity giữa vector của chunk và queryVector, lưu vào list tạm dưới dạng (chunkId, score)
         for (int i = 0; i < c.Vectors.Length; i++)
         {
             var score = CosineSimilarity(c.Vectors[i], queryVector);
@@ -214,11 +227,14 @@ public class FaissVectorStore : IVectorStore
             return empty;
         }
     }
-    //Tính tích vô hướng của 2 vector, chia cho tích của độ dài 2 vector (cosine similarity). Nếu có lỗi (độ dài 0) thì trả về 0.
+    //Tính độ giống nhau cosine giữa hai vector a và b. Nếu một trong hai vector rỗng hoặc có độ dài khác nhau thì trả về 0. Công thức: cosine_similarity = dot(a,b) / (||a|| * ||b||), trong đó dot(a,b) là tích vô hướng của a và b, ||a|| là chuẩn L2 của a. Kết quả nằm trong khoảng [-1, 1], giá trị càng gần 1 nghĩa là hai vector càng giống nhau.
     private static float CosineSimilarity(float[] a, float[] b)
     {
         if (a.Length == 0 || b.Length != a.Length)
             return 0f;
+        //dot : tổng tích từng cặp phần tử
+        //normA:tổng bình phương các phần tử của a 
+        //normB: tổng bình phương các phần tử của a 
         float dot = 0, normA = 0, normB = 0;
         for (int i = 0; i < a.Length; i++)
         {

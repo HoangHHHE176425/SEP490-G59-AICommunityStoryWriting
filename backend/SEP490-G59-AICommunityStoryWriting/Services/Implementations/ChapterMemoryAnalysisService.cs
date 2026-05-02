@@ -63,7 +63,7 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
         // Feature hỗ trợ hệ thống: không check/trừ token.
 
         var storyTitle = story.title ?? "";
-
+        //láy dữ liệu memory cũ để làm bối cảnh cho việc phân tích chương mới, giúp AI hiểu được sự phát triển của nhân vật và cốt truyện qua từng chương, từ đó đưa ra trích xuất chính xác hơn.
         var existingCharacters = _characterMemoryRepository.GetByStoryId(storyId);
         var existingState = _storyStateRepository.GetByStoryId(storyId);
 
@@ -127,7 +127,7 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
 
         var promptTokens = completion.Usage?.InputTokenCount ?? 0;
         var completionTokens = completion.Usage?.OutputTokenCount ?? 0;
-
+        //chuẩn hóa text đầu ra (loại bỏ markdown, giải thích nếu có) rồi parse JSON, ghi DB; log lỗi nếu có lỗi parse JSON để dễ debug prompt/system.
         try
         {
             ApplyExtractionJson(storyId, chapterId, UnwrapJsonFromMarkdown(text.Trim()));

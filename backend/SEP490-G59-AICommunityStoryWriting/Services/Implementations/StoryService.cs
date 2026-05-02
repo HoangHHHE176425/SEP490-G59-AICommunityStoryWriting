@@ -21,6 +21,7 @@ namespace Services.Implementations
         private const int StoryTitleMaxBusinessLength = 50;
         /// <summary>Giới hạn nội dung mô tả khi tạo/cập nhật (cột summary thường nvarchar(max); giới hạn API để kiểm soát kích thước).</summary>
         private const int StorySummaryMaxLength = 4000;
+        private const int CoverImageUrlMaxLength = 2048;
 
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
@@ -52,15 +53,24 @@ namespace Services.Implementations
         {
             if (!_userLookup.Exists(authorId))
             {
-                throw new InvalidOperationException(
-                    "AuthorId không tồn tại trong bảng users. Vui lòng kiểm tra DefaultAuthorIdForStories trong appsettings.json (dùng Guid của user có trong bảng users).");
+                _logger?.LogWarning("CreateStory failed: author does not exist. AuthorId={AuthorId}", authorId);
+                throw new InvalidOperationException("Không tìm thấy Author.");
+            }
+            if (!_userLookup.IsAuthor(authorId))
+            {
+                _logger?.LogWarning("CreateStory failed: user is not author. AuthorId={AuthorId}", authorId);
+                throw new InvalidOperationException("Bạn không phải là tác giả.");
             }
 
             if (_userLookup.IsAuthorWritingSuspended(authorId))
+            {
+                _logger?.LogWarning("CreateStory failed: author is writing suspended. AuthorId={AuthorId}", authorId);
                 throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
+            }
 
             if (request.CategoryIds == null || !request.CategoryIds.Any())
             {
+                _logger?.LogWarning("CreateStory failed: categoryIds is empty. AuthorId={AuthorId}", authorId);
                 throw new InvalidOperationException("Chọn ít nhất một thể loại.");
             }
 
@@ -68,22 +78,61 @@ namespace Services.Implementations
             {
                 var category = _categoryLookup.GetById(categoryId);
                 if (category == null)
+                {
+                    _logger?.LogWarning("CreateStory failed: category not found. CategoryId={CategoryId}, AuthorId={AuthorId}", categoryId, authorId);
                     throw new InvalidOperationException($"Category with ID {categoryId} not found.");
+                }
                 if (!category.is_active ?? false)
+                {
+                    _logger?.LogWarning("CreateStory failed: category inactive. CategoryId={CategoryId}, CategoryName={CategoryName}", categoryId, category.name);
                     throw new InvalidOperationException($"Category '{category.name}' is not active.");
+                }
             }
 
             if (string.IsNullOrWhiteSpace(request.Title))
+            {
+                _logger?.LogWarning("CreateStory failed: title is null/whitespace. AuthorId={AuthorId}", authorId);
                 throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
+            }
 
             if (request.Title.Length > StoryTitleMaxBusinessLength)
+            {
+                _logger?.LogWarning("CreateStory failed: title too long. AuthorId={AuthorId}, TitleLength={TitleLength}", authorId, request.Title.Length);
                 throw new ArgumentException($"Tiêu đề vượt quá giới hạn cho phép (tối đa {StoryTitleMaxBusinessLength} ký tự).");
+            }
 
             if (string.IsNullOrWhiteSpace(coverImageUrl))
+            {
+                _logger?.LogWarning("CreateStory failed: cover image is missing. AuthorId={AuthorId}", authorId);
                 throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
+            }
+            if (TryGetCoverSizeMb(coverImageUrl, out var coverSizeMb) && coverSizeMb > 5)
+            {
+                _logger?.LogWarning("CreateStory failed: cover image size exceeds limit. AuthorId={AuthorId}, CoverSizeMb={CoverSizeMb}", authorId, coverSizeMb);
+                throw new ArgumentException("Ảnh vượt quá dung lượng cho phép");
+            }
+            if (coverImageUrl.Length > CoverImageUrlMaxLength)
+            {
+                _logger?.LogWarning("CreateStory failed: cover image is too large. AuthorId={AuthorId}, CoverLength={CoverLength}", authorId, coverImageUrl.Length);
+                throw new ArgumentException("Ảnh vượt quá dung lượng cho phép");
+            }
+            if (!IsValidCoverImageUrl(coverImageUrl))
+            {
+                _logger?.LogWarning("CreateStory failed: invalid cover image format. AuthorId={AuthorId}, CoverImageUrl={CoverImageUrl}", authorId, coverImageUrl);
+                throw new ArgumentException("Ảnh không đúng định dạng");
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Summary))
+            {
+                _logger?.LogWarning("CreateStory failed: summary is null/whitespace. AuthorId={AuthorId}", authorId);
+                throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
+            }
 
             if (!string.IsNullOrEmpty(request.Summary) && request.Summary.Length > StorySummaryMaxLength)
+            {
+                _logger?.LogWarning("CreateStory failed: summary too long. AuthorId={AuthorId}, SummaryLength={SummaryLength}", authorId, request.Summary.Length);
                 throw new ArgumentException($"Mô tả truyện vượt quá giới hạn cho phép (tối đa {StorySummaryMaxLength} ký tự).");
+            }
 
             // Nhiều truyện được phép cùng tiêu đề hiển thị: slug suy từ title có thể trùng → thêm hậu tố số cho đến khi unique (UTCID02).
             var baseSlug = GenerateSlug(request.Title ?? string.Empty);
@@ -92,22 +141,30 @@ namespace Services.Implementations
             var validAgeRatings = new[] { "ALL", "13+", "16+", "18+" };
             if (!validAgeRatings.Contains(request.AgeRating?.ToUpper()))
             {
+                _logger?.LogWarning("CreateStory failed: invalid age rating. AuthorId={AuthorId}, AgeRating={AgeRating}", authorId, request.AgeRating);
                 throw new ArgumentException($"Invalid age rating. Must be one of: {string.Join(", ", validAgeRatings)}");
             }
 
             if (string.IsNullOrWhiteSpace(request.StoryProgressStatus))
+            {
+                _logger?.LogWarning("CreateStory failed: story progress status is empty. AuthorId={AuthorId}", authorId);
                 throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
+            }
 
             var validProgressStatuses = new[] { "ONGOING", "COMPLETED", "HIATUS" };
             var progressStatus = request.StoryProgressStatus.Trim().ToUpperInvariant();
             if (!validProgressStatuses.Contains(progressStatus))
             {
-                throw new ArgumentException($"Invalid story progress status. Must be one of: {string.Join(", ", validProgressStatuses)}");
+                _logger?.LogWarning("CreateStory failed: invalid progress status. AuthorId={AuthorId}, ProgressStatus={ProgressStatus}", authorId, request.StoryProgressStatus);
+                throw new ArgumentException("Trạng thái không tồn tại");
             }
 
             // Truyện mới (Create) bắt buộc tiến độ «Đang ra» — không cho COMPLETED/HIATUS lúc khởi tạo.
             if (progressStatus != "ONGOING")
+            {
+                _logger?.LogWarning("CreateStory failed: non-ONGOING status on create. AuthorId={AuthorId}, ProgressStatus={ProgressStatus}", authorId, progressStatus);
                 throw new InvalidOperationException("Truyện mới chỉ được tạo với trạng thái tiến độ Đang ra.");
+            }
 
             var story = new stories
             {
@@ -130,6 +187,7 @@ namespace Services.Implementations
             };
 
             _storyRepository.Add(story, request.CategoryIds);
+            _logger?.LogInformation("CreateStory succeeded: StoryId={StoryId}, AuthorId={AuthorId}, Slug={Slug}", story.id, authorId, story.slug);
             // Create: return lightweight DTO without extra DB lookups (counts, author profile, etc.).
             // This keeps Create() unit-testable without requiring a real database.
             return MapToResponseDto(story, includeComputedLookups: false, categoryIdsOverride: request.CategoryIds);
@@ -857,6 +915,35 @@ namespace Services.Implementations
             if (slugBase.Length <= maxBase)
                 return slugBase;
             return slugBase.Substring(0, maxBase).TrimEnd('-');
+        }
+
+        private static bool IsValidCoverImageUrl(string coverImageUrl)
+        {
+            if (!Uri.TryCreate(coverImageUrl, UriKind.Absolute, out var uri))
+                return false;
+
+            var ext = Path.GetExtension(uri.AbsolutePath)?.ToLowerInvariant();
+            return ext is ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp";
+        }
+
+        private static bool TryGetCoverSizeMb(string coverImageUrl, out decimal sizeMb)
+        {
+            sizeMb = 0;
+            if (!Uri.TryCreate(coverImageUrl, UriKind.Absolute, out var uri))
+                return false;
+
+            var query = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var pair in query)
+            {
+                var kv = pair.Split('=', 2);
+                if (kv.Length != 2 || !kv[0].Equals("sizeMb", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var raw = Uri.UnescapeDataString(kv[1]);
+                return decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out sizeMb);
+            }
+
+            return false;
         }
 
         private string GenerateSlug(string title)

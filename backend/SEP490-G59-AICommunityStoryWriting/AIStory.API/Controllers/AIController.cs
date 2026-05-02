@@ -62,7 +62,6 @@ namespace AIStory.API.Controllers
     [Authorize(Policy = "AuthorOnly")]
     public class AIController : ControllerBase
     {
-        private const int CoCreateAuthorIdeaMaxChars = 1500;
         private readonly IAINextChapterService _aiNextChapterService;
         private readonly IAICoCreationService _aiCoCreationService;
         private readonly IChapterCheckService _chapterCheckService;
@@ -111,45 +110,6 @@ namespace AIStory.API.Controllers
             tokenLimit = ex.LimitTokens,
             period = ex.Period.ToString()
         };
-
-        private async Task<(bool Ok, AuthorAiTokenBudgetExceededException? Error)> TryEnsureAuthorTokenBudgetAsync(
-            Guid authorUserId,
-            CancellationToken cancellationToken)
-        {
-            try
-            {
-                await _authorAiTokenBudget.EnsureWithinBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
-                return (true, null);
-            }
-            catch (AuthorAiTokenBudgetExceededException ex)
-            {
-                return (false, ex);
-            }
-        }
-
-        private async Task<IActionResult?> TryRejectOverTokenBudgetAsync(Guid authorUserId, CancellationToken cancellationToken)
-        {
-            var (ok, ex) = await TryEnsureAuthorTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
-            if (ok) return null;
-            return StatusCode(403, BuildTokenBudgetExceededPayload(ex!));
-        }
-
-        private async Task<IActionResult?> TryRejectInsufficientEstimatedTokensAsync(
-            Guid authorUserId,
-            int requiredTokens,
-            CancellationToken cancellationToken)
-        {
-            if (requiredTokens <= 0) return null;
-            var budget = await _authorAiTokenBudget.GetBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
-            var remaining = budget?.TokensRemaining;
-            if ((remaining ?? long.MaxValue) >= requiredTokens) return null;
-            return StatusCode(403, new
-            {
-                message = $"Số token AI còn lại không đủ để thực hiện yêu cầu này (cần tối thiểu {requiredTokens:N0} token). Vui lòng đợi đến kỳ cấp token tiếp theo.",
-                tokensRemaining = remaining,
-                minRequiredTokens = requiredTokens
-            });
-        }
 
         private static bool IsAuthorTokenBudgetBlocked(AuthorAiTokenBudgetDto b)
             => (b.TokensRemaining ?? 0) <= 0;
@@ -205,26 +165,31 @@ namespace AIStory.API.Controllers
         [HttpPost("suggest-next-chapter")]
         public async Task<IActionResult> SuggestNextChapter([FromBody] SuggestNextChapterRequest request, CancellationToken cancellationToken)
         {
-            if (request.StoryId == Guid.Empty)
-                return BadRequest(new { message = "StoryId là bắt buộc." });
-
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))
                 return Unauthorized(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." });
-
-            var tokenCap = await TryRejectOverTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
-            if (tokenCap != null)
-                return tokenCap;
-            // Default theo observed usage thực tế: suggest-next-chapter thường ~3.6k-3.7k token/lần.
-            var minSuggestTokens = _configuration.GetValue("AI:SuggestMinRequiredTokens", 3800);
-            var insufficientTokens = await TryRejectInsufficientEstimatedTokensAsync(authorUserId, minSuggestTokens, cancellationToken).ConfigureAwait(false);
-            if (insufficientTokens != null)
-                return insufficientTokens;
 
             try
             {
                 var response = await _aiNextChapterService.SuggestNextChapterAsync(request, authorUserId, cancellationToken);
                 return Ok(response);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (AuthorAiTokenBudgetExceededException ex)
+            {
+                return StatusCode(403, BuildTokenBudgetExceededPayload(ex));
+            }
+            catch (AuthorAiEstimatedTokensInsufficientException ex)
+            {
+                return StatusCode(403, new
+                {
+                    message = ex.Message,
+                    tokensRemaining = ex.TokensRemaining,
+                    minRequiredTokens = ex.MinRequiredTokens
+                });
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -251,42 +216,33 @@ namespace AIStory.API.Controllers
         [HttpPost("co-create")]
         public async Task<IActionResult> CoCreate([FromBody] CoCreationRequest request, CancellationToken cancellationToken)
         {
-            if (request.StoryId == Guid.Empty)
-            {
-                return BadRequest(new { message = "StoryId là bắt buộc." });
-            }
-            // AuthorIdea là tùy chọn (option 1: để trống → AI tự viết theo mạch truyện).
-            if (!string.IsNullOrWhiteSpace(request.AuthorIdea) && request.AuthorIdea.Trim().Length > CoCreateAuthorIdeaMaxChars)
-            {
-                return BadRequest(new { message = $"Ý tưởng tác giả không được vượt quá {CoCreateAuthorIdeaMaxChars} ký tự." });
-            }
-
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))
             {
                 return Unauthorized(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." });
             }
 
-            var (budgetOk, budgetEx) = await TryEnsureAuthorTokenBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
-            if (!budgetOk)
-            {
-                return StatusCode(403, BuildTokenBudgetExceededPayload(budgetEx!));
-            }
-            // Default theo observed usage thực tế: co-create (outline + write) thường >13k token/lần.
-            var minCoCreateTokens = _configuration.GetValue("AI:CoCreateMinRequiredTokens", 14000);
-            var coCreateInsufficient = await TryRejectInsufficientEstimatedTokensAsync(authorUserId, minCoCreateTokens, cancellationToken).ConfigureAwait(false);
-            if (coCreateInsufficient != null)
-            {
-                return StatusCode(403, coCreateInsufficient is ObjectResult o ? o.Value : new
-                {
-                    message = "Số token AI còn lại không đủ để thực hiện đồng sáng tác. Vui lòng đợi đến kỳ cấp token tiếp theo."
-                });
-            }
-
             try
             {
                 var response = await _aiCoCreationService.CoCreateAsync(request, authorUserId, cancellationToken);
                 return Ok(response);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (AuthorAiTokenBudgetExceededException ex)
+            {
+                return StatusCode(403, BuildTokenBudgetExceededPayload(ex));
+            }
+            catch (AuthorAiEstimatedTokensInsufficientException ex)
+            {
+                return StatusCode(403, new
+                {
+                    message = ex.Message,
+                    tokensRemaining = ex.TokensRemaining,
+                    minRequiredTokens = ex.MinRequiredTokens
+                });
             }
             catch (OperationCanceledException)
             {
@@ -295,6 +251,9 @@ namespace AIStory.API.Controllers
             }
             catch (UnauthorizedAccessException ex)
             {
+                const string missingUserMsg = "Không xác định được người dùng. Vui lòng đăng nhập lại.";
+                if (string.Equals(ex.Message, missingUserMsg, StringComparison.Ordinal))
+                    return Unauthorized(new { message = ex.Message });
                 return StatusCode(403, new { message = ex.Message });
             }
             catch (InvalidOperationException ex)

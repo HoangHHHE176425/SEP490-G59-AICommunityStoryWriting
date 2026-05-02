@@ -11,6 +11,7 @@ using Services.DTOs.Moderation;
 using Services.DTOs.Notifications;
 using Services;
 using Services.DTOs.Stories;
+using Services.Helpers;
 using Services.Interfaces;
 
 namespace Services.Implementations
@@ -766,7 +767,7 @@ namespace Services.Implementations
         }
 
         /// <summary>Bắt buộc đã "Nhận duyệt" (claim) — không cho duyệt/từ chối khi chưa lock hoặc lock cho người khác.</summary>
-        private static void EnsureModeratorHasClaimedForReview(string targetType, Guid targetId, Guid moderatorId)
+        internal static void EnsureModeratorHasClaimedForReview(string targetType, Guid targetId, Guid moderatorId)
         {
             if (!ReviewAssignmentDAO.IsLocked(targetType, targetId))
                 throw new InvalidOperationException("Bạn phải nhận duyệt mục này trước khi duyệt hoặc từ chối.");
@@ -775,7 +776,7 @@ namespace Services.Implementations
         }
 
         /// <summary>Moderator đã gửi đơn báo cáo admin và đơn còn PENDING → không cho duyệt/từ chối đến khi admin xử lý.</summary>
-        private static void EnsureNoPendingEscalationBlocksModeratorReview(string targetType, Guid targetId, Guid moderatorId)
+        internal static void EnsureNoPendingEscalationBlocksModeratorReview(string targetType, Guid targetId, Guid moderatorId)
         {
             if (!ReviewEscalationDAO.HasPendingForTarget(targetType, targetId))
                 return;
@@ -896,14 +897,13 @@ namespace Services.Implementations
         public bool ApproveChapter(Guid chapterId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
         {
             Console.WriteLine($"[CONSOLE] ModerationService.ApproveChapter ENTER ChapterId={chapterId}");
-            if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
-            {
-                Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: allowedCategoryIds empty");
-                return false;
-            }
             var chapter = _chapterRepository.GetById(chapterId);
             if (chapter == null)
             {
+                _logger.LogWarning(
+                    "Không tìm thấy chương để duyệt. ChapterId={ChapterId}, ModeratorId={ModeratorId}",
+                    chapterId,
+                    moderatorId);
                 Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: chapter not found ChapterId={chapterId}");
                 return false;
             }
@@ -915,6 +915,11 @@ namespace Services.Implementations
                 || hasPendingVersion;
             if (!canApprove)
             {
+                _logger.LogWarning(
+                    "Chương không trong trạng thái chờ duyệt. ChapterId={ChapterId}, CurrentStatus={CurrentStatus}, HasPendingVersion={HasPendingVersion}",
+                    chapterId,
+                    chapter.status,
+                    hasPendingVersion);
                 Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: not pending (current={chapter.status}, hasPendingVersion={hasPendingVersion})");
                 return false;
             }
@@ -923,12 +928,39 @@ namespace Services.Implementations
                 var story = _approveGetStoryById(chapter.story_id.Value);
                 if (story == null || !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
                 {
+                    _logger.LogWarning(
+                        "Không thể duyệt chương do truyện không tồn tại hoặc category không tồn tại / không thuộc phạm vi được phép duyệt. ChapterId={ChapterId}, StoryId={StoryId}, ModeratorId={ModeratorId}",
+                        chapterId,
+                        chapter.story_id,
+                        moderatorId);
                     Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: story not found or category not allowed");
                     return false;
                 }
             }
-            _approveEnsureClaimed(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
-            _approveEnsureNoPendingEscalation(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+            try
+            {
+                _approveEnsureClaimed(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+                _approveEnsureNoPendingEscalation(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Không thể duyệt chương do không thỏa điều kiện claim/escalation. ChapterId={ChapterId}, ModeratorId={ModeratorId}",
+                    chapterId,
+                    moderatorId);
+                throw;
+            }
+
+            if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
+            {
+                _logger.LogWarning(
+                    "Cấu hình không hợp lệ (allowedCategoryIds rỗng). ChapterId={ChapterId}, ModeratorId={ModeratorId}",
+                    chapterId,
+                    moderatorId);
+                Console.WriteLine($"[CONSOLE] ApproveChapter THROW: allowedCategoryIds empty");
+                throw new InvalidOperationException("Cấu hình không hợp lệ");
+            }
 
             // Duyệt theo thứ tự CHỈ khi publish lần đầu cho chapter.
             // Nếu chapter đã từng PUBLISHED (published_at có giá trị) và giờ chỉ gửi version mới,
@@ -943,6 +975,11 @@ namespace Services.Implementations
                 if (previous == null || previousStatus != "PUBLISHED")
                 {
                     var missingIndex = currentIndex - 1;
+                    _logger.LogWarning(
+                        "Không thể duyệt chương theo thứ tự. ChapterId={ChapterId}, CurrentIndex={CurrentIndex}, MissingPublishedIndex={MissingPublishedIndex}",
+                        chapterId,
+                        currentIndex,
+                        missingIndex);
                     throw new InvalidOperationException(
                         $"Phải duyệt chương theo thứ tự. Cần duyệt chương có thứ tự {missingIndex} trước khi duyệt chương {currentIndex}.");
                 }
@@ -960,7 +997,7 @@ namespace Services.Implementations
                 if (v.content_snapshot != null)
                 {
                     chapter.content = v.content_snapshot;
-                    chapter.word_count = chapter.content.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+                    chapter.word_count = ChapterContentNormalizer.CountWords(chapter.content);
                 }
             }
 
@@ -971,7 +1008,14 @@ namespace Services.Implementations
             _chapterRepository.Update(chapter);
 
             if (!_enableApproveChapterPostSideEffects)
+            {
+                _logger.LogInformation(
+                    "Đã duyệt chương. ChapterId={ChapterId}, ModeratorId={ModeratorId}, StoryId={StoryId}",
+                    chapterId,
+                    moderatorId,
+                    chapter.story_id);
                 return true;
+            }
 
             // Cập nhật last_published_at của story nếu cần và gửi thông báo cho user follow story
             Console.WriteLine($"[CONSOLE] ApproveChapter ChapterId={chapterId} StoryId={chapter.story_id} HasStoryId={chapter.story_id.HasValue}");
@@ -995,6 +1039,8 @@ namespace Services.Implementations
                     _ = PushStoryFollowNotificationsAsync(authorNotifications);
                 }
                 TriggerRagIndexInBackground(chapter.story_id.Value, chapterId);
+
+                //chạy AI analysis cho chapter vừa duyệt xong 
                 if (!string.IsNullOrWhiteSpace(chapter.content))
                 {
                     ChapterMemoryAnalysisScheduler.TrySchedule(
@@ -1019,6 +1065,11 @@ namespace Services.Implementations
             var chapterNotif = NotifyChapterResult(chapter, "APPROVED", null);
             if (chapterNotif != null) _ = PushAuthorNotificationAsync(chapterNotif);
             _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
+            _logger.LogInformation(
+                "Đã duyệt chương. ChapterId={ChapterId}, ModeratorId={ModeratorId}, StoryId={StoryId}",
+                chapterId,
+                moderatorId,
+                chapter.story_id);
             return true;
         }
 

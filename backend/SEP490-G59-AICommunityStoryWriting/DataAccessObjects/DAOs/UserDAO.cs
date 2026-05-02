@@ -283,6 +283,17 @@ namespace DataAccessObjects.DAOs
             return context.users.Any(u => u.id == id);
         }
 
+        public static bool IsAuthor(Guid userId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var user = context.users.AsNoTracking().FirstOrDefault(u => u.id == userId);
+            if (user == null)
+                return false;
+
+            return string.Equals(user.role, "AUTHOR", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(user.status, "BANNED", StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>Tìm user id theo email hoặc nickname (chứa chuỗi) — dùng lọc moderator performance.</summary>
         public static List<Guid> SearchUserIdsByEmailOrNickname(string search)
         {

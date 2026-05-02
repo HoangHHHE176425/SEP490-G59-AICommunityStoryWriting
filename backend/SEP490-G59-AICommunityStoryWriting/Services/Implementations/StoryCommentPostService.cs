@@ -16,6 +16,7 @@ public class StoryCommentPostService : IStoryCommentPostService
     private readonly ICommentReactionReader _reactionReader;
     private readonly INotificationHubNotifier _notificationHubNotifier;
     private readonly ILogger<StoryCommentPostService> _logger;
+    private const int MaxCommentLength = 2000;
 
     public StoryCommentPostService(
         IStoryLookup storyLookup,
@@ -42,6 +43,17 @@ public class StoryCommentPostService : IStoryCommentPostService
         Guid? parentId,
         CancellationToken cancellationToken = default)
     {
+        var normalizedContent = contentTrimmed?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedContent))
+        {
+            _logger.LogWarning("Story comment rejected: content is empty. StoryId={StoryId}, UserId={UserId}", storyId, userId);
+            return StoryCommentPostOutcome.BadRequest("Nội dung comment không được để trống.");
+        }
+        if (normalizedContent.Length > MaxCommentLength)
+        {
+            _logger.LogWarning("Story comment rejected: content too long. StoryId={StoryId}, UserId={UserId}, ContentLength={ContentLength}", storyId, userId, normalizedContent.Length);
+            return StoryCommentPostOutcome.BadRequest("Nội dung comment tối đa 2000 ký tự.");
+        }
         var story = _storyLookup.GetById(storyId);
         if (story == null)
             return StoryCommentPostOutcome.NotFound($"Story with ID {storyId} not found");
@@ -70,7 +82,7 @@ public class StoryCommentPostService : IStoryCommentPostService
                 return StoryCommentPostOutcome.BadRequest("ParentId không hợp lệ (phải là comment cấp truyện).");
         }
 
-        var entity = _commentCommand.AddStoryComment(storyId, userId, contentTrimmed, parentId);
+        var entity = _commentCommand.AddStoryComment(storyId, userId, normalizedContent, parentId);
 
         if (parent != null && parent.user_id.HasValue && parent.user_id != userId)
         {
@@ -89,6 +101,7 @@ public class StoryCommentPostService : IStoryCommentPostService
         }
 
         var dto = MapToStoryCommentDto(entity, userId, story.author_id);
+        _logger.LogInformation("Đã đăng bình luận. StoryId={StoryId}, UserId={UserId}, ParentId={ParentId}", storyId, userId, parentId);
         return StoryCommentPostOutcome.Ok(dto);
     }
 

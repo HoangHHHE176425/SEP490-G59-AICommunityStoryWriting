@@ -80,18 +80,20 @@ public class StoryMemoryEngine : IStoryMemoryEngine
     }
 
     /// <summary>Build context cho suggest-next-chapter: RAG (với ragQuery) + Character + Event + Story State. </summary>
+    /// 
+    //tạo ra nội dung bối cảnh -> trả về chuỗi text
     public async Task<string> BuildContextForSuggestAsync(Guid storyId, string ragQuery, CancellationToken cancellationToken = default)
     {
         var story = _storyRepository.GetById(storyId);
         if (story == null)
             return string.Empty;
-
+        //kiểm tra cấu hình và trạng thái RAG, nếu không đủ điều kiện thì fallback về context chương đã xuất bản (không dùng RAG)
         var ragStatusSuggest = _ragService.GetRagStatus(storyId);
         if (!ragStatusSuggest.EmbeddingConfigured || !_ragService.IsRagAvailableForStory(storyId))
             return BuildPublishedChaptersFallbackBlock(storyId, story);
-
-        int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);
-        int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);
+        //đọc cấu hình RAG max chars và topK, nếu không hợp lệ thì dùng mặc định
+        int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);//tối đa bn kí tự context
+        int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);//lấy bao nhiêu đoạn
         if (ragMaxChars < 1000) ragMaxChars = DefaultRagMaxChars;
         if (ragTopK < 5) ragTopK = 5;
         var query = ragQuery?.Trim() ?? "";
@@ -111,11 +113,11 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         if (string.IsNullOrWhiteSpace(ragBlock))
             return BuildPublishedChaptersFallbackBlock(storyId, story);
 
-        var storyContextBlock = BuildRagStoryBlock(story, ragBlock);
-        var characterBlock = BuildCharacterMemoryBlock(storyId);
-        var eventBlock = BuildEventMemoryBlock(storyId);
-        var stateBlock = BuildStoryStateBlock(storyId);
-
+        var storyContextBlock = BuildRagStoryBlock(story, ragBlock);//bối cảnh truyện từ RAG
+        var characterBlock = BuildCharacterMemoryBlock(storyId);//bối cảnh nhân vật
+        var eventBlock = BuildEventMemoryBlock(storyId);//bối cảnh sự kiện
+        var stateBlock = BuildStoryStateBlock(storyId);//bối cảnh trạng thái truyện
+        //ghép thành một chuỗi,giữan các block có 2 dòng trống, chỉ lấy những block có nội dung
         var parts = new List<string> { storyContextBlock };
         if (!string.IsNullOrWhiteSpace(characterBlock)) parts.Add(characterBlock);
         if (!string.IsNullOrWhiteSpace(eventBlock)) parts.Add(eventBlock);

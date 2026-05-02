@@ -5,6 +5,8 @@ using BusinessObjects;
 using DataAccessObjects;
 using DataAccessObjects.DAOs;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Services;
 using Services.DTOs.Notifications;
 using Services.DTOs.StoryReports;
@@ -68,6 +70,7 @@ public class StoryReportService : IStoryReportService
     private readonly ICreateStoryReportGateway _createStoryReportGateway;
     private readonly bool _enableCreateStoryReportNotifications;
     private readonly bool _enableAdminActionNotifications;
+    private readonly ILogger<StoryReportService> _logger;
 
     public StoryReportService(
         IUserLookup userLookup,
@@ -77,7 +80,8 @@ public class StoryReportService : IStoryReportService
         ICreateStoryReportGateway? createStoryReportGateway = null,
         bool enableCreateStoryReportNotifications = true,
         IAdminComplianceAdminActionGateway? adminComplianceGateway = null,
-        bool enableAdminActionNotifications = true)
+        bool enableAdminActionNotifications = true,
+        ILogger<StoryReportService>? logger = null)
     {
         _userLookup = userLookup;
         _userActivityLookup = userActivityLookup;
@@ -87,6 +91,7 @@ public class StoryReportService : IStoryReportService
         _enableCreateStoryReportNotifications = enableCreateStoryReportNotifications;
         _adminComplianceGateway = adminComplianceGateway ?? new DefaultAdminComplianceAdminActionGateway();
         _enableAdminActionNotifications = enableAdminActionNotifications;
+        _logger = logger ?? NullLogger<StoryReportService>.Instance;
     }
 
     public IReadOnlyList<StoryReportReasonOptionDto> GetReasonOptions()
@@ -103,30 +108,61 @@ public class StoryReportService : IStoryReportService
             .ToList();
     }
 
-    public Task<Guid> CreateStoryReportAsync(Guid storyId, Guid reporterId, CreateStoryReportRequestDto request)
+    public Task<CreateStoryReportResultDto> CreateStoryReportAsync(Guid storyId, Guid reporterId, CreateStoryReportRequestDto request)
     {
         if (!StoryReportReasonCatalog.TryGet(request.ReasonCode, out _))
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: reason code không hợp lệ. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
             throw new ArgumentException("Invalid reason code.");
+        }
 
-        UserReportDescriptionRules.ValidateDescription(request.Description);
+        try
+        {
+            UserReportDescriptionRules.ValidateDescription(request.Description);
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(
+                "Tạo báo cáo thất bại: mô tả báo cáo không hợp lệ. StoryId={StoryId}, ReporterId={ReporterId}, Message={Message}",
+                storyId,
+                reporterId,
+                ex.Message);
+            throw;
+        }
         var descriptionTrimmed = (request.Description ?? "").Trim();
 
         if (reporterId == Guid.Empty || !_userLookup.Exists(reporterId))
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: reporter không tồn tại. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
             throw new InvalidOperationException("USER không tồn tại.");
+        }
 
-        var story = _createStoryReportGateway.GetStoryById(storyId)
-                    ?? throw new InvalidOperationException("Story not found.");
+        var story = _createStoryReportGateway.GetStoryById(storyId);
+        if (story == null)
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: không tìm thấy story. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
+            throw new InvalidOperationException("Story not found.");
+        }
 
         var st = (story.status ?? "").Trim().ToUpperInvariant();
         if (st != "PUBLISHED")
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: story chưa PUBLISHED. StoryId={StoryId}, ReporterId={ReporterId}, Status={Status}", storyId, reporterId, story.status);
             throw new InvalidOperationException("Chỉ có thể báo cáo truyện đã PUBLISHED.");
+        }
 
         // Giống đánh giá: yêu cầu có log READ_CHAPTER cho truyện.
         if (!_userActivityLookup.HasReadAnyChapterOfStory(reporterId, storyId))
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: reporter chưa đọc chapter nào. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
             throw new InvalidOperationException("Bạn cần đọc ít nhất một chapter trước khi gửi báo cáo.");
+        }
 
         if (story.author_id == reporterId)
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: tác giả tự báo cáo truyện mình. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
             throw new InvalidOperationException("Bạn không thể báo cáo truyện của chính mình.");
+        }
 
         var code = request.ReasonCode.Trim().ToUpperInvariant();
         var id = _createStoryReportGateway.AppendStoryReportAggregated(
@@ -134,10 +170,22 @@ public class StoryReportService : IStoryReportService
             reporterId,
             code,
             descriptionTrimmed);
-        // Mỗi người báo cáo mới (1 lần / truyện / user) = 1 thông báo cho tác giả; trùng trả về Guid.Empty.
-        if (id != Guid.Empty && _enableCreateStoryReportNotifications)
+        // Duplicate reporter on same story: DAO trả Guid.Empty -> coi là vi phạm precondition "chưa report trước đó".
+        if (id == Guid.Empty)
+        {
+            _logger.LogWarning("Tạo báo cáo thất bại: reporter đã báo cáo story trước đó. StoryId={StoryId}, ReporterId={ReporterId}", storyId, reporterId);
+            throw new InvalidOperationException("Bạn đã báo cáo truyện này trước đó.");
+        }
+        // Chỉ gửi thông báo khi ghi nhận báo cáo mới thành công.
+        if (_enableCreateStoryReportNotifications)
             _ = NotifyStoryAuthorReportedAsync(story, reporterId, request.ReasonCode, descriptionTrimmed);
-        return Task.FromResult(id);
+        var result = new CreateStoryReportResultDto
+        {
+            ReportId = id,
+            Message = "Tạo báo cáo thành công"
+        };
+        _logger.LogInformation("CreateStoryReport succeeded: ReportId={ReportId}, StoryId={StoryId}, ReporterId={ReporterId}, ReasonCode={ReasonCode}", id, storyId, reporterId, code);
+        return Task.FromResult(result);
     }
 
     private async Task NotifyStoryAuthorReportedAsync(stories story, Guid reporterId, string? reasonCode, string? description)
