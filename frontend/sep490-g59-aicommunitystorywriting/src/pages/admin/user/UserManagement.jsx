@@ -212,7 +212,7 @@ export function UserManagement() {
                             type="text"
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
-                            placeholder="Tìm theo email, tên..."
+                            placeholder="Tìm theo ID / email / nickname..."
                             className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                         />
                     </div>

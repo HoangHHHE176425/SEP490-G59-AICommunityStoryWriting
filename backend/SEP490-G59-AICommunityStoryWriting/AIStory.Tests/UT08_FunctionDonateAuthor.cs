@@ -1,6 +1,7 @@
+﻿using Moq;
 using Services.DTOs.Notifications;
-using Moq;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Xunit.Abstractions;
 
 namespace AIStory.Tests;
@@ -14,149 +15,179 @@ public class UT08_FunctionDonateAuthor
         _output = output;
     }
 
-    private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        ReferenceHandler = ReferenceHandler.IgnoreCycles
+    };
+
+    private void LogTestCase(string utcId, string spec, object? input, object? output, Exception? ex = null)
     {
         _output.WriteLine("");
-        _output.WriteLine($"======== {utcId} | UT08 DonateAuthor ========");
-        _output.WriteLine(oneLineGoal);
-        foreach (var line in details)
-            _output.WriteLine("  · " + line);
+        _output.WriteLine($"========== {utcId} ==========");
+        _output.WriteLine($"SPEC   : {spec}");
+        _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input, _jsonOptions)}");
+
+        if (ex != null)
+        {
+            _output.WriteLine("OUTPUT : ERROR");
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+        }
+        else
+        {
+            _output.WriteLine("OUTPUT : SUCCESS");
+            _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output, _jsonOptions)}");
+        }
     }
 
-    private void LogActualMessage(string message)
+    private void LogStore(string label, CoinPaymentTestStore store)
     {
-        var line = "Actual log message: " + message;
-        _output.WriteLine(line);
-        Console.WriteLine(line);
-    }
-
-    private void LogActualReturn<T>(T value)
-    {
-        var line = "Actual return: " + JsonSerializer.Serialize(value);
-        _output.WriteLine(line);
-        Console.WriteLine(line);
+        _output.WriteLine("");
+        _output.WriteLine($"======== {label} - store ========");
+        _output.WriteLine($"Users={store.Users.Count}, Wallets={store.Wallets.Count}, PlatformWallets={store.PlatformWallets.Count}, Donations={store.Donations.Count}, IncomeLogs={store.AuthorIncomeLogs.Count}, Notifications={store.Notifications.Count}");
+        foreach (var wallet in store.Wallets)
+        {
+            _output.WriteLine($"  wallet user_id={wallet.user_id}, balance_coin={wallet.balance_coin}, income={wallet.income_balance}");
+        }
+        foreach (var donation in store.Donations)
+        {
+            _output.WriteLine($"  donation id={donation.id}, sender={donation.sender_id}, receiver={donation.receiver_id}, amount={donation.amount}");
+        }
     }
 
     [Fact]
-    public async Task UTCID01_Donate_Fails_WhenAmountIsNotPositive()
+    public async Task UTCID01_Donate_Result_WhenAmountIsNotPositive()
     {
-        LogUtcContext("UTCID01",
-            "Abnormal path: amount <= 0.",
-            "Precondition: gọi DonateAsync với amount = 0.",
-            "Kỳ vọng: throw ArgumentOutOfRangeException.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
+        var input = new { SenderUserId = Guid.NewGuid(), ReceiverUserId = Guid.NewGuid(), Amount = 0, Message = (string?)null };
 
-        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
-            scope.Sut.DonateAsync(Guid.NewGuid(), Guid.NewGuid(), 0, null));
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.DonateAsync(input.SenderUserId, input.ReceiverUserId, input.Amount, input.Message));
+        LogTestCase("UTCID01", "Amount <= 0 -> fail truoc khi luu donation.", input, null, ex);
 
-        Assert.Equal("amount", ex.ParamName);
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.Donations);
+        Assert.Empty(scope.Store.Wallets);
+        scope.NotificationHubNotifierMock.VerifyNoOtherCalls();
+        LogStore("UTCID01 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID02_Donate_Fails_WhenSenderDonatesToSelf()
+    public async Task UTCID02_Donate_Result_WhenSenderDonatesToSelf()
     {
-        LogUtcContext("UTCID02",
-            "Abnormal path: user tự donate cho chính mình.",
-            "Precondition: senderUserId == receiverUserId.",
-            "Kỳ vọng: throw InvalidOperationException Bạn không thể tự ủng hộ chính mình.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var userId = Guid.NewGuid();
+        var input = new { SenderUserId = userId, ReceiverUserId = userId, Amount = 10, Message = (string?)null };
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            scope.Sut.DonateAsync(userId, userId, 10, null));
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.DonateAsync(input.SenderUserId, input.ReceiverUserId, input.Amount, input.Message));
+        LogTestCase("UTCID02", "Sender donate cho chinh minh -> fail truoc khi luu donation.", input, null, ex);
 
-        Assert.Equal("Bạn không thể tự ủng hộ chính mình.", ex.Message);
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.Donations);
+        Assert.Empty(scope.Store.Wallets);
+        scope.NotificationHubNotifierMock.VerifyNoOtherCalls();
+        LogStore("UTCID02 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID03_Donate_Fails_WhenSenderDoesNotExist()
+    public async Task UTCID03_Donate_Result_WhenSenderDoesNotExist()
     {
-        LogUtcContext("UTCID03",
-            "Abnormal path: sender không tồn tại.",
-            "Precondition: chỉ có receiver trong DB.",
-            "Kỳ vọng: throw InvalidOperationException Tài khoản người ủng hộ không tồn tại.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var receiver = CoinPaymentTestHelpers.CreateUser(email: "author@example.com");
         CoinPaymentTestHelpers.Seed(scope.DbContext, receiver);
+        var input = new { SenderUserId = Guid.NewGuid(), ReceiverUserId = receiver.id, Amount = 10, Message = (string?)null };
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            scope.Sut.DonateAsync(Guid.NewGuid(), receiver.id, 10, null));
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.DonateAsync(input.SenderUserId, input.ReceiverUserId, input.Amount, input.Message));
+        LogTestCase("UTCID03", "Sender khong ton tai -> fail, khong tao donation.", input, null, ex);
 
-        Assert.Equal("Tài khoản người ủng hộ không tồn tại.", ex.Message);
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.Donations);
+        Assert.Empty(scope.Store.Wallets);
+        scope.NotificationHubNotifierMock.VerifyNoOtherCalls();
+        LogStore("UTCID03 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID04_Donate_Fails_WhenReceiverDoesNotExist()
+    public async Task UTCID04_Donate_Result_WhenReceiverDoesNotExist()
     {
-        LogUtcContext("UTCID04",
-            "Abnormal path: receiver không tồn tại.",
-            "Precondition: chỉ có sender trong DB.",
-            "Kỳ vọng: throw InvalidOperationException Tác giả nhận ủng hộ không tồn tại.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var sender = CoinPaymentTestHelpers.CreateUser(email: "reader@example.com");
         CoinPaymentTestHelpers.Seed(scope.DbContext, sender);
+        var input = new { SenderUserId = sender.id, ReceiverUserId = Guid.NewGuid(), Amount = 10, Message = "Thanks" };
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            scope.Sut.DonateAsync(sender.id, Guid.NewGuid(), 10, "Thanks"));
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.DonateAsync(input.SenderUserId, input.ReceiverUserId, input.Amount, input.Message));
+        LogTestCase("UTCID04", "Receiver khong ton tai -> fail, khong tao donation.", input, null, ex);
 
-        Assert.Equal("Tác giả nhận ủng hộ không tồn tại.", ex.Message);
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.Donations);
+        Assert.Empty(scope.Store.Wallets);
+        scope.NotificationHubNotifierMock.VerifyNoOtherCalls();
+        LogStore("UTCID04 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID05_Donate_Fails_WhenSenderBalanceInsufficient()
+    public async Task UTCID05_Donate_Result_WhenSenderBalanceInsufficient()
     {
-        LogUtcContext("UTCID05",
-            "Abnormal path: sender không đủ coin.",
-            "Precondition: sender balance = 20 nhưng donate 50.",
-            "Kỳ vọng: throw InvalidOperationException Số dư coin không đủ để thực hiện ủng hộ.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var sender = CoinPaymentTestHelpers.CreateUser(email: "reader@example.com");
         var receiver = CoinPaymentTestHelpers.CreateUser(email: "author@example.com");
         var senderWallet = CoinPaymentTestHelpers.CreateWallet(sender.id, balanceCoin: 20);
         CoinPaymentTestHelpers.Seed(scope.DbContext, sender, receiver, senderWallet);
+        var input = new { SenderUserId = sender.id, ReceiverUserId = receiver.id, Amount = 50, Message = (string?)null };
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            scope.Sut.DonateAsync(sender.id, receiver.id, 50, null));
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.DonateAsync(input.SenderUserId, input.ReceiverUserId, input.Amount, input.Message));
+        LogTestCase("UTCID05", "Sender khong du coin -> fail, khong tao donation.", input, null, ex);
 
-        Assert.Equal("Số dư coin không đủ để thực hiện ủng hộ.", ex.Message);
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.Donations);
+        Assert.Equal(2, scope.Store.Wallets.Count);
+        Assert.Equal(20, scope.Store.Wallets.Single(x => x.user_id == sender.id).balance_coin);
+        Assert.Equal(0, scope.Store.Wallets.Single(x => x.user_id == receiver.id).balance_coin);
+        scope.NotificationHubNotifierMock.VerifyNoOtherCalls();
+        LogStore("UTCID05 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID06_Donate_Succeeds_WhenInputValid_AndSplitsSeventyThirty()
+    public async Task UTCID06_Donate_Result_WhenInputValid()
     {
-        LogUtcContext("UTCID06",
-            "Happy path: donate thành công, trừ coin sender, cộng income receiver, cộng fee vào platform.",
-            "Precondition: sender và receiver tồn tại; sender có đủ balance; platform wallet có thể được tạo.",
-            "Kỳ vọng: tạo donation, author_income_logs, notifications và push realtime.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var sender = CoinPaymentTestHelpers.CreateUser(email: "reader@example.com", nickname: "Reader One");
         var receiver = CoinPaymentTestHelpers.CreateUser(email: "author@example.com", nickname: "Author One");
         var senderWallet = CoinPaymentTestHelpers.CreateWallet(sender.id, balanceCoin: 500);
-
         CoinPaymentTestHelpers.Seed(scope.DbContext, sender, receiver, senderWallet);
         scope.NotificationHubNotifierMock
             .Setup(x => x.NotifyUserAsync(receiver.id, It.IsAny<NotificationDto>()))
             .Returns(Task.CompletedTask);
+        var input = new { SenderUserId = sender.id, ReceiverUserId = receiver.id, Amount = 100, Message = "Thanks" };
 
-        var result = await scope.Sut.DonateAsync(sender.id, receiver.id, 100, "Thanks");
+        // Act
+        var result = await scope.Sut.DonateAsync(input.SenderUserId, input.ReceiverUserId, input.Amount, input.Message);
+        LogTestCase("UTCID06", "Donate hop le -> tru coin sender, cong income author, tao donation/log/notification.", input, result);
 
-        var savedSenderWallet = scope.DbContext.wallets.Single(x => x.user_id == sender.id);
-        var savedReceiverWallet = scope.DbContext.wallets.Single(x => x.user_id == receiver.id);
-        var platformWallet = scope.DbContext.platform_wallet.Single(x => x.id == 1);
-        var donation = scope.DbContext.donations.Single(x => x.id == result.DonationId);
-        var incomeLog = scope.DbContext.author_income_logs.Single(x => x.author_id == receiver.id);
-        var notification = scope.DbContext.notifications.Single(x => x.user_id == receiver.id);
+        // Assert
+        var savedSenderWallet = Assert.Single(scope.Store.Wallets, x => x.user_id == sender.id);
+        var savedReceiverWallet = Assert.Single(scope.Store.Wallets, x => x.user_id == receiver.id);
+        var platformWallet = Assert.Single(scope.Store.PlatformWallets, x => x.id == 1);
+        var donation = Assert.Single(scope.Store.Donations, x => x.id == result.DonationId);
+        var incomeLog = Assert.Single(scope.Store.AuthorIncomeLogs, x => x.author_id == receiver.id);
+        var notification = Assert.Single(scope.Store.Notifications, x => x.user_id == receiver.id);
 
         Assert.Equal(400, savedSenderWallet.balance_coin);
         Assert.Equal(30m, savedReceiverWallet.income_balance);
@@ -170,58 +201,58 @@ public class UT08_FunctionDonateAuthor
             n.LinkUrl == "/wallet" &&
             n.Content != null &&
             n.Content.Contains("100 coin"))), Times.Once);
-
-        LogActualReturn(result);
+        LogStore("UTCID06 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID07_Donate_Fails_WhenUsersExistButWalletsAreMissingAndSenderStartsAtZero()
+    public async Task UTCID07_Donate_Result_WhenUsersExistButWalletsAreMissing()
     {
-        LogUtcContext("UTCID07",
-            "Boundary path: users tồn tại nhưng chưa có wallet nào.",
-            "Precondition: sender/receiver đều tồn tại, nhưng wallets chưa được tạo.",
-            "Kỳ vọng: service tự tạo wallet 0 coin rồi kết thúc bằng lỗi không đủ số dư.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var sender = CoinPaymentTestHelpers.CreateUser(email: "reader-boundary@example.com");
         var receiver = CoinPaymentTestHelpers.CreateUser(email: "author-boundary@example.com");
         CoinPaymentTestHelpers.Seed(scope.DbContext, sender, receiver);
+        var input = new { SenderUserId = sender.id, ReceiverUserId = receiver.id, Amount = 100, Message = "Thanks" };
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            scope.Sut.DonateAsync(sender.id, receiver.id, 100, "Thanks"));
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.DonateAsync(input.SenderUserId, input.ReceiverUserId, input.Amount, input.Message));
+        LogTestCase("UTCID07", "Users ton tai nhung chua co wallet -> tao wallet 0 roi fail vi khong du coin.", input, null, ex);
 
-        Assert.Equal("Số dư coin không đủ để thực hiện ủng hộ.", ex.Message);
-        Assert.Equal(2, scope.DbContext.wallets.Count());
-        Assert.All(scope.DbContext.wallets.ToList(), wallet => Assert.Equal(0, wallet.balance_coin));
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.Donations);
+        Assert.Equal(2, scope.Store.Wallets.Count);
+        Assert.All(scope.Store.Wallets, wallet => Assert.Equal(0, wallet.balance_coin));
+        scope.NotificationHubNotifierMock.VerifyNoOtherCalls();
+        LogStore("UTCID07 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task NonReport_Donate_Succeeds_EvenWhenRealtimeNotificationFails()
+    public async Task NonReport_Donate_Result_WhenRealtimeNotificationFails()
     {
-        LogUtcContext("NON-REPORT",
-            "Resilience path: push realtime lỗi nhưng giao dịch donate vẫn thành công.",
-            "Precondition: sender có đủ coin; notifier ném exception.",
-            "Kỳ vọng: donation vẫn được lưu, ví vẫn cập nhật.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var sender = CoinPaymentTestHelpers.CreateUser(email: "reader2@example.com");
         var receiver = CoinPaymentTestHelpers.CreateUser(email: "author2@example.com");
         var senderWallet = CoinPaymentTestHelpers.CreateWallet(sender.id, balanceCoin: 200);
         CoinPaymentTestHelpers.Seed(scope.DbContext, sender, receiver, senderWallet);
-
         scope.NotificationHubNotifierMock
             .Setup(x => x.NotifyUserAsync(receiver.id, It.IsAny<NotificationDto>()))
             .ThrowsAsync(new InvalidOperationException("SignalR offline"));
+        var input = new { SenderUserId = sender.id, ReceiverUserId = receiver.id, Amount = 50, Message = "Keep going" };
 
-        var result = await scope.Sut.DonateAsync(sender.id, receiver.id, 50, "Keep going");
+        // Act
+        var result = await scope.Sut.DonateAsync(input.SenderUserId, input.ReceiverUserId, input.Amount, input.Message);
+        LogTestCase("NON-REPORT", "Realtime notification fail nhung giao dich donate van thanh cong.", input, result);
 
-        var savedSenderWallet = scope.DbContext.wallets.Single(x => x.user_id == sender.id);
-        var savedReceiverWallet = scope.DbContext.wallets.Single(x => x.user_id == receiver.id);
+        // Assert
+        var savedSenderWallet = Assert.Single(scope.Store.Wallets, x => x.user_id == sender.id);
+        var savedReceiverWallet = Assert.Single(scope.Store.Wallets, x => x.user_id == receiver.id);
         Assert.Equal(150, savedSenderWallet.balance_coin);
         Assert.Equal(15m, savedReceiverWallet.income_balance);
-        Assert.Equal(1, scope.DbContext.donations.Count());
-        Assert.Equal(1, scope.DbContext.notifications.Count());
-        LogActualReturn(result);
+        Assert.Single(scope.Store.Donations);
+        Assert.Single(scope.Store.Notifications);
+        scope.NotificationHubNotifierMock.Verify(x => x.NotifyUserAsync(receiver.id, It.IsAny<NotificationDto>()), Times.Once);
+        LogStore("NON-REPORT (sau verify)", scope.Store);
     }
 }

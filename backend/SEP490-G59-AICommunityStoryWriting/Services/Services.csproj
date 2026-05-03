@@ -6,6 +6,13 @@
 		<Nullable>enable</Nullable>
 	</PropertyGroup>
 
+	<!-- Chụp bug matrix UTCID03: bỏ comment block bên dưới, thêm cùng block vào AIStory.Tests.csproj nếu chạy unit test, rồi rebuild. Gỡ trước khi commit. -->
+	<!--
+	<PropertyGroup>
+		<DefineConstants>$(DefineConstants);STORY_CREATE_SKIP_AUTHOR_EXISTS_UTCID03</DefineConstants>
+	</PropertyGroup>
+	-->
+
 	<ItemGroup>
 		<InternalsVisibleTo Include="AIStory.Tests" />
 	</ItemGroup>

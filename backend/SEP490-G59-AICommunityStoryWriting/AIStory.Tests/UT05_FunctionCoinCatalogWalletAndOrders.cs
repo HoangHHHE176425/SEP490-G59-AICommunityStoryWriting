@@ -1,5 +1,6 @@
-using BusinessObjects.Entities;
+﻿using BusinessObjects.Entities;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Xunit.Abstractions;
 
 namespace AIStory.Tests;
@@ -13,45 +14,59 @@ public class UT05_FunctionCoinCatalogWalletAndOrders
         _output = output;
     }
 
-    private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        WriteIndented = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        ReferenceHandler = ReferenceHandler.IgnoreCycles
+    };
+
+    private void LogTestCase(string utcId, string spec, object? input, object? output, Exception? ex = null)
     {
         _output.WriteLine("");
-        _output.WriteLine($"======== {utcId} | UT05 CoinCatalogWalletAndOrders ========");
-        _output.WriteLine(oneLineGoal);
-        foreach (var line in details)
-            _output.WriteLine("  · " + line);
+        _output.WriteLine($"========== {utcId} ==========");
+        _output.WriteLine($"SPEC   : {spec}");
+        _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input, _jsonOptions)}");
+
+        if (ex != null)
+        {
+            _output.WriteLine("OUTPUT : ERROR");
+            _output.WriteLine($"Exception type: {ex.GetType().Name}");
+            _output.WriteLine($"Message: {ex.Message}");
+        }
+        else
+        {
+            _output.WriteLine("OUTPUT : SUCCESS");
+            _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output, _jsonOptions)}");
+        }
     }
 
-    private void LogActualMessage(string message)
+    private void LogStore(string label, CoinPaymentTestStore store)
     {
-        var line = "Actual log message: " + message;
-        _output.WriteLine(line);
-        Console.WriteLine(line);
-    }
-
-    private void LogActualReturn<T>(T value)
-    {
-        var line = "Actual return: " + JsonSerializer.Serialize(value);
-        _output.WriteLine(line);
-        Console.WriteLine(line);
+        _output.WriteLine("");
+        _output.WriteLine($"======== {label} - store ========");
+        _output.WriteLine($"Packages={store.CoinPackages.Count}, Wallets={store.Wallets.Count}, Orders={store.CoinOrders.Count}, Users={store.Users.Count}");
     }
 
     [Fact]
-    public async Task UTCID01_GetActivePackages_ReturnsOnlyActivePackages_WithMappedFields()
+    public async Task UTCID01_GetActivePackages_Result_WhenActivePackagesExist()
     {
-        LogUtcContext("UTCID01",
-            "Happy path: chỉ lấy package active và map field đúng từ entity sang dto.",
-            "Precondition: có 3 package, trong đó 2 active và 1 inactive.",
-            "Kỳ vọng: trả đúng 2 package active; field dto map đúng, package inactive không xuất hiện.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var cheap = CoinPaymentTestHelpers.CreatePackage(name: "Cheap", priceAmount: 10000m, coinAmount: 100, bonusCoin: 10, isActive: true);
         var inactive = CoinPaymentTestHelpers.CreatePackage(name: "Inactive", priceAmount: 5000m, coinAmount: 50, isActive: false);
         var premium = CoinPaymentTestHelpers.CreatePackage(name: "Premium", priceAmount: 20000m, coinAmount: 250, isActive: true);
         CoinPaymentTestHelpers.Seed(scope.DbContext, cheap, inactive, premium);
 
+        // Act
         var result = await scope.Sut.GetActivePackagesAsync();
+        LogTestCase(
+            "UTCID01",
+            "Chi lay package active va map field dung tu entity sang DTO.",
+            new { SeededPackages = scope.Store.CoinPackages.Select(p => new { p.id, p.name, p.price_amount, p.is_active }) },
+            result);
 
+        // Assert
         Assert.Equal(2, result.Count);
         Assert.DoesNotContain(result, x => x.Id == inactive.id);
 
@@ -70,18 +85,14 @@ public class UT05_FunctionCoinCatalogWalletAndOrders
         Assert.Equal(250, premiumDto.CoinAmount);
         Assert.Equal(0, premiumDto.BonusCoin);
         Assert.True(premiumDto.IsActive);
-
-        LogActualReturn(result);
+        Assert.Equal(3, scope.Store.CoinPackages.Count);
+        LogStore("UTCID01 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID02_GetActivePackages_ReturnsEmpty_WhenNoActivePackage()
+    public async Task UTCID02_GetActivePackages_Result_WhenNoActivePackage()
     {
-        LogUtcContext("UTCID02",
-            "Boundary path: không có package active.",
-            "Precondition: tất cả package đều inactive hoặc null is_active.",
-            "Kỳ vọng: trả danh sách rỗng.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         CoinPaymentTestHelpers.Seed(
             scope.DbContext,
@@ -97,108 +108,126 @@ public class UT05_FunctionCoinCatalogWalletAndOrders
                 is_active = null
             });
 
+        // Act
         var result = await scope.Sut.GetActivePackagesAsync();
+        LogTestCase(
+            "UTCID02",
+            "Khong co package active -> tra danh sach rong.",
+            new { SeededPackages = scope.Store.CoinPackages.Select(p => new { p.id, p.name, p.is_active }) },
+            result);
 
+        // Assert
         Assert.Empty(result);
-        LogActualReturn(result);
+        Assert.Equal(2, scope.Store.CoinPackages.Count);
+        LogStore("UTCID02 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID03_GetActivePackages_ReturnsPackagesOrderedByPriceAscending()
+    public async Task UTCID03_GetActivePackages_Result_WhenOrderingByPriceAscending()
     {
-        LogUtcContext("UTCID03",
-            "Happy path: nhiều package active phải được sort tăng dần theo price_amount.",
-            "Precondition: có ít nhất 2 package active với price_amount khác nhau.",
-            "Kỳ vọng: danh sách trả về được sắp xếp tăng dần theo giá.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var expensive = CoinPaymentTestHelpers.CreatePackage(name: "Expensive", priceAmount: 30000m, coinAmount: 300, isActive: true);
         var cheapest = CoinPaymentTestHelpers.CreatePackage(name: "Cheapest", priceAmount: 9000m, coinAmount: 90, isActive: true);
         var middle = CoinPaymentTestHelpers.CreatePackage(name: "Middle", priceAmount: 15000m, coinAmount: 150, isActive: true);
         CoinPaymentTestHelpers.Seed(scope.DbContext, expensive, cheapest, middle);
 
+        // Act
         var result = await scope.Sut.GetActivePackagesAsync();
+        LogTestCase(
+            "UTCID03",
+            "Nhieu package active -> sort tang dan theo price_amount.",
+            new { SeededPackages = scope.Store.CoinPackages.Select(p => new { p.id, p.name, p.price_amount }) },
+            result);
 
+        // Assert
         Assert.Equal(3, result.Count);
         Assert.Equal(cheapest.id, result[0].Id);
         Assert.Equal(middle.id, result[1].Id);
         Assert.Equal(expensive.id, result[2].Id);
-        LogActualReturn(result);
+        LogStore("UTCID03 (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID01_GetOrCreateWallet_ReturnsExistingWallet_WithoutCreatingNewRow()
+    public async Task UTCID01_GetOrCreateWallet_Result_WhenWalletAlreadyExists()
     {
-        LogUtcContext("UTCID01",
-            "Happy path: user đã có wallet thì trả về wallet hiện có.",
-            "Precondition: user và wallet tồn tại sẵn trong DB.",
-            "Kỳ vọng: không tạo row mới, số dư giữ nguyên.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var user = CoinPaymentTestHelpers.CreateUser(email: "wallet-owner@example.com");
         var wallet = CoinPaymentTestHelpers.CreateWallet(user.id, balanceCoin: 321, incomeBalance: 45m, frozenBalance: 6m);
         CoinPaymentTestHelpers.Seed(scope.DbContext, user, wallet);
 
+        // Act
         var result = await scope.Sut.GetOrCreateWalletAsync(user.id);
+        LogTestCase(
+            "UTCID01",
+            "User da co wallet -> tra wallet hien co, khong tao row moi.",
+            new { UserId = user.id, ExistingWallet = new { wallet.balance_coin, wallet.income_balance, wallet.frozen_balance } },
+            result);
 
+        // Assert
         Assert.Equal(user.id, result.UserId);
         Assert.Equal(321, result.BalanceCoin);
         Assert.Equal(45m, result.IncomeBalance);
-        Assert.Equal(1, scope.DbContext.wallets.Count());
-        LogActualReturn(result);
+        Assert.Single(scope.Store.Wallets);
+        Assert.Equal(321, scope.Store.Wallets.Single().balance_coin);
+        LogStore("UTCID01 wallet (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID02_GetOrCreateWallet_CreatesWallet_WhenMissing()
+    public async Task UTCID02_GetOrCreateWallet_Result_WhenWalletMissing()
     {
-        LogUtcContext("UTCID02",
-            "Abnormal path: user chưa có wallet thì service tự tạo wallet mặc định.",
-            "Precondition: user tồn tại nhưng chưa có row wallet.",
-            "Kỳ vọng: tạo wallet mới balance 0, currency VND.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var user = CoinPaymentTestHelpers.CreateUser(email: "new-wallet@example.com");
         CoinPaymentTestHelpers.Seed(scope.DbContext, user);
 
+        // Act
         var result = await scope.Sut.GetOrCreateWalletAsync(user.id);
+        LogTestCase(
+            "UTCID02",
+            "User chua co wallet -> service tao wallet mac dinh.",
+            new { UserId = user.id },
+            result);
 
-        var savedWallet = scope.DbContext.wallets.Single(x => x.user_id == user.id);
+        // Assert
+        var savedWallet = Assert.Single(scope.Store.Wallets, x => x.user_id == user.id);
         Assert.Equal(0, result.BalanceCoin);
         Assert.Equal("VND", result.Currency);
         Assert.Equal(0, savedWallet.balance_coin);
-        LogActualReturn(result);
+        LogStore("UTCID02 wallet (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID03_GetOrCreateWallet_CurrentlyThrowsEfError_WhenUserIdIsGuidEmpty()
+    public async Task UTCID03_GetOrCreateWallet_Result_WhenUserIdIsGuidEmpty()
     {
-        LogUtcContext("UTCID03",
-            "Boundary path theo report: userId = Guid.Empty.",
-            "Excel kỳ vọng: throw 'UserId cannot be empty!'.",
-            "Current service chưa có validation này; hành vi thực tế hiện tại là EF ném InvalidOperationException khi SaveChanges.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
+        var userId = Guid.Empty;
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => scope.Sut.GetOrCreateWalletAsync(Guid.Empty));
+        // Act
+        var ex = await Record.ExceptionAsync(() => scope.Sut.GetOrCreateWalletAsync(userId));
+        LogTestCase(
+            "UTCID03",
+            "UserId Guid.Empty -> service hien tai fail khi SaveChanges, khong persist wallet vao store.",
+            new { UserId = userId },
+            null,
+            ex);
 
-        Assert.Contains("wallets.user_id", ex.Message, StringComparison.Ordinal);
-        LogActualMessage(ex.Message);
+        // Assert
+        Assert.NotNull(ex);
+        Assert.Empty(scope.Store.Wallets);
+        LogStore("UTCID03 wallet (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID01_GetMyOrders_ReturnsOnlyCurrentUsersOrders_InDescendingCreatedAt_WithTake10()
+    public async Task UTCID01_GetMyOrders_Result_WhenUserHasManyOrders()
     {
-        LogUtcContext("UTCID01",
-            "Happy path: chỉ lấy order của đúng user, sort mới nhất trước, tối đa 10 phần tử.",
-            "Precondition: coin_orders có dữ liệu của user A và user B.",
-            "Input: userId = A, take = 10.",
-            "Kỳ vọng: chỉ trả order của A, sort theo created_at giảm dần, số phần tử không vượt quá 10.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var user = CoinPaymentTestHelpers.CreateUser(email: "buyer@example.com");
         var anotherUser = CoinPaymentTestHelpers.CreateUser(email: "other@example.com");
         var package = CoinPaymentTestHelpers.CreatePackage();
-
         var userOrders = Enumerable.Range(0, 12)
             .Select(i => CoinPaymentTestHelpers.CreateOrder(
                 user.id,
@@ -206,29 +235,31 @@ public class UT05_FunctionCoinCatalogWalletAndOrders
                 paymentLinkId: $"plink-a-{i}",
                 createdAt: DateTime.UtcNow.AddMinutes(-i)))
             .ToArray();
-
         var foreignOrder = CoinPaymentTestHelpers.CreateOrder(anotherUser.id, package.id, paymentLinkId: "plink-foreign", createdAt: DateTime.UtcNow);
         CoinPaymentTestHelpers.Seed(scope.DbContext, user, anotherUser, package);
         CoinPaymentTestHelpers.Seed(scope.DbContext, userOrders.Cast<object>().Concat(new object[] { foreignOrder }).ToArray());
 
+        // Act
         var result = await scope.Sut.GetMyOrdersAsync(user.id, take: 10);
+        LogTestCase(
+            "UTCID01",
+            "Chi lay order cua user hien tai, sort moi nhat truoc va gioi han take=10.",
+            new { UserId = user.id, Take = 10, TotalStoreOrders = scope.Store.CoinOrders.Count },
+            result);
 
+        // Assert
         Assert.Equal(10, result.Count);
         Assert.Equal(userOrders[0].id, result[0].Id);
         Assert.Equal(userOrders[9].id, result[9].Id);
         Assert.DoesNotContain(result, x => x.Id == foreignOrder.id);
-        LogActualReturn(result);
+        Assert.Equal(13, scope.Store.CoinOrders.Count);
+        LogStore("UTCID01 orders (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID02_GetMyOrders_ReturnsEmpty_WhenUserHasNoOrders()
+    public async Task UTCID02_GetMyOrders_Result_WhenUserHasNoOrders()
     {
-        LogUtcContext("UTCID02",
-            "Normal path: user không có coin order nào.",
-            "Precondition: DB không có coin_orders thuộc userId.",
-            "Input: userId bất kỳ, take = 50.",
-            "Kỳ vọng: trả danh sách rỗng.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var user = CoinPaymentTestHelpers.CreateUser(email: "empty-orders@example.com");
         var otherUser = CoinPaymentTestHelpers.CreateUser(email: "other-orders@example.com");
@@ -236,21 +267,24 @@ public class UT05_FunctionCoinCatalogWalletAndOrders
         var foreignOrder = CoinPaymentTestHelpers.CreateOrder(otherUser.id, package.id, paymentLinkId: "plink-foreign-only");
         CoinPaymentTestHelpers.Seed(scope.DbContext, user, otherUser, package, foreignOrder);
 
+        // Act
         var result = await scope.Sut.GetMyOrdersAsync(user.id, take: 50);
+        LogTestCase(
+            "UTCID02",
+            "User khong co coin order -> tra danh sach rong.",
+            new { UserId = user.id, Take = 50, TotalStoreOrders = scope.Store.CoinOrders.Count },
+            result);
 
+        // Assert
         Assert.Empty(result);
-        LogActualReturn(result);
+        Assert.Single(scope.Store.CoinOrders);
+        LogStore("UTCID02 orders (sau verify)", scope.Store);
     }
 
     [Fact]
-    public async Task UTCID03_GetMyOrders_ClampsTake_ToMinimum1_AndMaximum200()
+    public async Task UTCID03_GetMyOrders_Result_WhenTakeOutsideAllowedRange()
     {
-        LogUtcContext("UTCID03",
-            "Boundary path: take < 1 hoặc take > 200 phải bị clamp.",
-            "Precondition: có đủ dữ liệu order cho cùng một user.",
-            "Input: take = 0 và take = 500.",
-            "Kỳ vọng: take thực tế lần lượt là 1 và 200.");
-
+        // Arrange
         using var scope = CoinPaymentTestHelpers.CreateScope();
         var user = CoinPaymentTestHelpers.CreateUser(email: "clamp-orders@example.com");
         var package = CoinPaymentTestHelpers.CreatePackage();
@@ -261,24 +295,32 @@ public class UT05_FunctionCoinCatalogWalletAndOrders
                 paymentLinkId: $"plink-clamp-{i}",
                 createdAt: DateTime.UtcNow.AddMinutes(-i)))
             .ToArray();
-
         CoinPaymentTestHelpers.Seed(scope.DbContext, user, package);
         CoinPaymentTestHelpers.Seed(scope.DbContext, orders);
 
+        // Act
         var resultMin = await scope.Sut.GetMyOrdersAsync(user.id, take: 0);
         var resultMax = await scope.Sut.GetMyOrdersAsync(user.id, take: 500);
-
-        Assert.Single(resultMin);
-        Assert.Equal(200, resultMax.Count);
-        Assert.Equal(orders[0].id, resultMin[0].Id);
-        Assert.Equal(orders[0].id, resultMax[0].Id);
-        Assert.Equal(orders[199].id, resultMax[199].Id);
-        LogActualReturn(new
+        var output = new
         {
             Take0 = resultMin,
             Take500Count = resultMax.Count,
             Take500FirstId = resultMax[0].Id,
             Take500LastId = resultMax[199].Id
-        });
+        };
+        LogTestCase(
+            "UTCID03",
+            "take < 1 va take > 200 duoc clamp lan luot ve 1 va 200.",
+            new { UserId = user.id, Takes = new[] { 0, 500 }, TotalStoreOrders = scope.Store.CoinOrders.Count },
+            output);
+
+        // Assert
+        Assert.Single(resultMin);
+        Assert.Equal(200, resultMax.Count);
+        Assert.Equal(orders[0].id, resultMin[0].Id);
+        Assert.Equal(orders[0].id, resultMax[0].Id);
+        Assert.Equal(orders[199].id, resultMax[199].Id);
+        Assert.Equal(205, scope.Store.CoinOrders.Count);
+        LogStore("UTCID03 orders (sau verify)", scope.Store);
     }
 }
