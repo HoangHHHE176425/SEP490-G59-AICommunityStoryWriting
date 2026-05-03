@@ -393,53 +393,65 @@ namespace AIStory.Tests
         }
 
         [Fact]
-        public void UTCID08_ApproveChapter_Fail_WhenMustApproveInOrder()
+        public void UTCID08_ApproveChapter_Fail_WhenStoryReviewClaimedByAnotherModerator()
         {
             // Arrange
             var storyId = Guid.NewGuid();
-            var chapterIdOrder0 = Guid.NewGuid();
-            var chapterIdOrder1 = Guid.NewGuid();
+            var chapterId = Guid.NewGuid();
             var moderatorId = Guid.NewGuid();
+            Guid claimedModeratorId;
+            using (var db = new StoryPlatformDbContext())
+            {
+                claimedModeratorId = db.users.Select(u => u.id).FirstOrDefault();
+            }
+            Assert.NotEqual(Guid.Empty, claimedModeratorId);
+            Assert.NotEqual(claimedModeratorId, moderatorId);
+
             var chapterStore = new List<chapters>
             {
                 new()
                 {
-                    id = chapterIdOrder0,
+                    id = chapterId,
                     story_id = storyId,
                     order_index = 0,
-                    status = "DRAFT",
-                    title = "Chương 0: Mở đầu",
-                    published_at = null
-                },
-                new()
-                {
-                    id = chapterIdOrder1,
-                    story_id = storyId,
-                    order_index = 1,
                     status = "PENDING_REVIEW",
-                    title = "Chương 1: Chưa tới lượt",
-                    published_at = null
+                    title = "Chương 1",
+                    content = "nội dung chờ duyệt"
                 }
             };
-            var sut = CreateSut(chapterStore, out var chapterRepoMock, out _, out _);
 
-            // Act — duyệt chương 1 trong khi chương 0 chưa PUBLISHED
-            var ex = Record.Exception(() => sut.ApproveChapter(chapterIdOrder1, moderatorId, null));
+            var claimed = ReviewAssignmentDAO.TryClaim(
+                ReviewAssignmentDAO.TargetTypeStory,
+                storyId,
+                claimedModeratorId,
+                reviewDeadlineUtc: DateTime.UtcNow.AddHours(4));
+            Assert.True(claimed);
+
+            var sut = CreateSut(
+                chapterStore,
+                out var chapterRepoMock,
+                out _,
+                out _,
+                approveEnsureClaimed: ModerationService.EnsureModeratorHasClaimedForReview);
+
+            // Act — moderator khác đã nhận duyệt truyện → không được duyệt chương
+            var ex = Record.Exception(() => sut.ApproveChapter(chapterId, moderatorId, null));
             LogTestCase(
                 "UTCID08",
-                new { chapterId = chapterIdOrder1, moderatorId, storyId, previousChapterOrder0 = chapterIdOrder0 },
+                new { chapterId, moderatorId, storyId, claimedModeratorId, allowedCategoryIds = (IReadOnlyList<Guid>?)null },
                 null,
                 ex,
-                spec: "Publish lần đầu: phải duyệt chương theo thứ tự — chương trước chưa PUBLISHED → fail.");
+                spec: "Truyện đã được moderator khác nhận duyệt — không thể nhận duyệt chương này.");
 
             // Assert
             Assert.NotNull(ex);
             Assert.IsType<InvalidOperationException>(ex);
-            Assert.Contains("Phải duyệt chương theo thứ tự", ex.Message);
-            chapterRepoMock.Verify(x => x.GetByStoryIdAndOrderIndex(storyId, 0), Times.Once);
+            chapterRepoMock.Verify(x => x.GetById(chapterId), Times.Once);
             chapterRepoMock.Verify(x => x.Update(It.IsAny<chapters>()), Times.Never);
             chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, storyId);
         }
+
 
     }
 }

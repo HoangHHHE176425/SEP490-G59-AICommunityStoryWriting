@@ -4,7 +4,14 @@ const TYPE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', AI: 'AI', DE
 
 function formatDate(value) {
     if (!value) return '—';
-    return new Date(value).toLocaleString('vi-VN');
+    const raw = String(value).trim();
+    const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+    const d = new Date(hasTimezone ? raw : `${raw}Z`);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour12: false,
+    });
 }
 
 export function PolicyList({ policies, loading, onView, onEdit, onToggleActive, onDelete }) {

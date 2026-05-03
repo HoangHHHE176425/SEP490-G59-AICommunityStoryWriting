@@ -99,7 +99,7 @@ public class ChapterCheckService : IChapterCheckService
             Summary = summary
         };
     }
-
+    //check tu cam
     public async Task<CheckChapterResponse> CheckBannedWordsOnlyAsync(CheckChapterBannedWordsRequest request, Guid? userId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Content))
@@ -138,7 +138,7 @@ public class ChapterCheckService : IChapterCheckService
                 : "Nội dung có từ cấm/vi phạm chính sách. Xem policyViolations."
         };
     }
-
+    //check chinh ta
     public async Task<CheckChapterResponse> CheckSpellingOnlyAsync(CheckChapterSpellingRequest request, Guid? userId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Content))

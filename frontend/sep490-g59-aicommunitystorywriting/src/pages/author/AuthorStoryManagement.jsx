@@ -3440,9 +3440,9 @@ export function AuthorStoryManagement({ onBack }) {
                                                 <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
                                             </div>
                                             <div>
-                                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 70% cho tác giả, 30% nền tảng</div>
+                                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 30% cho tác giả, 70% nền tảng</div>
                                                 <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
-                                                    Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>30%</b> phí.
+                                                    Các khoản <b>Donate</b> trong lịch sử hiển thị phần tác giả nhận theo tỉ lệ <b>30%</b>.
                                                 </div>
                                             </div>
                                         </div>
@@ -3485,7 +3485,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                         const statusUpper = String(withdrawStatusRaw ?? '').toUpperCase();
                                                         const netReceived = isWithdraw
                                                             ? (statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? Number(amount) : 0)
-                                                            : Math.max(0, Number(amount) - Math.floor(Number(amount) * 0.3));
+                                                            : Math.floor(Math.max(0, Number(amount)) * 0.3);
                                                         const statusLabel =
                                                             statusUpper === 'PENDING' ? 'Chờ xử lý' :
                                                                 statusUpper === 'PENDING_REVIEW' ? 'Chờ xét duyệt' :

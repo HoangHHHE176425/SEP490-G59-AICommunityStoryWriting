@@ -3,6 +3,7 @@ using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Services;
 using Services.DTOs.CommentReports;
 using Services.DTOs.Notifications;
@@ -88,17 +89,20 @@ public class CommentReportService : ICommentReportService
     private readonly INotificationHubNotifier? _notificationHubNotifier;
     private readonly Func<ICreateCommentReportGateway> _createCommentReportGatewayFactory;
     private readonly bool _enableCreateReportNotifications;
+    private readonly ILogger<CommentReportService>? _logger;
 
     public CommentReportService(
         IUserLookup userLookup,
         INotificationHubNotifier? notificationHubNotifier = null,
         Func<ICreateCommentReportGateway>? createCommentReportGatewayFactory = null,
-        bool enableCreateReportNotifications = true)
+        bool enableCreateReportNotifications = true,
+        ILogger<CommentReportService>? logger = null)
     {
         _userLookup = userLookup;
         _notificationHubNotifier = notificationHubNotifier;
         _createCommentReportGatewayFactory = createCommentReportGatewayFactory ?? (() => new EfCreateCommentReportGateway());
         _enableCreateReportNotifications = enableCreateReportNotifications;
+        _logger = logger;
     }
 
     private static void AddCommentIdsFromComplianceAdminMessage(string? message, HashSet<Guid> sink)
@@ -290,6 +294,13 @@ public class CommentReportService : ICommentReportService
         });
 
         await gateway.SaveChangesAsync();
+        _logger?.LogInformation(
+            "Tạo báo cáo thành công: ReportId={ReportId}, CommentId={CommentId}, StoryId={StoryId}, ReporterId={ReporterId}, ReasonCode={ReasonCode}",
+            row.id,
+            commentId,
+            storyId,
+            reporterId,
+            code);
         if (_enableCreateReportNotifications)
             _ = NotifyCommentOwnerReportedAsync(comment, reporterId, request.ReasonCode, desc);
         return row.id;

@@ -144,6 +144,18 @@ function formatOutlineForDisplay(outline) {
                 .join('\n\n');
             return translateCoCreateOutlineLabels(joined);
         }
+        const outlineField = parsed?.outline ?? parsed?.Outline;
+        if (typeof outlineField === 'string' && outlineField.trim()) {
+            let out = normalizeEscapedNewlines(outlineField).trim();
+            const st = (parsed?.suggestedChapterTitle ?? parsed?.SuggestedChapterTitle ?? '').toString().trim();
+            const chars = parsed?.charactersInvolved ?? parsed?.CharactersInvolved;
+            if (st) out = `Tiêu đề gợi ý: ${st}\n\n${out}`;
+            if (Array.isArray(chars) && chars.length) {
+                const names = chars.map((x) => (x != null ? String(x).trim() : '')).filter(Boolean);
+                if (names.length) out += `\n\nNhân vật: ${names.join(', ')}`;
+            }
+            return translateCoCreateOutlineLabels(out);
+        }
     } catch {
         // Không phải JSON, xử lý plain text (chỉ phần không phải block hướng dẫn)
     }

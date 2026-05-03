@@ -1,4 +1,4 @@
-import { User, Mail, Shield, Clock, Ban, CheckCircle, Eye, Phone, AlertCircle } from 'lucide-react';
+import { User, Mail, Shield, Clock, Ban, CheckCircle, Eye, Phone, AlertCircle, Copy } from 'lucide-react';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 import { getUserDisplayName } from '../../../api/admin/userManagementApi';
 
@@ -13,8 +13,26 @@ const STATUS_CONFIG = {
 
 function formatDate(value) {
     if (!value) return '—';
-    const d = new Date(value);
-    return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const raw = String(value).trim();
+    const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+    const d = new Date(hasTimezone ? raw : `${raw}Z`);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour12: false,
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+function shortenId(id) {
+    const s = String(id ?? '').trim();
+    if (!s) return '—';
+    if (s.length <= 12) return s;
+    return `${s.slice(0, 8)}...${s.slice(-4)}`;
 }
 
 export function UserList({ users, onViewDetail, onBlock, onUnblock, loading }) {
@@ -71,7 +89,21 @@ export function UserList({ users, onViewDetail, onBlock, onUnblock, loading }) {
                                                     <User className="w-5 h-5 text-slate-500" />
                                                 )}
                                             </div>
-                                            <span className="font-medium text-slate-800">{getUserDisplayName(user)}</span>
+                                            <div className="min-w-0">
+                                                <span className="block truncate font-medium text-slate-800">{getUserDisplayName(user)}</span>
+                                                <div className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500">
+                                                    <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono">{shortenId(user.id)}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => navigator.clipboard?.writeText(String(user.id ?? ''))}
+                                                        className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                                        title="Sao chép ID đầy đủ"
+                                                        aria-label="Sao chép ID đầy đủ"
+                                                    >
+                                                        <Copy className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
                                         </div>
                                     </td>
                                     <td className="px-4 py-3">

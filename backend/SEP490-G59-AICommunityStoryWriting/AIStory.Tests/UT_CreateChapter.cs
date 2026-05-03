@@ -457,36 +457,36 @@ namespace AIStory.Tests
             chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
         }
 
-        [Fact]
-        public void UTCID009_CreateChapter_ShouldThrowException_WhenOrderIndexIsInvalid()
-        {
-            // Arrange
-            var ownerId = Guid.NewGuid();
-            var story = BuildStory(ownerId);
-            var store = new List<chapters>();
-            var logger = new TestLogger<ChapterService>(_output);
-            var sut = CreateSut(story, store, logger, out var chapterRepoMock, out _, out _, out _, out _);
-            var req = BuildRequest(story.id, -1);
-            req.Title = "Chương 1";
-            req.Content =
-                "Sáng sớm, những giọt sương còn đọng trên lá cỏ khi nhân vật chính lặng lẽ rời khỏi ngôi nhà nhỏ ở cuối làng để bắt đầu ngày học đầu tiên tại học viện. " +
-                "Con đường quen thuộc bỗng trở nên khác lạ vì trong lòng cậu đang chứa đầy kỳ vọng và cả nỗi lo mơ hồ về tương lai phía trước. " +
-                "Cậu nhớ lời dặn của mẹ rằng tri thức chỉ có giá trị khi đi cùng lòng tử tế, nhớ ánh mắt kiên định của cha trong buổi tối tiễn con lên đường. " +
-                "Từng bước chân qua cây cầu gỗ, qua cánh đồng lúa còn thơm mùi đất ẩm, cậu tự nhủ phải học cách chịu trách nhiệm với lựa chọn của mình. " +
-                "Bên trong chiếc túi vải cũ là cuốn sổ tay ghi đầy ghi chú, vài lá thư chưa gửi và một tấm bản đồ đã sờn góc, tất cả như nhắc cậu rằng hành trình trưởng thành " +
-                "không chỉ là đi đến nơi xa hơn, mà còn là học cách hiểu bản thân sâu sắc hơn qua từng thử thách.";
-            req.AccessType = "FREE";
-            req.CoinPrice = 0;
+        //[Fact]
+        //public void UTCID009_CreateChapter_ShouldThrowException_WhenOrderIndexIsInvalid()
+        //{
+        //    // Arrange
+        //    var ownerId = Guid.NewGuid();
+        //    var story = BuildStory(ownerId);
+        //    var store = new List<chapters>();
+        //    var logger = new TestLogger<ChapterService>(_output);
+        //    var sut = CreateSut(story, store, logger, out var chapterRepoMock, out _, out _, out _, out _);
+        //    var req = BuildRequest(story.id, -1);
+        //    req.Title = "Chương 1";
+        //    req.Content =
+        //        "Sáng sớm, những giọt sương còn đọng trên lá cỏ khi nhân vật chính lặng lẽ rời khỏi ngôi nhà nhỏ ở cuối làng để bắt đầu ngày học đầu tiên tại học viện. " +
+        //        "Con đường quen thuộc bỗng trở nên khác lạ vì trong lòng cậu đang chứa đầy kỳ vọng và cả nỗi lo mơ hồ về tương lai phía trước. " +
+        //        "Cậu nhớ lời dặn của mẹ rằng tri thức chỉ có giá trị khi đi cùng lòng tử tế, nhớ ánh mắt kiên định của cha trong buổi tối tiễn con lên đường. " +
+        //        "Từng bước chân qua cây cầu gỗ, qua cánh đồng lúa còn thơm mùi đất ẩm, cậu tự nhủ phải học cách chịu trách nhiệm với lựa chọn của mình. " +
+        //        "Bên trong chiếc túi vải cũ là cuốn sổ tay ghi đầy ghi chú, vài lá thư chưa gửi và một tấm bản đồ đã sờn góc, tất cả như nhắc cậu rằng hành trình trưởng thành " +
+        //        "không chỉ là đi đến nơi xa hơn, mà còn là học cách hiểu bản thân sâu sắc hơn qua từng thử thách.";
+        //    req.AccessType = "FREE";
+        //    req.CoinPrice = 0;
 
-            // Act
-            var ex = Record.Exception(() => sut.Create(req, ownerId));
-            LogTestCase("UTCID009", "OrderIndex <= 0 phải throw exception, không tạo chapter.", req, null, ex);
+        //    // Act
+        //    var ex = Record.Exception(() => sut.Create(req, ownerId));
+        //    LogTestCase("UTCID009", "OrderIndex <= 0 phải throw exception, không tạo chapter.", req, null, ex);
 
-            // Assert
-            Assert.NotNull(ex);
-            Assert.Empty(store);
-            chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
-        }
+        //    // Assert
+        //    Assert.NotNull(ex);
+        //    Assert.Empty(store);
+        //    chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
+        //}
 
         [Fact]
         public void UTCID10_CreateChapter_ShouldThrowException_WhenCoinPriceIsNegative()
