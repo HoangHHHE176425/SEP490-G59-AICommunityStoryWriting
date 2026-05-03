@@ -11,6 +11,8 @@ export function StoryInfoForm({
     disabledProgressOptions = [],
     /** Truyện mới: khóa dropdown trạng thái tiến độ ở «Đang ra». */
     lockStoryProgressStatus = false,
+    /** Khi readOnlyFields (vd. truyện đã public): vẫn cho sửa Trạng thái tiến độ. */
+    allowProgressStatusWhenReadOnly = false,
 }) {
     const lockedFieldStyle = {
         backgroundColor: '#eef2f7',
@@ -53,6 +55,8 @@ export function StoryInfoForm({
         load();
         return () => { cancelled = true; };
     }, []);
+
+    const progressStatusSelectLocked = readOnlyFields && !allowProgressStatusWhenReadOnly;
 
     const getCategoryId = (c) => (typeof c === 'object' && c?.id ? c.id : c);
     const handleCategoryToggle = (category) => {
@@ -226,17 +230,17 @@ export function StoryInfoForm({
                                 <select
                                     value={formData.status}
                                     onChange={(e) => onChange('status', e.target.value)}
-                                    disabled={readOnlyFields}
+                                    disabled={progressStatusSelectLocked}
                                     style={{
                                         width: '100%',
                                         padding: '0.75rem',
-                                        backgroundColor: readOnlyFields ? '#f3f4f6' : '#f9fafb',
+                                        backgroundColor: progressStatusSelectLocked ? '#f3f4f6' : '#f9fafb',
                                         border: '1px solid #e5e7eb',
                                         borderRadius: '4px',
                                         fontSize: '0.875rem',
                                         outline: 'none',
                                         appearance: 'none',
-                                        cursor: readOnlyFields ? 'not-allowed' : 'pointer',
+                                        cursor: progressStatusSelectLocked ? 'not-allowed' : 'pointer',
                                     }}
                                 >
                                     {statusOptions.map((opt) => (

@@ -8,7 +8,11 @@ import { getNotifications, getUnreadCount, markNotificationAsRead, markAllNotifi
 import * as coinApi from '../../api/coins/coinApi';
 import { useToast } from '../author/story-editor/Toast';
 import { isAuthorChapterListActive } from '../../utils/authorUiFlags';
-import { normalizeNotificationTo } from '../../utils/notificationLink';
+import {
+    resolveNotificationTarget,
+    shouldNavigateNotificationOnRowClick,
+    shouldShowOpenRelatedPageButton,
+} from '../../utils/notificationLink';
 
 /** Thông báo mới nhất trên cùng (theo createdAt). */
 function sortNotificationsNewestFirst(list) {
@@ -302,18 +306,6 @@ export function Header() {
         }
     };
 
-    const resolveNotificationTarget = useCallback((notification) => {
-        const linkUrl = notification?.linkUrl ?? notification?.LinkUrl;
-        let target = normalizeNotificationTo(linkUrl);
-        const typeUpper = String(notification?.type ?? notification?.Type ?? '').toUpperCase();
-        if (typeUpper === 'STORY_REPORTED_TO_AUTHOR' || typeUpper === 'COMMENT_REPORTED_TO_OWNER') {
-            const storyMatch = String(linkUrl ?? '').match(/\/story\/([0-9a-fA-F-]{36})/i);
-            const storyId = storyMatch?.[1];
-            target = storyId ? `/author?view=reports&storyId=${encodeURIComponent(storyId)}` : '/author?view=reports';
-        }
-        return target;
-    }, []);
-
     const handleNotificationClick = async (notification) => {
         const notificationId = notification?.id ?? notification?.Id;
         const isRead = notification?.isRead ?? notification?.IsRead ?? false;
@@ -334,6 +326,10 @@ export function Header() {
         }
 
         setIsNotificationOpen(false);
+        if (shouldNavigateNotificationOnRowClick(notification)) {
+            navigate(target);
+            return;
+        }
         setSelectedNotification({
             ...(notification ?? {}),
             isRead: true,
@@ -824,13 +820,15 @@ export function Header() {
                             >
                                 Đóng
                             </button>
-                            <button
-                                type="button"
-                                onClick={handleOpenNotificationTarget}
-                                className="rounded-full bg-primary px-4 py-1.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
-                            >
-                                Mở trang liên quan
-                            </button>
+                            {shouldShowOpenRelatedPageButton(selectedNotification) ? (
+                                <button
+                                    type="button"
+                                    onClick={handleOpenNotificationTarget}
+                                    className="rounded-full bg-primary px-4 py-1.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+                                >
+                                    Mở trang liên quan
+                                </button>
+                            ) : null}
                         </div>
                     </div>
                 </div>

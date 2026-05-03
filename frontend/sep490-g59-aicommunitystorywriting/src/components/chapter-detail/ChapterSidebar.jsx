@@ -1,3 +1,5 @@
+import { Lock, Unlock } from 'lucide-react';
+
 export function ChapterSidebar({ show, chapters, currentChapter, onClose, onChapterSelect }) {
     if (!show) return null;
 
@@ -56,7 +58,11 @@ export function ChapterSidebar({ show, chapters, currentChapter, onClose, onChap
 
                 {/* Chapter List */}
                 <div style={{ padding: '1rem' }}>
-                    {chapters.map((ch) => (
+                    {chapters.map((ch) => {
+                        const coinPrice = Number(ch.coinPrice ?? 0) || 0;
+                        const isPaidChapter = coinPrice > 0;
+                        const isUnlockedPaid = isPaidChapter && ch.isLocked !== true;
+                        return (
                         <button
                             key={ch.number}
                             onClick={() => onChapterSelect(ch)}
@@ -92,17 +98,21 @@ export function ChapterSidebar({ show, chapters, currentChapter, onClose, onChap
                                 <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.125rem 0 0 0' }}>
                                     {ch.title}
                                 </p>
-                                {ch.isLocked && (ch.coinPrice ?? 0) > 0 && (
-                                    <p style={{ fontSize: '0.6875rem', color: '#d97706', margin: '0.125rem 0 0 0' }}>
-                                        🔒 {ch.coinPrice} xu
+                                {isPaidChapter && (
+                                    <p style={{ fontSize: '0.6875rem', color: isUnlockedPaid ? '#059669' : '#d97706', margin: '0.125rem 0 0 0', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                        {isUnlockedPaid ? <Unlock size={12} /> : <Lock size={12} />}
+                                        {coinPrice} xu
                                     </p>
                                 )}
                             </div>
-                            {ch.isLocked && (
-                                <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>🔒</span>
-                            )}
+                            {ch.isLocked ? (
+                                <Lock className="w-4 h-4 text-amber-600 shrink-0" aria-hidden />
+                            ) : isUnlockedPaid ? (
+                                <Unlock className="w-4 h-4 text-emerald-600 shrink-0" aria-hidden />
+                            ) : null}
                         </button>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
         </>

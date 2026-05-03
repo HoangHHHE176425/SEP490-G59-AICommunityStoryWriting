@@ -161,6 +161,7 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
                         onChange={handleInputChange}
                         onImageUpload={handleImageUpload}
                         readOnlyFields={isPublishedStory}
+                        allowProgressStatusWhenReadOnly={isPublishedStory}
                         allowProgressOptions={allowProgressOptions}
                         disabledProgressOptions={disabledProgressOptions}
                     />

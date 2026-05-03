@@ -338,8 +338,9 @@ export function AuthorStoryManagement({ onBack }) {
 
     const parseStoryIdFromNotificationLink = useCallback((linkUrl) => {
         const value = String(linkUrl || '');
-        const match = value.match(/\/story\/([0-9a-fA-F-]{36})/i);
-        return match?.[1] ?? '';
+        const fromStory = value.match(/\/story\/([0-9a-fA-F-]{36})/i);
+        const fromLegacy = value.match(/\/Stories\/Details\/([0-9a-fA-F-]{36})/i);
+        return fromStory?.[1] ?? fromLegacy?.[1] ?? '';
     }, []);
 
     const loadAuthorReportNotifications = useCallback(async () => {
