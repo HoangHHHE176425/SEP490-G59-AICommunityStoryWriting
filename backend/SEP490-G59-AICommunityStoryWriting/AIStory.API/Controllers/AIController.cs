@@ -14,6 +14,7 @@ using Repositories;
 using Services;
 using Services.DTOs.Admin;
 using Services.DTOs.AI;
+using Services.Helpers;
 using Services.Interfaces;
 
 namespace AIStory.API.Controllers
@@ -62,6 +63,7 @@ namespace AIStory.API.Controllers
     [Authorize(Policy = "AuthorOnly")]
     public class AIController : ControllerBase
     {
+        private const int CoCreateAuthorIdeaMaxChars = 1500;
         private readonly IAINextChapterService _aiNextChapterService;
         private readonly IAICoCreationService _aiCoCreationService;
         private readonly IChapterCheckService _chapterCheckService;
@@ -216,6 +218,17 @@ namespace AIStory.API.Controllers
         [HttpPost("co-create")]
         public async Task<IActionResult> CoCreate([FromBody] CoCreationRequest request, CancellationToken cancellationToken)
         {
+            if (request.StoryId == Guid.Empty)
+            {
+                return BadRequest(new { message = "StoryId là bắt buộc." });
+            }
+            // AuthorIdea là tùy chọn (option 1: để trống → AI tự viết theo mạch truyện).
+            var trimmedCoCreateIdea = request.AuthorIdea?.Trim();
+            if (!string.IsNullOrWhiteSpace(trimmedCoCreateIdea) && CoCreateAuthorIdeaLengthHelper.GetDisplayLength(trimmedCoCreateIdea) > CoCreateAuthorIdeaLengthHelper.MaxDisplayLength)
+            {
+                return BadRequest(new { message = $"Ý tưởng tác giả không được vượt quá {CoCreateAuthorIdeaLengthHelper.MaxDisplayLength} ký tự." });
+            }
+
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))
             {
