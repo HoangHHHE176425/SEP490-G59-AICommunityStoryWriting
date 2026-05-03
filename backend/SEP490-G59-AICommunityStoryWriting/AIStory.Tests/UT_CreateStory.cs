@@ -571,6 +571,7 @@ namespace AIStory.Tests
             // Assert
             Assert.NotNull(ex);
             Assert.Empty(storyStore);
+            Assert.IsType<InvalidOperationException>(ex);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
             userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
             userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
@@ -632,6 +633,7 @@ namespace AIStory.Tests
             // Assert
             Assert.NotNull(ex);
             Assert.Empty(storyStore);
+            Assert.IsType<InvalidOperationException>(ex);
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Never);
             userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
             userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);

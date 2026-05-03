@@ -7,6 +7,13 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 
+	<!-- Khớp với Services.csproj: bỏ comment khi bật STORY_CREATE_SKIP_AUTHOR_EXISTS_UTCID03 để UTCID03 bị Skip thay vì fail. -->
+	<!--
+	<PropertyGroup>
+		<DefineConstants>$(DefineConstants);STORY_CREATE_SKIP_AUTHOR_EXISTS_UTCID03</DefineConstants>
+	</PropertyGroup>
+	-->
+
 	<ItemGroup>
 		<PackageReference Include="coverlet.collector" Version="6.0.4" />
 		<PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="9.0.0" />

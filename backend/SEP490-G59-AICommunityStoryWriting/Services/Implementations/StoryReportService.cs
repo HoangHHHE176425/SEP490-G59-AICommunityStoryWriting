@@ -34,6 +34,8 @@ public class StoryReportService : IStoryReportService
     {
         compliance_admin_action_requests? GetTrackedById(Guid requestId);
         stories? GetStoryById(Guid storyId);
+        /// <summary>Chỉ ADMIN ACTIVE mới được resolve đơn compliance (gateway thực tế tra DB).</summary>
+        bool CanUserResolveComplianceAdminAction(Guid userId);
         void MarkResolved(Guid requestId, Guid adminId, string finalStatus, string? adminNote, string resolutionAction);
         void SetUserAccountStatus(Guid userId, string status);
         void RunBannedAuthorModerationSweep();
@@ -45,6 +47,17 @@ public class StoryReportService : IStoryReportService
     {
         public compliance_admin_action_requests? GetTrackedById(Guid requestId) => ComplianceAdminActionRequestDAO.GetTrackedById(requestId);
         public stories? GetStoryById(Guid storyId) => StoryDAO.GetById(storyId);
+
+        public bool CanUserResolveComplianceAdminAction(Guid userId)
+        {
+            if (userId == Guid.Empty) return false;
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == userId);
+            if (u == null) return false;
+            if (!string.Equals(u.status, "ACTIVE", StringComparison.OrdinalIgnoreCase)) return false;
+            return string.Equals((u.role ?? "").Trim(), "ADMIN", StringComparison.OrdinalIgnoreCase);
+        }
+
         public void MarkResolved(Guid requestId, Guid adminId, string finalStatus, string? adminNote, string resolutionAction) =>
             ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId, finalStatus, adminNote, resolutionAction);
         public void SetUserAccountStatus(Guid userId, string status) => UserDAO.SetUserAccountStatus(userId, status);
@@ -1209,12 +1222,25 @@ public class StoryReportService : IStoryReportService
         if (dto.AdminNote != null && dto.AdminNote.Length > 2000)
             throw new ArgumentException("Ký tự quá dài: mô tả tối đa 2000 ký tự.");
 
+        var descriptionTrimmed = (dto.Description ?? "").Trim();
+        if (descriptionTrimmed.Length > UserReportDescriptionRules.MaxLength)
+            throw new ArgumentException($"Mô tả tối đa {UserReportDescriptionRules.MaxLength} ký tự.");
+
         var decision = (dto.Decision ?? "").Trim().ToUpperInvariant();
         if (decision is not ("APPROVE" or "REJECT"))
             throw new ArgumentException("Decision phải là APPROVE hoặc REJECT.");
 
+        if (string.IsNullOrWhiteSpace(dto.ReasonCode) || !StoryReportReasonCatalog.TryGet(dto.ReasonCode, out _))
+            throw new ArgumentException("Invalid reason code.");
+
+        if (adminId == Guid.Empty)
+            throw new InvalidOperationException("USER không tồn tại.");
+
+        if (!_adminComplianceGateway.CanUserResolveComplianceAdminAction(adminId))
+            throw new InvalidOperationException("Chỉ quản trị viên (ADMIN) mới được xử lý yêu cầu.");
+
         var row = _adminComplianceGateway.GetTrackedById(requestId)
-                  ?? throw new InvalidOperationException("Yêu cầu không tồn tại.");
+                  ?? throw new InvalidOperationException("Không tìm thấy comment.");
         if (row.status != ComplianceAdminActionRequestDAO.StatusPending)
             throw new InvalidOperationException("Yêu cầu đã xử lý.");
 
@@ -1235,6 +1261,7 @@ public class StoryReportService : IStoryReportService
         {
             _adminComplianceGateway.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusRejected, dto.AdminNote, "REJECT");
+            _logger.LogInformation("Xử lý yêu cầu thành công");
             return;
         }
 
@@ -1247,6 +1274,7 @@ public class StoryReportService : IStoryReportService
                 dto.AdminNote ?? row.message, "ADMIN_APPROVE_COMPLIANCE_REQUEST");
             _adminComplianceGateway.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusApproved, dto.AdminNote, "BAN_USER");
+            _logger.LogInformation("Xử lý yêu cầu thành công");
             if (_enableAdminActionNotifications)
             {
                 await TrySendAccountBannedByAdminApprovalEmailAsync(
@@ -1280,6 +1308,7 @@ public class StoryReportService : IStoryReportService
                 dto.AdminNote ?? row.message, until.Value.ToString("O"));
             _adminComplianceGateway.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusApproved, dto.AdminNote, "SUSPEND_WRITING");
+            _logger.LogInformation("Xử lý yêu cầu thành công");
             if (_enableAdminActionNotifications)
             {
                 await NotifyTargetUserComplianceAdminActionApprovedAsync(

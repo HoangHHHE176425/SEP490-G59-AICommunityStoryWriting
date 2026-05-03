@@ -79,6 +79,7 @@ namespace AIStory.Tests
             ragService = new Mock<IStoryRagService>(MockBehavior.Strict);
             memoryEngine = new Mock<IStoryMemoryEngine>(MockBehavior.Strict);
             usageLog = new Mock<IAIUsageLogRepository>(MockBehavior.Strict);
+            usageLog.Setup(x => x.GetMaxTotalTokensForStoryAndActionType(It.IsAny<Guid>(), It.IsAny<string>())).Returns((int?)null);
             userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
             budgetMock = new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Strict);
             configuration ??= new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
