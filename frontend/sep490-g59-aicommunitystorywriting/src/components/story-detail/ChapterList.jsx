@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { BookOpen, Clock, MessageCircle, ChevronRight, Lock, X } from 'lucide-react';
+import { BookOpen, Clock, MessageCircle, ChevronRight, Lock, Unlock, X } from 'lucide-react';
 
 export function ChapterList({ chapters, storyId, lastReadChapterId }) {
     const navigate = useNavigate();
@@ -26,6 +26,9 @@ export function ChapterList({ chapters, storyId, lastReadChapterId }) {
                         ? `/chapter?storyId=${encodeURIComponent(storyId)}&chapterId=${encodeURIComponent(chapter.chapterId)}`
                         : '#';
                     const isLocked = chapter.isLocked === true;
+                    const accessUpper = String(chapter.accessType ?? '').toUpperCase();
+                    const isPaidChapter = accessUpper === 'PAID' && (chapter.coinPrice ?? 0) > 0;
+                    const isUnlockedPaid = isPaidChapter && chapter.isUnlocked === true;
                     // Chỉ chặn bằng modal khi FE chắc chắn trạng thái khóa từ API.
                     // Không hiển thị modal thanh toán ở danh sách chương.
                     // ChapterReader sẽ tự quyết định hiển thị nội dung hay phần thanh toán theo trạng thái mở khóa thật từ API.
@@ -45,6 +48,10 @@ export function ChapterList({ chapters, storyId, lastReadChapterId }) {
                                 {chapter.isLocked ? (
                                     <div className="w-6 h-6 rounded bg-amber-100 dark:bg-amber-950/30 flex items-center justify-center shrink-0">
                                         <Lock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                                    </div>
+                                ) : isUnlockedPaid ? (
+                                    <div className="w-6 h-6 rounded bg-emerald-100 dark:bg-emerald-950/30 flex items-center justify-center shrink-0">
+                                        <Unlock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                                     </div>
                                 ) : (
                                     <div className="w-6 h-6 rounded bg-primary/10 flex items-center justify-center shrink-0">
@@ -71,7 +78,7 @@ export function ChapterList({ chapters, storyId, lastReadChapterId }) {
                                                 Chương sử dụng AI{chapter.aiContributionRatio > 0 ? `: ${Number(chapter.aiContributionRatio).toFixed(1)}%` : ''}
                                             </span>
                                         )}
-                                        {chapter.isLocked && (chapter.coinPrice ?? 0) > 0 && (
+                                        {isPaidChapter && (chapter.coinPrice ?? 0) > 0 && (
                                             <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-xs font-semibold rounded shrink-0">
                                                 {chapter.coinPrice} xu
                                             </span>

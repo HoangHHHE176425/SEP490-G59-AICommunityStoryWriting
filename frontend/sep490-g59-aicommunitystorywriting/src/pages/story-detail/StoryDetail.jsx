@@ -218,22 +218,47 @@ export function StoryDetail() {
                     const rawItems = Array.isArray(chaptersRes) ? chaptersRes : (chaptersRes?.items ?? chaptersRes?.Items ?? []);
                     let chapterItemsWithAi = await Promise.all(
                         rawItems.map(async (ch) => {
+                            const chapterId = ch?.id ?? ch?.Id;
+                            const accessType = (ch.accessType ?? ch.AccessType ?? 'FREE').toUpperCase();
+                            const coinPrice = Number(ch.coinPrice ?? ch.CoinPrice ?? 0) || 0;
+                            const isPaid = accessType === 'PAID' && coinPrice > 0;
+
                             const hasAiField =
                                 ch?.aiContributionRatio != null ||
                                 ch?.AiContributionRatio != null ||
                                 ch?.aiSimilarityPercent != null ||
                                 ch?.AiSimilarityPercent != null;
-                            if (hasAiField) return ch;
 
-                            const chapterId = ch?.id ?? ch?.Id;
                             if (!chapterId) return ch;
 
-                            try {
-                                const details = await getChapterById(chapterId);
-                                return { ...ch, ...details };
-                            } catch {
-                                return ch;
+                            if (!hasAiField) {
+                                try {
+                                    const details = await getChapterById(chapterId);
+                                    return { ...ch, ...details };
+                                } catch {
+                                    return ch;
+                                }
                             }
+
+                            if (isPaid && user?.id) {
+                                try {
+                                    const details = await getChapterById(chapterId);
+                                    const rawUn =
+                                        details?.isUnlocked ??
+                                        details?.IsUnlocked ??
+                                        details?.unlocked ??
+                                        details?.Unlocked;
+                                    return {
+                                        ...ch,
+                                        isUnlocked: Boolean(rawUn),
+                                        IsUnlocked: Boolean(rawUn),
+                                    };
+                                } catch {
+                                    return ch;
+                                }
+                            }
+
+                            return ch;
                         })
                     );
                     const hasAnyAiField = chapterItemsWithAi.some((ch) => extractChapterAiPercent(ch) > 0);
@@ -381,6 +406,7 @@ export function StoryDetail() {
                             commentCount: Number(ch.commentCount ?? ch.CommentCount ?? 0) || 0,
                             isNew: idx >= chapterItemsWithAi.length - newCount,
                             isLocked: isPaidLocked,
+                            isUnlocked,
                             unlockKnown,
                             accessType,
                             coinPrice,
@@ -439,7 +465,7 @@ export function StoryDetail() {
             cancelled = true;
             clearTimeout(id);
         };
-    }, [storyId, viewerKey]);
+    }, [storyId, viewerKey, user?.id]);
 
     useEffect(() => {
         let cancelled = false;
@@ -562,6 +588,13 @@ export function StoryDetail() {
         };
     }, [user?.id, reviews]);
 
+    const isStoryOwner = useMemo(() => {
+        if (!user?.id || !story?.author) return false;
+        const uid = String(user.id).toLowerCase();
+        const aid = String(story.author?.id ?? story.author?.userId ?? '').toLowerCase();
+        return !!aid && uid === aid;
+    }, [user?.id, story?.author]);
+
     /** Đồng bộ với BE (READ_CHAPTER): có tiến độ đọc chương từ getStoryById. */
     const hasReadAnyChapter = Boolean(story?.lastReadChapterId);
 
@@ -617,6 +650,10 @@ export function StoryDetail() {
 
     const handleSubmitRating = async (starValue, reviewText) => {
         if (!storyId) return;
+        if (isStoryOwner) {
+            setRatingError('Không thể tự đánh giá.');
+            return;
+        }
         if (!user?.id) {
             setRatingError('Vui lòng đăng nhập để đánh giá.');
             return;
@@ -649,6 +686,10 @@ export function StoryDetail() {
 
     const handleOpenRating = () => {
         if (hasUserRated) return; // Mỗi user chỉ được đánh giá 1 lần
+        if (isStoryOwner) {
+            showToast('Không thể tự đánh giá.', 'warning');
+            return;
+        }
         if (!user?.id) {
             showToast('Vui lòng đăng nhập để đánh giá.', 'warning');
             return;
@@ -678,6 +719,10 @@ export function StoryDetail() {
 
     const handleToggleFollow = async () => {
         if (!storyId) return;
+        if (isStoryOwner) {
+            showToast('Bạn không thể theo dõi truyện của chính mình.', 'warning');
+            return;
+        }
         if (!user?.id) {
             showToast('Vui lòng đăng nhập để theo dõi truyện.', 'warning');
             return;
@@ -807,6 +852,7 @@ export function StoryDetail() {
                             userRatingStars={userRatingStars}
                             isLoggedIn={!!user?.id}
                             hasReadAnyChapter={hasReadAnyChapter}
+                            isStoryOwner={isStoryOwner}
                             onOpenReport={handleOpenStoryReport}
                             onReadStory={() => {
                                 const first = chapters[0];
