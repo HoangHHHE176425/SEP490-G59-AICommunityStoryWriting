@@ -7,6 +7,7 @@ using Services.DTOs.Community;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 using System.Globalization;
+using System.IO;
 using System.Text;
 
 namespace Services.Implementations
@@ -56,6 +57,9 @@ namespace Services.Implementations
                     "AuthorId không tồn tại trong bảng users. Vui lòng kiểm tra DefaultAuthorIdForStories trong appsettings.json (dùng Guid của user có trong bảng users).");
             }
 
+            if (!_userLookup.IsAuthor(authorId))
+                throw new InvalidOperationException("Chỉ tài khoản Author mới được tạo truyện.");
+
             if (_userLookup.IsAuthorWritingSuspended(authorId))
                 throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
 
@@ -69,7 +73,7 @@ namespace Services.Implementations
                 var category = _categoryLookup.GetById(categoryId);
                 if (category == null)
                     throw new InvalidOperationException($"Category with ID {categoryId} not found.");
-                if (!category.is_active ?? false)
+                if (!(category.is_active ?? false))
                     throw new InvalidOperationException($"Category '{category.name}' is not active.");
             }
 
@@ -82,7 +86,12 @@ namespace Services.Implementations
             if (string.IsNullOrWhiteSpace(coverImageUrl))
                 throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
 
-            if (!string.IsNullOrEmpty(request.Summary) && request.Summary.Length > StorySummaryMaxLength)
+            ValidateCreateStoryCoverImageUrl(coverImageUrl);
+
+            if (string.IsNullOrWhiteSpace(request.Summary))
+                throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
+
+            if (request.Summary.Length > StorySummaryMaxLength)
                 throw new ArgumentException($"Mô tả truyện vượt quá giới hạn cho phép (tối đa {StorySummaryMaxLength} ký tự).");
 
             // Nhiều truyện được phép cùng tiêu đề hiển thị: slug suy từ title có thể trùng → thêm hậu tố số cho đến khi unique (UTCID02).
@@ -816,7 +825,37 @@ namespace Services.Implementations
             };
         }
 
-        /// <summary>Slug duy nhất trong DB; <paramref name="excludeStoryId"/> dùng khi đổi title (giữ/ghép slug cho đúng bản ghi hiện tại).</summary>
+        private static void ValidateCreateStoryCoverImageUrl(string coverImageUrl)
+        {
+            var trimmed = coverImageUrl.Trim();
+            var pathForExt = trimmed;
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+            {
+                pathForExt = uri.AbsolutePath;
+                if (uri.Query.Length > 1)
+                {
+                    var query = uri.Query.TrimStart('?');
+                    foreach (var segment in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var eq = segment.IndexOf('=');
+                        if (eq <= 0)
+                            continue;
+                        var key = segment[..eq];
+                        var val = segment[(eq + 1)..];
+                        if (!string.Equals(key, "sizeMb", StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        if (double.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var mb) && mb > 5)
+                            throw new ArgumentException("Cover image exceeds 5MB limit.");
+                    }
+                }
+            }
+
+            var ext = Path.GetExtension(pathForExt).ToLowerInvariant();
+            var allowed = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
+            if (!allowed.Contains(ext))
+                throw new ArgumentException("Invalid cover image file type. Allowed: jpg, jpeg, png, gif, webp.");
+        }
+
         private string AllocateUniqueSlug(string baseSlug, Guid? excludeStoryId)
         {
             var normalizedBase = string.IsNullOrWhiteSpace(baseSlug) ? "story" : baseSlug.Trim();
