@@ -81,6 +81,7 @@ namespace AIStory.Tests
             memoryEngine = new Mock<IStoryMemoryEngine>(MockBehavior.Strict);
             guardrail = new Mock<IContentGuardrailService>(MockBehavior.Strict);
             usageLog = new Mock<IAIUsageLogRepository>(MockBehavior.Strict);
+            usageLog.Setup(x => x.SumCoCreatePipelineStepMaxTotals(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(0);
             budgetMock = new Mock<IAuthorAiTokenBudgetService>(MockBehavior.Strict);
             ragServiceMock = new Mock<IStoryRagService>(MockBehavior.Loose);
             ragServiceMock.Setup(x => x.GetRagStatus(It.IsAny<Guid>())).Returns(new RagStatusResponse { EmbeddingConfigured = true });

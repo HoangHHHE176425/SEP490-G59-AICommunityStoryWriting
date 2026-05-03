@@ -82,7 +82,14 @@ Quy tắc bắt buộc:
                 throw;
             }
 
-            var minSuggestTokens = _configuration.GetValue("AI:SuggestMinRequiredTokens", 3800);
+            var useHistoryMin = _configuration.GetValue("AI:UseHistoryBasedMinRequiredTokens", true);
+            var historyBuffer = _configuration.GetValue("AI:MinRequiredTokensHistoryBuffer", 3000);
+            var suggestFallbackMin = _configuration.GetValue("AI:SuggestMinRequiredTokens", 3800);
+            var historyMaxSuggest = useHistoryMin
+                ? _aiUsageLogRepository.GetMaxTotalTokensForStoryAndActionType(request.StoryId, ActionType)
+                : null;
+            var minSuggestTokens = AiMinRequiredTokensResolver.ResolveMinRequiredTokens(
+                useHistoryMin, historyMaxSuggest, suggestFallbackMin, historyBuffer);
             if (minSuggestTokens > 0)
             {
                 var budgetDto = await _authorAiTokenBudget.GetBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);

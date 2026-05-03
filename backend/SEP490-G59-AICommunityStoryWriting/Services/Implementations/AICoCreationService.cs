@@ -1,5 +1,6 @@
 using System.ClientModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using BusinessObjects.Entities;
@@ -19,12 +20,14 @@ namespace Services.Implementations;
 /// <summary>Đồng sáng tác: Dàn ý → Viết → (tùy chọn) tự sửa từ cấm bằng Agent 2 → guardrail lần cuối; có thể mở rộng độ dài tối thiểu.</summary>
 public class AICoCreationService : IAICoCreationService
 {
-    private const int AuthorIdeaMaxChars = 1500;
+    private const int DefaultEmbeddingQueryMaxChars = 6000;
+    private const int AuthorIdeaMaxChars = DefaultEmbeddingQueryMaxChars;
     private const int MinDraftWordCount = 500;
     private const int ExpandTargetWords = 560;
-    private const int DefaultEmbeddingRagQueryMaxChars = 10000;
     private const string ActionOutline = "CO_CREATE_OUTLINE";
-    private const string ActionWrite = "CO_CREATE_WRITE";
+    private const string ActionWriteDraft = "CO_CREATE_WRITE_DRAFT";
+    private const string ActionWriteExpand = "CO_CREATE_WRITE_EXPAND";
+    private const string ActionWriteLegacy = "CO_CREATE_WRITE";
     private const string ActionWriteCorrect = "CO_CREATE_WRITE_CORRECT";
 
     /// <summary>Quy tắc bắt buộc (Constitutional): đưa vào system prompt mọi agent.</summary>
@@ -113,7 +116,20 @@ Quy tắc bắt buộc:
             throw;
         }
 
-        var minCoCreateTokens = _configuration.GetValue("AI:CoCreateMinRequiredTokens", 14000);
+        var useHistoryMin = _configuration.GetValue("AI:UseHistoryBasedMinRequiredTokens", true);
+        var historyBuffer = _configuration.GetValue("AI:MinRequiredTokensHistoryBuffer", 3000);
+        var coCreateFallbackMin = _configuration.GetValue("AI:CoCreateMinRequiredTokens", 14000);
+        var historyStepSum = useHistoryMin
+            ? _aiUsageLogRepository.SumCoCreatePipelineStepMaxTotals(
+                request.StoryId,
+                ActionOutline,
+                ActionWriteDraft,
+                ActionWriteExpand,
+                ActionWriteCorrect,
+                ActionWriteLegacy)
+            : 0;
+        var minCoCreateTokens = AiMinRequiredTokensResolver.ResolveCoCreateMinRequiredFromHistoryStepSum(
+            useHistoryMin, historyStepSum, coCreateFallbackMin, historyBuffer);
         if (minCoCreateTokens > 0)
         {
             var budgetDto = await _authorAiTokenBudget.GetBudgetAsync(authorUserId, cancellationToken).ConfigureAwait(false);
@@ -247,7 +263,7 @@ Quy tắc bắt buộc:
             swWrite.ElapsedMilliseconds);
 
         //ghi log token/cost cho bước viết bản nháp đầu tiên của Agent 2
-        LogUsageFromCompletion(authorUserId, request.StoryId, null, ActionWrite, m2, writeCompletion);
+        LogUsageFromCompletion(authorUserId, request.StoryId, null, ActionWriteDraft, m2, writeCompletion);
         //check từ cấm 
         var (draftAfterRefine, approved, reviewFeedback, revisionCount) = await RefineDraftWithSelfCorrectionAsync(
             clientWriter,
@@ -284,7 +300,7 @@ Quy tắc bắt buộc:
             draft = StripTrailingFeedbackFromDraft(draft);
             durations.Add(new AgentDuration { Step = "Length_Expand", DurationMs = swExpand.ElapsedMilliseconds });
             //ghi log token/cost cho bước mở rộng độ dài
-            LogUsageFromCompletion(authorUserId, request.StoryId, null, ActionWrite, m2, expandCompletion);
+            LogUsageFromCompletion(authorUserId, request.StoryId, null, ActionWriteExpand, m2, expandCompletion);
             //chạy lại check từ cấm sau khi thêm nội dung mở rộng, nếu vẫn còn từ cấm hoặc lỗi chính tả thì tiếp tục sửa (có thể sửa nhiều lần nếu vẫn còn vấn đề sau lần sửa đầu tiên)
             var (draftExpanded, expandApproved, expandReviewFeedback, expandRewrites) = await RefineDraftWithSelfCorrectionAsync(
                 clientWriter,
@@ -378,7 +394,7 @@ Quy tắc bắt buộc:
         return allOrdered.Count == 0 ? 0 : allOrdered.Max(c => c.order_index) + 1;
     }
 
-    /// <summary>Khi tác giả không nhập gợi ý: nội dung chương publish mới nhất làm query RAG; nếu vượt ngưỡng embedding thì chỉ lấy đoạn cuối (cùng AI:EmbeddingQueryMaxChars với StoryRagService).</summary>
+    /// <summary>Khi tác giả không nhập gợi ý: nội dung chương publish mới nhất làm query RAG; nếu vượt ngưỡng thì chỉ lấy đoạn cuối (mặc định 6000 ký tự, cấu hình AI:EmbeddingQueryMaxChars, đồng bộ StoryRagService).</summary>
     private string CoCreateRagQueryFromLatestPublishedChapter(Guid storyId, string? storyTitleFallback)
     {
         var latestPublished = _chapterRepository
@@ -389,9 +405,9 @@ Quy tắc bắt buộc:
         var latestContent = latestPublished?.content?.Trim();
         if (!string.IsNullOrWhiteSpace(latestContent))
         {
-            var maxChars = _configuration.GetValue("AI:EmbeddingQueryMaxChars", DefaultEmbeddingRagQueryMaxChars);
+            var maxChars = _configuration.GetValue("AI:EmbeddingQueryMaxChars", DefaultEmbeddingQueryMaxChars);
             if (maxChars < 256)
-                maxChars = DefaultEmbeddingRagQueryMaxChars;
+                maxChars = DefaultEmbeddingQueryMaxChars;
             if (latestContent.Length > maxChars)
                 return latestContent[^maxChars..];
             return latestContent;

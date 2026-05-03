@@ -14,7 +14,7 @@ public class StoryRagService : IStoryRagService
     private const int ChunkOverlapChars = 80;
     private const int DefaultEmbeddingBatchSize = 20;
     private const int DefaultDelayBetweenBatchesMs = 500;
-    private const int DefaultEmbeddingQueryMaxChars = 10000;
+    private const int DefaultEmbeddingQueryMaxChars = 6000;
 
     private readonly IStoryRepository _storyRepository;
     private readonly IChapterRepository _chapterRepository;
@@ -178,7 +178,7 @@ public class StoryRagService : IStoryRagService
             return null;
 
         var (baseUrl, apiKey, model) = config.Value;
-        int maxQueryChars = _configuration.GetValue("AI:EmbeddingQueryMaxChars", DefaultEmbeddingQueryMaxChars);
+        var maxQueryChars = _configuration.GetValue("AI:EmbeddingQueryMaxChars", DefaultEmbeddingQueryMaxChars);
         if (maxQueryChars < 256)
             maxQueryChars = DefaultEmbeddingQueryMaxChars;
         var q = query?.Trim() ?? "";
