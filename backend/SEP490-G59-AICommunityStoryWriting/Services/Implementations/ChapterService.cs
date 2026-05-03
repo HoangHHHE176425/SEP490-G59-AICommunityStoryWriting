@@ -9,6 +9,7 @@ using Repositories;
 using Services.DTOs.Chapters;
 using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
+using Services.Helpers;
 using Services.Interfaces;
 
 namespace Services.Implementations
@@ -938,14 +939,7 @@ namespace Services.Implementations
         }
 
         private int CalculateWordCount(string? content)
-        {
-            if (string.IsNullOrWhiteSpace(content))
-                return 0;
-
-            return content
-                .Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
-                .Length;
-        }
+            => ChapterContentNormalizer.CountWords(content);
 
         private void EnsureUniqueChapterTitleForStory(Guid storyId, string? title, Guid? excludeChapterId)
         {

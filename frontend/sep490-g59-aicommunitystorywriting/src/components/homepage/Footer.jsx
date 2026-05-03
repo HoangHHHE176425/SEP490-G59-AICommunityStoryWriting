@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Share2, Bot, Users, Award, Shield } from 'lucide-react';
+import { Share2, Bot, Users, Award, Shield, Mail, Phone } from 'lucide-react';
 
 export function Footer() {
     return (
@@ -66,6 +66,21 @@ export function Footer() {
                         </li>
                         <li><Link to="/faq" className="hover:text-primary transition-colors">Câu hỏi thường gặp</Link></li>
                         <li><Link to="/about-us" className="hover:text-primary transition-colors">Về chúng tôi</Link></li>
+                        <li className="flex items-start gap-2 pt-1">
+                            <Mail className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                            <a
+                                href="mailto:aicommunitystorywriting@gmail.com"
+                                className="hover:text-primary transition-colors break-all"
+                            >
+                                aicommunitystorywriting@gmail.com
+                            </a>
+                        </li>
+                        <li className="flex items-center gap-2">
+                            <Phone className="w-4 h-4 text-primary shrink-0" />
+                            <a href="tel:0904895575" className="hover:text-primary transition-colors">
+                                0904 895 575
+                            </a>
+                        </li>
                     </ul>
                 </div>
             </div>

@@ -36,9 +36,15 @@ function formatVnd(amount) {
 }
 
 function formatTime(iso) {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString('vi-VN');
+    if (!iso) return '—';
+    const raw = String(iso).trim();
+    const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+    const d = new Date(hasTimezone ? raw : `${raw}Z`);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour12: false,
+    });
 }
 
 function statusPill(status) {

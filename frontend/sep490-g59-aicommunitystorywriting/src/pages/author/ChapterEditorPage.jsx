@@ -9,13 +9,7 @@ import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 import { refresh as refreshAuth } from '../../api/auth/authApi';
 import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
 import { stripHtmlToText } from '../../utils/richText';
-
-// Helper function to count words
-const countWords = (text) => {
-    const plain = stripHtmlToText(text);
-    if (!plain) return 0;
-    return plain.split(/\s+/).filter(word => word.length > 0).length;
-};
+import { countChapterWords as countWords } from '../../utils/chapterWordCount';
 
 const MIN_PAID_COIN_PRICE = 10;
 const MAX_PAID_COIN_PRICE = 100;
@@ -149,6 +143,18 @@ function formatOutlineForDisplay(outline) {
                 })
                 .join('\n\n');
             return translateCoCreateOutlineLabels(joined);
+        }
+        const outlineField = parsed?.outline ?? parsed?.Outline;
+        if (typeof outlineField === 'string' && outlineField.trim()) {
+            let out = normalizeEscapedNewlines(outlineField).trim();
+            const st = (parsed?.suggestedChapterTitle ?? parsed?.SuggestedChapterTitle ?? '').toString().trim();
+            const chars = parsed?.charactersInvolved ?? parsed?.CharactersInvolved;
+            if (st) out = `Tiêu đề gợi ý: ${st}\n\n${out}`;
+            if (Array.isArray(chars) && chars.length) {
+                const names = chars.map((x) => (x != null ? String(x).trim() : '')).filter(Boolean);
+                if (names.length) out += `\n\nNhân vật: ${names.join(', ')}`;
+            }
+            return translateCoCreateOutlineLabels(out);
         }
     } catch {
         // Không phải JSON, xử lý plain text (chỉ phần không phải block hướng dẫn)

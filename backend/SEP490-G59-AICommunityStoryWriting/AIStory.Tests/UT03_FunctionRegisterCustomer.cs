@@ -1,9 +1,11 @@
-using AIStory.Services.Implementations;
+﻿using AIStory.Services.Implementations;
 using BusinessObjects.Entities;
 using Moq;
 using Repositories.Interfaces;
 using Services.DTOs.Auth;
 using Services.Interfaces;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Xunit.Abstractions;
 
 namespace AIStory.Tests
@@ -15,506 +17,533 @@ namespace AIStory.Tests
 
         public UT03_FunctionRegisterCustomer(ITestOutputHelper output) => _output = output;
 
-        private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
+        private sealed record SentEmail(string To, string Subject, string Body);
+
+        private static readonly JsonSerializerOptions _jsonOptions = new()
+        {
+            WriteIndented = true,
+            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            ReferenceHandler = ReferenceHandler.IgnoreCycles
+        };
+
+        private void LogTestCase(string utcId, string spec, object? input, object? output, Exception? ex = null)
         {
             _output.WriteLine("");
-            _output.WriteLine($"======== {utcId} | UT03 RegisterCustomer ========");
-            _output.WriteLine(oneLineGoal);
-            foreach (var line in details)
-                _output.WriteLine("  · " + line);
+            _output.WriteLine($"========== {utcId} ==========");
+            _output.WriteLine($"SPEC   : {spec}");
+            _output.WriteLine($"INPUT  : {JsonSerializer.Serialize(input, _jsonOptions)}");
+
+            if (ex != null)
+            {
+                _output.WriteLine("OUTPUT : ERROR");
+                _output.WriteLine($"Exception type: {ex.GetType().Name}");
+                _output.WriteLine($"Message: {ex.Message}");
+            }
+            else
+            {
+                _output.WriteLine("OUTPUT : SUCCESS");
+                _output.WriteLine($"RESULT : {JsonSerializer.Serialize(output, _jsonOptions)}");
+            }
         }
 
-        private void LogActualMessage(string message)
+        private void LogStores(string label, IReadOnlyList<users> userStore, IReadOnlyList<otp_verifications> otpStore, IReadOnlyList<SentEmail> sentEmails)
         {
-            var line = "Actual log message: " + message;
-            _output.WriteLine(line);
-            Console.WriteLine(line);
-        }
+            _output.WriteLine("");
+            _output.WriteLine($"======== {label} - stores ========");
+            _output.WriteLine($"Users: {userStore.Count}, Otp: {otpStore.Count}, SentEmails: {sentEmails.Count}");
 
-        private void LogRegisterSuccess(users user, otp_verifications? otp = null, string? email = null)
-        {
-            var line =
-                $"Actual log message: Register succeeded. UserStatus={user.status}, Nickname={user.user_profiles?.nickname}, OtpGenerated={(otp != null)}, EmailTarget={email ?? user.email}";
-            _output.WriteLine(line);
-            Console.WriteLine(line);
+            foreach (var user in userStore)
+            {
+                _output.WriteLine($"  user id={user.id}, email={user.email}, status={user.status}, nickname={user.user_profiles?.nickname}");
+            }
+
+            foreach (var otp in otpStore)
+            {
+                _output.WriteLine($"  otp id={otp.id}, user_id={otp.user_id}, type={otp.type}, code={otp.otp_code}, is_used={otp.is_used}");
+            }
+
+            foreach (var email in sentEmails)
+            {
+                _output.WriteLine($"  email to={email.To}, subject={email.Subject}, bodyLen={email.Body.Length}");
+            }
         }
 
         private static AuthService CreateSut(
+            List<users> userStore,
+            List<otp_verifications> otpStore,
+            List<SentEmail> sentEmails,
             out Mock<IUserRepository> userRepoMock,
             out Mock<IOtpRepository> otpRepoMock,
-            out Mock<IEmailService> emailServiceMock)
+            out Mock<IEmailService> emailServiceMock,
+            out Mock<ITokenService> tokenServiceMock)
         {
             userRepoMock = new Mock<IUserRepository>(MockBehavior.Strict);
             otpRepoMock = new Mock<IOtpRepository>(MockBehavior.Strict);
             emailServiceMock = new Mock<IEmailService>(MockBehavior.Strict);
-            var tokenServiceMock = new Mock<ITokenService>(MockBehavior.Strict);
+            tokenServiceMock = new Mock<ITokenService>(MockBehavior.Strict);
 
-            return new AuthService(
-                userRepoMock.Object,
-                otpRepoMock.Object,
-                emailServiceMock.Object,
-                tokenServiceMock.Object);
+            userRepoMock.Setup(x => x.IsEmailExist(It.IsAny<string>()))
+                .ReturnsAsync((string email) => userStore.Any(u => string.Equals(u.email, email, StringComparison.OrdinalIgnoreCase)));
+            userRepoMock.Setup(x => x.IsNicknameExist(It.IsAny<string>(), It.IsAny<Guid>()))
+                .ReturnsAsync((string nickname, Guid currentUserId) => userStore.Any(u =>
+                    u.id != currentUserId &&
+                    string.Equals(u.user_profiles?.nickname, nickname, StringComparison.OrdinalIgnoreCase)));
+            userRepoMock.Setup(x => x.AddUser(It.IsAny<users>()))
+                .Callback((users user) => userStore.Add(user))
+                .Returns(Task.CompletedTask);
+
+            otpRepoMock.Setup(x => x.AddOtp(It.IsAny<otp_verifications>()))
+                .Callback((otp_verifications otp) => otpStore.Add(otp))
+                .Returns(Task.CompletedTask);
+
+            emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+                .Callback((string to, string subject, string body) => sentEmails.Add(new SentEmail(to, subject, body)))
+                .Returns(Task.CompletedTask);
+
+            return new AuthService(userRepoMock.Object, otpRepoMock.Object, emailServiceMock.Object, tokenServiceMock.Object);
         }
 
         private static RegisterRequest CreateRequest(
-            string email = "valid@gmail.com",
-            string password = ValidPassword,
+            string? email = "valid@gmail.com",
+            string? password = ValidPassword,
             string? confirmPassword = null,
             string? fullName = "Test User")
         {
             return new RegisterRequest
             {
-                Email = email,
-                Password = password,
-                ConfirmPassword = confirmPassword ?? password,
+                Email = email!,
+                Password = password!,
+                ConfirmPassword = confirmPassword ?? password!,
                 FullName = fullName
             };
         }
 
-        [Fact]
-        public async Task UTCID01_Register_Fails_WhenEmailAlreadyExists()
+        private static users ExistingUser(string email, string nickname)
         {
-            LogUtcContext("UTCID01",
-                "Abnormal path: email đã tồn tại -> register fail ngay từ đầu.",
-                "Precondition: IsEmailExist = true.",
-                "Input: existing@gmail.com / A12345678 / bất kỳ fullName.",
-                "Kỳ vọng: throw Exception Email already exists.; không AddUser, không AddOtp, không gửi mail.");
+            var userId = Guid.NewGuid();
+            return new users
+            {
+                id = userId,
+                email = email,
+                password_hash = BCrypt.Net.BCrypt.HashPassword(ValidPassword),
+                role = "USER",
+                status = "ACTIVE",
+                user_profiles = new user_profiles
+                {
+                    user_id = userId,
+                    nickname = nickname,
+                    settings = "{\"allow_notif\":true}",
+                    updated_at = DateTime.UtcNow
+                },
+                created_at = DateTime.UtcNow,
+                updated_at = DateTime.UtcNow
+            };
+        }
 
-            var request = CreateRequest(email: "existing@gmail.com", fullName: "Hung Nguyen");
-
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
-
-            userRepoMock.Setup(x => x.IsEmailExist(request.Email)).ReturnsAsync(true);
-
-            var ex = await Assert.ThrowsAsync<Exception>(() => sut.RegisterAsync(request));
-
-            LogActualMessage(ex.Message);
-            Assert.Equal("Email already exists.", ex.Message);
-            userRepoMock.Verify(x => x.IsEmailExist(request.Email), Times.Once);
-            userRepoMock.Verify(x => x.IsNicknameExist(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+        private static void AssertNoSaveCalls(Mock<IUserRepository> userRepoMock, Mock<IOtpRepository> otpRepoMock, Mock<IEmailService> emailServiceMock)
+        {
             userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Never);
             otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Never);
             emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         }
 
-        [Fact]
-        public async Task UTCID02_Register_Succeeds_WhenAllInputsValid()
+        private static void AssertRegisterSuccess(RegisterRequest request, List<users> userStore, List<otp_verifications> otpStore, List<SentEmail> sentEmails)
         {
-            LogUtcContext("UTCID02",
-                "Happy path: email mới, nickname chưa trùng -> tạo user PENDING, tạo OTP và gửi email.",
-                "Precondition: IsEmailExist = false; IsNicknameExist(fullName) = false.",
-                "Input: fullName = Hung Nguyen, email = newuser@gmail.com, password hợp lệ.",
-                "Kỳ vọng: AddUser/AddOtp/SendEmailAsync đều được gọi đúng 1 lần.");
+            Assert.Single(userStore);
+            Assert.Single(otpStore);
+            Assert.Single(sentEmails);
 
+            var user = userStore[0];
+            var otp = otpStore[0];
+            var sentEmail = sentEmails[0];
+
+            Assert.Equal(request.Email, user.email);
+            Assert.Equal("USER", user.role);
+            Assert.Equal("PENDING", user.status);
+            Assert.True(BCrypt.Net.BCrypt.Verify(request.Password, user.password_hash));
+            Assert.Equal(user.id, user.user_profiles!.user_id);
+            Assert.Equal(user.id, otp.user_id);
+            Assert.Equal("EMAIL_VERIFICATION", otp.type);
+            Assert.False(otp.is_used ?? true);
+            Assert.Matches("^[0-9]{6}$", otp.otp_code);
+            Assert.Equal(request.Email, sentEmail.To);
+            Assert.Equal("Xác thực tài khoản", sentEmail.Subject);
+            Assert.Contains(otp.otp_code, sentEmail.Body);
+        }
+
+        [Fact]
+        public async Task UTCID01_Register_Result_WhenEmailAlreadyExists()
+        {
+            // Arrange
+            var request = CreateRequest(email: "existing@gmail.com", fullName: "Hung Nguyen");
+            var userStore = new List<users> { ExistingUser(request.Email, "Existing User") };
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
+
+            // Act
+            var ex = await Record.ExceptionAsync(() => sut.RegisterAsync(request));
+            LogTestCase("UTCID01", "Email da ton tai -> register fail, khong AddUser/AddOtp/gui mail.", request, null, ex);
+
+            // Assert
+            Assert.NotNull(ex);
+            Assert.Single(userStore);
+            Assert.Empty(otpStore);
+            Assert.Empty(sentEmails);
+            userRepoMock.Verify(x => x.IsEmailExist(request.Email), Times.Once);
+            userRepoMock.Verify(x => x.IsNicknameExist(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+            AssertNoSaveCalls(userRepoMock, otpRepoMock, emailServiceMock);
+            tokenServiceMock.VerifyNoOtherCalls();
+            LogStores("UTCID01 (sau verify)", userStore, otpStore, sentEmails);
+        }
+
+        [Fact]
+        public async Task UTCID02_Register_Result_WhenAllInputsValid()
+        {
+            // Arrange
             var request = CreateRequest(email: "newuser@gmail.com", fullName: "Hung Nguyen");
-            users? addedUser = null;
-            otp_verifications? addedOtp = null;
-            string? sentTo = null;
-            string? sentSubject = null;
-            string? sentBody = null;
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
 
-            userRepoMock.Setup(x => x.IsEmailExist(request.Email)).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.IsNicknameExist("Hung Nguyen", It.IsAny<Guid>())).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.AddUser(It.IsAny<users>()))
-                .Callback<users>(u => addedUser = u)
-                .Returns(Task.CompletedTask);
-            otpRepoMock.Setup(x => x.AddOtp(It.IsAny<otp_verifications>()))
-                .Callback<otp_verifications>(o => addedOtp = o)
-                .Returns(Task.CompletedTask);
-            emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Callback<string, string, string>((to, subject, body) =>
-                {
-                    sentTo = to;
-                    sentSubject = subject;
-                    sentBody = body;
-                })
-                .Returns(Task.CompletedTask);
-
+            // Act
             await sut.RegisterAsync(request);
+            LogTestCase("UTCID02", "Input hop le -> tao user PENDING, OTP va email xac thuc.", request, new { User = userStore.Single(), Otp = otpStore.Single(), Email = sentEmails.Single() });
 
-            LogRegisterSuccess(addedUser!, addedOtp, sentTo);
-            Assert.NotNull(addedUser);
-            Assert.Equal(request.Email, addedUser!.email);
-            Assert.Equal("USER", addedUser.role);
-            Assert.Equal("PENDING", addedUser.status);
-            Assert.Equal("Hung Nguyen", addedUser.user_profiles!.nickname);
-            Assert.True(BCrypt.Net.BCrypt.Verify(request.Password, addedUser.password_hash));
-            Assert.NotNull(addedOtp);
-            Assert.Equal(addedUser.id, addedOtp!.user_id);
-            Assert.Equal("EMAIL_VERIFICATION", addedOtp.type);
-            Assert.Matches("^[0-9]{6}$", addedOtp.otp_code);
-            Assert.Equal(request.Email, sentTo);
-            Assert.Equal("Xác thực tài khoản", sentSubject);
-            Assert.NotNull(sentBody);
-            Assert.Contains(addedOtp.otp_code, sentBody);
-
+            // Assert
+            AssertRegisterSuccess(request, userStore, otpStore, sentEmails);
+            Assert.Equal("Hung Nguyen", userStore[0].user_profiles!.nickname);
+            userRepoMock.Verify(x => x.IsEmailExist(request.Email), Times.Once);
             userRepoMock.Verify(x => x.IsNicknameExist("Hung Nguyen", It.IsAny<Guid>()), Times.Once);
             userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Once);
             otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Once);
             emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            tokenServiceMock.VerifyNoOtherCalls();
+            LogStores("UTCID02 (sau verify)", userStore, otpStore, sentEmails);
         }
 
         [Fact]
-        public async Task UTCID03_Register_Fails_WhenEmailIsNull()
+        public async Task UTCID03_Register_Result_WhenEmailIsNull()
         {
-            LogUtcContext("UTCID03",
-                "Abnormal path: email null phải bị BE chặn.",
-                "Precondition: request.Email = null.",
-                "Input: null / A12345678 / confirm đúng.",
-                "Kỳ vọng: throw Exception Email is required.; không AddUser, không AddOtp, không gửi mail.");
+            // Arrange
+            var request = CreateRequest(email: null, fullName: "Test User");
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
 
-            var request = CreateRequest(email: null!, fullName: "Test User");
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
+            // Act
+            var ex = await Record.ExceptionAsync(() => sut.RegisterAsync(request));
+            LogTestCase("UTCID03", "Email null -> fail truoc khi repository duoc goi.", request, null, ex);
 
-            var ex = await Assert.ThrowsAsync<Exception>(() => sut.RegisterAsync(request));
-
-            LogActualMessage(ex.Message);
-            Assert.Equal("Email is required.", ex.Message);
-            userRepoMock.VerifyNoOtherCalls();
-            otpRepoMock.VerifyNoOtherCalls();
-            emailServiceMock.VerifyNoOtherCalls();
+            // Assert
+            Assert.NotNull(ex);
+            Assert.Empty(userStore);
+            Assert.Empty(otpStore);
+            Assert.Empty(sentEmails);
+            userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Never);
+            otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Never);
+            emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+            tokenServiceMock.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task UTCID04_Register_Fails_WhenEmailFormatIsInvalid()
+        public async Task UTCID04_Register_Result_WhenEmailFormatIsInvalid()
         {
-            LogUtcContext("UTCID04",
-                "Abnormal path: email sai format phải bị BE chặn.",
-                "Precondition: request.Email = invalid.email.com.",
-                "Input: invalid.email.com / A12345678 / confirm đúng.",
-                "Kỳ vọng: throw Exception Invalid Email format; không AddUser, không AddOtp, không gửi mail.");
-
+            // Arrange
             var request = CreateRequest(email: "invalid.email.com", fullName: "Test User");
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
 
-            var ex = await Assert.ThrowsAsync<Exception>(() => sut.RegisterAsync(request));
+            // Act
+            var ex = await Record.ExceptionAsync(() => sut.RegisterAsync(request));
+            LogTestCase("UTCID04", "Email sai format -> fail truoc khi luu du lieu.", request, null, ex);
 
-            LogActualMessage(ex.Message);
-            Assert.Equal("Invalid Email format", ex.Message);
-            userRepoMock.VerifyNoOtherCalls();
-            otpRepoMock.VerifyNoOtherCalls();
-            emailServiceMock.VerifyNoOtherCalls();
+            // Assert
+            Assert.NotNull(ex);
+            Assert.Empty(userStore);
+            Assert.Empty(otpStore);
+            Assert.Empty(sentEmails);
+            AssertNoSaveCalls(userRepoMock, otpRepoMock, emailServiceMock);
+            tokenServiceMock.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task UTCID05_Register_Succeeds_WhenPasswordMeetsBoundaryRule()
+        public async Task UTCID05_Register_Result_WhenPasswordMeetsBoundaryRule()
         {
-            LogUtcContext("UTCID05",
-                "Boundary happy path: password hợp lệ theo rule tối thiểu vẫn cho đăng ký thành công.",
-                "Precondition: email chưa tồn tại; nickname unique.",
-                "Input: valid@gmail.com / Abcd1234 / Test User.",
-                "Kỳ vọng: đăng ký thành công, có AddUser/AddOtp/SendEmail.");
-
+            // Arrange
             var request = CreateRequest(password: "Abcd1234");
-            users? addedUser = null;
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
 
-            userRepoMock.Setup(x => x.IsEmailExist(request.Email)).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.IsNicknameExist("Test User", It.IsAny<Guid>())).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.AddUser(It.IsAny<users>()))
-                .Callback<users>(u => addedUser = u)
-                .Returns(Task.CompletedTask);
-            otpRepoMock.Setup(x => x.AddOtp(It.IsAny<otp_verifications>())).Returns(Task.CompletedTask);
-            emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Returns(Task.CompletedTask);
-
+            // Act
             await sut.RegisterAsync(request);
+            LogTestCase("UTCID05", "Password hop le theo boundary -> register thanh cong.", request, new { User = userStore.Single(), Otp = otpStore.Single(), Email = sentEmails.Single() });
 
-            LogRegisterSuccess(addedUser!);
-            Assert.NotNull(addedUser);
-            Assert.True(BCrypt.Net.BCrypt.Verify("Abcd1234", addedUser!.password_hash));
+            // Assert
+            AssertRegisterSuccess(request, userStore, otpStore, sentEmails);
+            Assert.True(BCrypt.Net.BCrypt.Verify("Abcd1234", userStore[0].password_hash));
+            userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Once);
+            otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Once);
+            emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            tokenServiceMock.VerifyNoOtherCalls();
+            LogStores("UTCID05 (sau verify)", userStore, otpStore, sentEmails);
+        }
+
+        [Fact]
+        public async Task UTCID06_Register_Result_WhenPasswordIsTooShort()
+        {
+            // Arrange
+            var request = CreateRequest(password: "12345", confirmPassword: "12345");
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
+
+            // Act
+            var ex = await Record.ExceptionAsync(() => sut.RegisterAsync(request));
+            LogTestCase("UTCID06", "Password qua ngan -> fail, khong luu du lieu.", request, null, ex);
+
+            // Assert
+            Assert.NotNull(ex);
+            Assert.Empty(userStore);
+            Assert.Empty(otpStore);
+            Assert.Empty(sentEmails);
+            AssertNoSaveCalls(userRepoMock, otpRepoMock, emailServiceMock);
+            tokenServiceMock.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task UTCID07_Register_Result_WhenPasswordIsNull()
+        {
+            // Arrange
+            var request = CreateRequest(password: null, confirmPassword: null);
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
+
+            // Act
+            var ex = await Record.ExceptionAsync(() => sut.RegisterAsync(request));
+            LogTestCase("UTCID07", "Password null -> fail, khong luu du lieu.", request, null, ex);
+
+            // Assert
+            Assert.NotNull(ex);
+            Assert.Empty(userStore);
+            Assert.Empty(otpStore);
+            Assert.Empty(sentEmails);
+            AssertNoSaveCalls(userRepoMock, otpRepoMock, emailServiceMock);
+            tokenServiceMock.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task UTCID08_Register_Result_WhenPasswordMustBeHashedWithBCrypt()
+        {
+            // Arrange
+            var request = CreateRequest();
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
+
+            // Act
+            await sut.RegisterAsync(request);
+            LogTestCase("UTCID08", "Password raw khong duoc luu truc tiep, phai hash BCrypt.", request, new { User = userStore.Single(), Otp = otpStore.Single(), Email = sentEmails.Single() });
+
+            // Assert
+            AssertRegisterSuccess(request, userStore, otpStore, sentEmails);
+            Assert.NotEqual(request.Password, userStore[0].password_hash);
+            Assert.True(BCrypt.Net.BCrypt.Verify(request.Password, userStore[0].password_hash));
+            userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Once);
+            otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Once);
+            emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            tokenServiceMock.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task UTCID09_Register_Result_WhenFullNameHasLeadingAndTrailingSpaces()
+        {
+            // Arrange
+            var request = CreateRequest(fullName: "  Test User  ");
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
+
+            // Act
+            await sut.RegisterAsync(request);
+            LogTestCase("UTCID09", "FullName co space dau/cuoi -> nickname duoc trim.", request, new { User = userStore.Single(), Otp = otpStore.Single(), Email = sentEmails.Single() });
+
+            // Assert
+            AssertRegisterSuccess(request, userStore, otpStore, sentEmails);
+            Assert.Equal("Test User", userStore[0].user_profiles!.nickname);
             userRepoMock.Verify(x => x.IsNicknameExist("Test User", It.IsAny<Guid>()), Times.Once);
             userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Once);
             otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Once);
             emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            tokenServiceMock.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task UTCID06_Register_Fails_WhenPasswordIsTooShort()
+        public async Task UTCID10_Register_Result_WhenFullNameIsNull()
         {
-            LogUtcContext("UTCID06",
-                "Abnormal path: password quá ngắn phải bị BE chặn.",
-                "Precondition: request.Password = 12345, confirm đúng.",
-                "Input: valid@gmail.com / 12345 / Test User.",
-                "Kỳ vọng: throw Exception Password too short; không AddUser, không AddOtp, không gửi mail.");
-
-            var request = CreateRequest(password: "12345", confirmPassword: "12345");
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
-
-            var ex = await Assert.ThrowsAsync<Exception>(() => sut.RegisterAsync(request));
-
-            LogActualMessage(ex.Message);
-            Assert.Equal("Password too short", ex.Message);
-            userRepoMock.VerifyNoOtherCalls();
-            otpRepoMock.VerifyNoOtherCalls();
-            emailServiceMock.VerifyNoOtherCalls();
-        }
-
-        [Fact]
-        public async Task UTCID07_Register_Fails_WhenPasswordIsNull()
-        {
-            LogUtcContext("UTCID07",
-                "Abnormal path: password null phải bị BE chặn.",
-                "Precondition: request.Password = null.",
-                "Input: valid@gmail.com / null / confirm null.",
-                "Kỳ vọng: throw Exception Password is required.; không AddUser, không AddOtp, không gửi mail.");
-
-            var request = CreateRequest(password: null!, confirmPassword: null!);
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
-
-            var ex = await Assert.ThrowsAsync<Exception>(() => sut.RegisterAsync(request));
-
-            LogActualMessage(ex.Message);
-            Assert.Equal("Password is required.", ex.Message);
-            userRepoMock.VerifyNoOtherCalls();
-            otpRepoMock.VerifyNoOtherCalls();
-            emailServiceMock.VerifyNoOtherCalls();
-        }
-
-        [Fact]
-        public async Task UTCID08_Register_HashesPasswordWithBCrypt()
-        {
-            LogUtcContext("UTCID08",
-                "Security path: password thô không được lưu trực tiếp, phải được hash bằng BCrypt.",
-                "Precondition: email chưa tồn tại; nickname unique.",
-                "Input: valid@gmail.com / A12345678 / Test User.",
-                "Kỳ vọng: password_hash khác raw password và BCrypt.Verify trả true.");
-
-            var request = CreateRequest();
-            users? addedUser = null;
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
-
-            userRepoMock.Setup(x => x.IsEmailExist(request.Email)).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.IsNicknameExist("Test User", It.IsAny<Guid>())).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.AddUser(It.IsAny<users>()))
-                .Callback<users>(u => addedUser = u)
-                .Returns(Task.CompletedTask);
-            otpRepoMock.Setup(x => x.AddOtp(It.IsAny<otp_verifications>())).Returns(Task.CompletedTask);
-            emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Returns(Task.CompletedTask);
-
-            await sut.RegisterAsync(request);
-
-            LogRegisterSuccess(addedUser!);
-            Assert.NotNull(addedUser);
-            Assert.NotEqual(request.Password, addedUser!.password_hash);
-            Assert.True(BCrypt.Net.BCrypt.Verify(request.Password, addedUser.password_hash));
-        }
-
-        [Fact]
-        public async Task UTCID09_Register_TrimsFullName_WhenItHasLeadingAndTrailingSpaces()
-        {
-            LogUtcContext("UTCID09",
-                "Current service behavior: FullName có space đầu/cuối sẽ được trim trước khi tạo nickname.",
-                "Precondition: email chưa tồn tại; nickname sau trim chưa trùng.",
-                "Input: fullName = '  Test User  '.",
-                "Kỳ vọng hiện tại: đăng ký thành công với nickname = 'Test User'.");
-
-            var request = CreateRequest(fullName: "  Test User  ");
-            users? addedUser = null;
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
-
-            userRepoMock.Setup(x => x.IsEmailExist(request.Email)).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.IsNicknameExist("Test User", It.IsAny<Guid>())).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.AddUser(It.IsAny<users>()))
-                .Callback<users>(u => addedUser = u)
-                .Returns(Task.CompletedTask);
-            otpRepoMock.Setup(x => x.AddOtp(It.IsAny<otp_verifications>())).Returns(Task.CompletedTask);
-            emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Returns(Task.CompletedTask);
-
-            await sut.RegisterAsync(request);
-
-            LogRegisterSuccess(addedUser!);
-            Assert.NotNull(addedUser);
-            Assert.Equal("Test User", addedUser!.user_profiles!.nickname);
-        }
-
-        [Fact]
-        public async Task UTCID10_Register_UsesEmailPrefix_WhenFullNameIsNull()
-        {
-            LogUtcContext("UTCID10",
-                "Current service behavior: FullName null không fail mà dùng prefix của email làm nickname.",
-                "Precondition: email chưa tồn tại; nickname email prefix chưa trùng.",
-                "Input: email = prefix.name@gmail.com, fullName = null.",
-                "Kỳ vọng hiện tại: user được tạo với nickname = prefix.name.");
-
+            // Arrange
             var request = CreateRequest(email: "prefix.name@gmail.com", fullName: null);
-            users? addedUser = null;
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
 
-            userRepoMock.Setup(x => x.IsEmailExist(request.Email)).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.IsNicknameExist("prefix.name", It.IsAny<Guid>())).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.AddUser(It.IsAny<users>()))
-                .Callback<users>(u => addedUser = u)
-                .Returns(Task.CompletedTask);
-            otpRepoMock.Setup(x => x.AddOtp(It.IsAny<otp_verifications>())).Returns(Task.CompletedTask);
-            emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Returns(Task.CompletedTask);
-
+            // Act
             await sut.RegisterAsync(request);
+            LogTestCase("UTCID10", "FullName null -> dung email prefix lam nickname.", request, new { User = userStore.Single(), Otp = otpStore.Single(), Email = sentEmails.Single() });
 
-            LogRegisterSuccess(addedUser!);
-            Assert.NotNull(addedUser);
-            Assert.Equal("prefix.name", addedUser!.user_profiles!.nickname);
+            // Assert
+            AssertRegisterSuccess(request, userStore, otpStore, sentEmails);
+            Assert.Equal("prefix.name", userStore[0].user_profiles!.nickname);
+            userRepoMock.Verify(x => x.IsNicknameExist("prefix.name", It.IsAny<Guid>()), Times.Once);
+            userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Once);
+            otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Once);
+            emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            tokenServiceMock.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task UTCID11_Register_TrimsNicknameToMaxLength100_WhenFullNameIsTooLong()
+        public async Task UTCID11_Register_Result_WhenFullNameIsTooLong()
         {
-            LogUtcContext("UTCID11",
-                "Boundary path: FullName quá dài được truncate nickname về tối đa 100 ký tự.",
-                "Precondition: email chưa tồn tại; nickname sau truncate chưa trùng.",
-                "Input: FullName dài hơn 100 ký tự.",
-                "Kỳ vọng hiện tại: đăng ký thành công, nickname dài 100 ký tự.");
-
+            // Arrange
             var longName = new string('N', 120);
             var trimmedName = new string('N', 100);
             var request = CreateRequest(fullName: longName);
-            users? addedUser = null;
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
 
-            userRepoMock.Setup(x => x.IsEmailExist(request.Email)).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.IsNicknameExist(trimmedName, It.IsAny<Guid>())).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.AddUser(It.IsAny<users>()))
-                .Callback<users>(u => addedUser = u)
-                .Returns(Task.CompletedTask);
-            otpRepoMock.Setup(x => x.AddOtp(It.IsAny<otp_verifications>())).Returns(Task.CompletedTask);
-            emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Returns(Task.CompletedTask);
-
+            // Act
             await sut.RegisterAsync(request);
+            LogTestCase("UTCID11", "FullName > 100 ky tu -> nickname bi trim ve 100 ky tu.", new { FullNameLength = longName.Length, request.Email }, new { User = userStore.Single(), Otp = otpStore.Single(), Email = sentEmails.Single() });
 
-            LogRegisterSuccess(addedUser!);
-            Assert.NotNull(addedUser);
-            Assert.Equal(100, addedUser!.user_profiles!.nickname!.Length);
-            Assert.Equal(trimmedName, addedUser.user_profiles.nickname);
+            // Assert
+            AssertRegisterSuccess(request, userStore, otpStore, sentEmails);
+            Assert.Equal(100, userStore[0].user_profiles!.nickname!.Length);
+            Assert.Equal(trimmedName, userStore[0].user_profiles!.nickname);
+            userRepoMock.Verify(x => x.IsNicknameExist(trimmedName, It.IsAny<Guid>()), Times.Once);
+            userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Once);
+            otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Once);
+            emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            tokenServiceMock.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task UTCID12_Register_UsesBaseNicknameWhenItIsUnique()
+        public async Task UTCID12_Register_Result_WhenBaseNicknameIsUnique()
         {
-            LogUtcContext("UTCID12",
-                "Happy path: base nickname unique thì dùng trực tiếp, không thêm suffix.",
-                "Precondition: email chưa tồn tại; IsNicknameExist(base) = false.",
-                "Input: fullName = BaseUnique.",
-                "Kỳ vọng: nickname đúng bằng BaseUnique.");
-
+            // Arrange
             var request = CreateRequest(fullName: "BaseUnique");
-            users? addedUser = null;
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
 
-            userRepoMock.Setup(x => x.IsEmailExist(request.Email)).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.IsNicknameExist("BaseUnique", It.IsAny<Guid>())).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.AddUser(It.IsAny<users>()))
-                .Callback<users>(u => addedUser = u)
-                .Returns(Task.CompletedTask);
-            otpRepoMock.Setup(x => x.AddOtp(It.IsAny<otp_verifications>())).Returns(Task.CompletedTask);
-            emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Returns(Task.CompletedTask);
-
+            // Act
             await sut.RegisterAsync(request);
+            LogTestCase("UTCID12", "Base nickname unique -> dung truc tiep nickname goc.", request, new { User = userStore.Single(), Otp = otpStore.Single(), Email = sentEmails.Single() });
 
-            LogRegisterSuccess(addedUser!);
-            Assert.Equal("BaseUnique", addedUser!.user_profiles!.nickname);
+            // Assert
+            AssertRegisterSuccess(request, userStore, otpStore, sentEmails);
+            Assert.Equal("BaseUnique", userStore[0].user_profiles!.nickname);
+            userRepoMock.Verify(x => x.IsNicknameExist("BaseUnique", It.IsAny<Guid>()), Times.Once);
+            userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Once);
+            otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Once);
+            emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            tokenServiceMock.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task UTCID13_Register_GeneratesAlternativeNickname_WhenBaseNicknameExists()
+        public async Task UTCID13_Register_Result_WhenBaseNicknameExists()
         {
-            LogUtcContext("UTCID13",
-                "Abnormal-but-recoverable path: nickname gốc đã tồn tại -> service tạo nickname khác và vẫn register thành công.",
-                "Precondition: IsEmailExist = false; IsNicknameExist(base) = true; nickname có suffix là false.",
-                "Input: fullName = duplicate-name.",
-                "Kỳ vọng: AddUser với nickname bắt đầu bằng duplicate-name_ và không vượt quá 100 ký tự.");
-
+            // Arrange
             var request = CreateRequest(email: "another@gmail.com", fullName: "duplicate-name");
-            users? addedUser = null;
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
+            var userStore = new List<users> { ExistingUser("existing-nick@gmail.com", "duplicate-name") };
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
 
-            userRepoMock.Setup(x => x.IsEmailExist(request.Email)).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.IsNicknameExist("duplicate-name", It.IsAny<Guid>())).ReturnsAsync(true);
-            userRepoMock.Setup(x => x.IsNicknameExist(It.Is<string>(n => n.StartsWith("duplicate-name_")), It.IsAny<Guid>()))
-                .ReturnsAsync(false);
-            userRepoMock.Setup(x => x.AddUser(It.IsAny<users>()))
-                .Callback<users>(u => addedUser = u)
-                .Returns(Task.CompletedTask);
-            otpRepoMock.Setup(x => x.AddOtp(It.IsAny<otp_verifications>())).Returns(Task.CompletedTask);
-            emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Returns(Task.CompletedTask);
-
+            // Act
             await sut.RegisterAsync(request);
+            var addedUser = Assert.Single(userStore, u => u.email == request.Email);
+            LogTestCase("UTCID13", "Base nickname da ton tai -> tao nickname co suffix va van register thanh cong.", request, new { User = addedUser, Otp = otpStore.Single(), Email = sentEmails.Single() });
 
-            LogRegisterSuccess(addedUser!);
-            Assert.NotNull(addedUser);
-            Assert.StartsWith("duplicate-name_", addedUser!.user_profiles!.nickname);
+            // Assert
+            Assert.Equal(2, userStore.Count);
+            Assert.Single(otpStore);
+            Assert.Single(sentEmails);
+            Assert.StartsWith("duplicate-name_", addedUser.user_profiles!.nickname);
             Assert.True(addedUser.user_profiles.nickname!.Length <= 100);
+            userRepoMock.Verify(x => x.IsNicknameExist("duplicate-name", It.IsAny<Guid>()), Times.Once);
+            userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Once);
+            otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Once);
+            emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            tokenServiceMock.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task UTCID14_Register_UsesGuidSuffixWhenNicknameKeepsColliding()
+        public async Task UTCID14_Register_Result_WhenNicknameKeepsColliding()
         {
-            LogUtcContext("UTCID14",
-                "Boundary path: nickname gốc và 5 lần thử suffix đều bị trùng -> fallback sang GUID suffix.",
-                "Precondition: IsEmailExist = false; mọi nickname bắt đầu bằng guid-fallback_ đều bị xem là đã tồn tại trong 5 lần random.",
-                "Input: fullName = guid-fallback.",
-                "Kỳ vọng: nickname cuối cùng kết thúc bằng _{8 ký tự hex}.");
-
+            // Arrange
             var request = CreateRequest(email: "guid@gmail.com", fullName: "guid-fallback");
-            users? addedUser = null;
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
-
-            userRepoMock.Setup(x => x.IsEmailExist(request.Email)).ReturnsAsync(false);
-            userRepoMock.Setup(x => x.IsNicknameExist("guid-fallback", It.IsAny<Guid>())).ReturnsAsync(true);
-            userRepoMock.Setup(x => x.IsNicknameExist(It.Is<string>(n => n.StartsWith("guid-fallback_")), It.IsAny<Guid>()))
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
+            userRepoMock.Setup(x => x.IsNicknameExist(It.Is<string>(n => n == "guid-fallback" || n.StartsWith("guid-fallback_")), It.IsAny<Guid>()))
                 .ReturnsAsync(true);
-            userRepoMock.Setup(x => x.AddUser(It.IsAny<users>()))
-                .Callback<users>(u => addedUser = u)
-                .Returns(Task.CompletedTask);
-            otpRepoMock.Setup(x => x.AddOtp(It.IsAny<otp_verifications>())).Returns(Task.CompletedTask);
-            emailServiceMock.Setup(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
-                .Returns(Task.CompletedTask);
 
+            // Act
             await sut.RegisterAsync(request);
+            LogTestCase("UTCID14", "Nickname goc va 5 suffix deu bi trung -> fallback GUID suffix.", request, new { User = userStore.Single(), Otp = otpStore.Single(), Email = sentEmails.Single() });
 
-            LogRegisterSuccess(addedUser!);
-            Assert.NotNull(addedUser);
-            var nickname = addedUser!.user_profiles!.nickname;
-            Assert.NotNull(nickname);
-            Assert.Matches("^guid-fallback_[a-f0-9]{8}$", nickname!);
+            // Assert
+            AssertRegisterSuccess(request, userStore, otpStore, sentEmails);
+            Assert.Matches("^guid-fallback_[a-f0-9]{8}$", userStore[0].user_profiles!.nickname!);
+            userRepoMock.Verify(x => x.AddUser(It.IsAny<users>()), Times.Once);
+            otpRepoMock.Verify(x => x.AddOtp(It.IsAny<otp_verifications>()), Times.Once);
+            emailServiceMock.Verify(x => x.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+            tokenServiceMock.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task UTCID15_Register_Fails_WhenConfirmPasswordDoesNotMatch()
+        public async Task UTCID15_Register_Result_WhenConfirmPasswordDoesNotMatch()
         {
-            LogUtcContext("UTCID15",
-                "Abnormal path: confirm password không khớp phải bị BE chặn.",
-                "Precondition: password và confirmPassword khác nhau.",
-                "Input: A12345678 / A12345679.",
-                "Kỳ vọng: throw Exception Password not match; không AddUser, không AddOtp, không gửi mail.");
-
+            // Arrange
             var request = CreateRequest(password: "A12345678", confirmPassword: "A12345679");
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
 
-            var ex = await Assert.ThrowsAsync<Exception>(() => sut.RegisterAsync(request));
+            // Act
+            var ex = await Record.ExceptionAsync(() => sut.RegisterAsync(request));
+            LogTestCase("UTCID15", "Confirm password khong khop -> fail, khong luu du lieu.", request, null, ex);
 
-            LogActualMessage(ex.Message);
-            Assert.Equal("Password not match", ex.Message);
-            userRepoMock.VerifyNoOtherCalls();
-            otpRepoMock.VerifyNoOtherCalls();
-            emailServiceMock.VerifyNoOtherCalls();
+            // Assert
+            Assert.NotNull(ex);
+            Assert.Empty(userStore);
+            Assert.Empty(otpStore);
+            Assert.Empty(sentEmails);
+            AssertNoSaveCalls(userRepoMock, otpRepoMock, emailServiceMock);
+            tokenServiceMock.VerifyNoOtherCalls();
         }
 
         [Fact]
-        public async Task UTCID16_Register_Fails_WhenConfirmPasswordIsNull()
+        public async Task UTCID16_Register_Result_WhenConfirmPasswordIsNull()
         {
-            LogUtcContext("UTCID16",
-                "Abnormal path: confirm password null phải bị BE chặn.",
-                "Precondition: request.ConfirmPassword = null.",
-                "Input: A12345678 / null.",
-                "Kỳ vọng: throw Exception Confirm password is required.; không AddUser, không AddOtp, không gửi mail.");
-
+            // Arrange
             var request = new RegisterRequest
             {
                 Email = "valid@gmail.com",
@@ -522,15 +551,22 @@ namespace AIStory.Tests
                 ConfirmPassword = null!,
                 FullName = "Test User"
             };
-            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock);
+            var userStore = new List<users>();
+            var otpStore = new List<otp_verifications>();
+            var sentEmails = new List<SentEmail>();
+            var sut = CreateSut(userStore, otpStore, sentEmails, out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
 
-            var ex = await Assert.ThrowsAsync<Exception>(() => sut.RegisterAsync(request));
+            // Act
+            var ex = await Record.ExceptionAsync(() => sut.RegisterAsync(request));
+            LogTestCase("UTCID16", "Confirm password null -> fail, khong luu du lieu.", request, null, ex);
 
-            LogActualMessage(ex.Message);
-            Assert.Equal("Confirm password is required.", ex.Message);
-            userRepoMock.VerifyNoOtherCalls();
-            otpRepoMock.VerifyNoOtherCalls();
-            emailServiceMock.VerifyNoOtherCalls();
+            // Assert
+            Assert.NotNull(ex);
+            Assert.Empty(userStore);
+            Assert.Empty(otpStore);
+            Assert.Empty(sentEmails);
+            AssertNoSaveCalls(userRepoMock, otpRepoMock, emailServiceMock);
+            tokenServiceMock.VerifyNoOtherCalls();
         }
     }
 }

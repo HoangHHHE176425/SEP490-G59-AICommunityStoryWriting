@@ -8,7 +8,7 @@ namespace Services.Implementations;
 public static class ChapterMemoryAnalysisScheduler
 {
     private const int MinContentLength = 80;
-
+    //chạy phân tích chương ở nền
     public static void TrySchedule(
         IServiceScopeFactory? scopeFactory,
         ILogger logger,

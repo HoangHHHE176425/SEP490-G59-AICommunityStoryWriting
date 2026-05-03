@@ -46,4 +46,44 @@ public static class ChapterContentNormalizer
 
         return s;
     }
+
+    /// <summary>
+    /// Plain text chỉ để đếm từ: gỡ HTML, decode entity.
+    /// Không dùng <see cref="NormalizeForAi"/> (tránh chèn «- » trước &lt;li&gt; — làm tăng số từ so với màn đọc/editor dùng DOM).
+    /// </summary>
+    public static string PlainTextForWordCount(string? rawHtmlOrText)
+    {
+        if (string.IsNullOrWhiteSpace(rawHtmlOrText))
+            return string.Empty;
+
+        var s = rawHtmlOrText.Trim();
+
+        s = Regex.Replace(s, @"<script\b[^>]*>[\s\S]*?</script>", " ", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"<style\b[^>]*>[\s\S]*?</style>", " ", RegexOptions.IgnoreCase);
+
+        s = Regex.Replace(s, @"<\s*br\s*/?\s*>", " ", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"<\s*/\s*p\s*>", " ", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"<\s*p\b[^>]*>", " ", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"<\s*/\s*div\s*>", " ", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"<\s*div\b[^>]*>", " ", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"<\s*/\s*li\s*>", " ", RegexOptions.IgnoreCase);
+        s = Regex.Replace(s, @"<\s*li\b[^>]*>", " ", RegexOptions.IgnoreCase);
+
+        s = Regex.Replace(s, @"<[^>]+>", " ");
+
+        s = WebUtility.HtmlDecode(s);
+        s = s.Replace('\u00A0', ' ');
+
+        s = Regex.Replace(s, @"\s+", " ");
+        return s.Trim();
+    }
+
+    /// <summary>Đếm «từ» = cụm tách bằng khoảng trắng trên plain text; khớp quy ước editor/reader (không đếm tiền tố bullet từ &lt;li&gt;).</summary>
+    public static int CountWords(string? rawHtmlOrText)
+    {
+        var plain = PlainTextForWordCount(rawHtmlOrText);
+        if (string.IsNullOrWhiteSpace(plain))
+            return 0;
+        return plain.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).Length;
+    }
 }

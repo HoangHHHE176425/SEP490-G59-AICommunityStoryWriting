@@ -84,7 +84,9 @@ namespace AIStory.API.Controllers
             // Vì chưa có cơ chế quy đổi coin -> VND ở luồng rút, endpoint sẽ trả rõ cả 2 field.
             var totalWithdrawCoins = await _db.withdraw_requests
                 .AsNoTracking()
-                .Where(w => (w.status ?? "PENDING") == "SUCCESS")
+                .Where(w =>
+                    (w.status ?? "PENDING") == "SUCCESS" ||
+                    (w.status ?? "PENDING") == "COMPLETED")
                 .SumAsync(w => (decimal?)w.amount_requested, cancellationToken) ?? 0m;
 
             var platformFeeCoins = (decimal)(platform?.balance_coin ?? 0);

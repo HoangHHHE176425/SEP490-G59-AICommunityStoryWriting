@@ -11,6 +11,7 @@ using Services.DTOs.Moderation;
 using Services.DTOs.Notifications;
 using Services;
 using Services.DTOs.Stories;
+using Services.Helpers;
 using Services.Interfaces;
 
 namespace Services.Implementations
@@ -1009,7 +1010,7 @@ namespace Services.Implementations
                 if (v.content_snapshot != null)
                 {
                     chapter.content = v.content_snapshot;
-                    chapter.word_count = chapter.content.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+                    chapter.word_count = ChapterContentNormalizer.CountWords(chapter.content);
                 }
             }
 
@@ -1051,6 +1052,8 @@ namespace Services.Implementations
                     _ = PushStoryFollowNotificationsAsync(authorNotifications);
                 }
                 TriggerRagIndexInBackground(chapter.story_id.Value, chapterId);
+
+                //chạy AI analysis cho chapter vừa duyệt xong 
                 if (!string.IsNullOrWhiteSpace(chapter.content))
                 {
                     ChapterMemoryAnalysisScheduler.TrySchedule(
