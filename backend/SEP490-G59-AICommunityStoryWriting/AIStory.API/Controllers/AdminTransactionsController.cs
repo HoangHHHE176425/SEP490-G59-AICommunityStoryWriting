@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
+using Services.Helpers;
 using Services.Integrations.PayOS;
 
 namespace AIStory.API.Controllers
@@ -372,7 +373,7 @@ namespace AIStory.API.Controllers
                         }
                     ), idempotencyKey: payoutReferenceId, cancellationToken: cancellationToken);
 
-                    var immediateMappedStatus = MapPayoutToWithdrawStatus(payoutRes.ApprovalState, null);
+                    var immediateMappedStatus = AuthorWithdrawWalletHelper.MapPayOSPayoutToSettlementStatus(payoutRes.ApprovalState, null);
                     req.status = immediateMappedStatus ?? "PROCESSING";
                     req.processed_at = DateTime.UtcNow;
                     req.processed_by = adminId;
@@ -399,9 +400,11 @@ namespace AIStory.API.Controllers
                         var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == req.author_id.Value, cancellationToken);
                         if (wallet != null)
                         {
-                            wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - req.amount_requested);
-                            if (immediateMappedStatus == "FAILED")
+                            if (immediateMappedStatus == "COMPLETED")
+                                AuthorWithdrawWalletHelper.ApplyPayoutCompleted(wallet, req.amount_requested);
+                            else
                             {
+                                wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - req.amount_requested);
                                 wallet.income_balance = (wallet.income_balance ?? 0m) + req.amount_requested;
                             }
                             wallet.updated_at = DateTime.UtcNow;
@@ -509,7 +512,7 @@ namespace AIStory.API.Controllers
                 return BadRequest(new { message = "Withdraw request does not have payoutId (transaction_proof_url)." });
 
             var payout = await _payos.GetPayoutInfoAsync(req.transaction_proof_url!, cancellationToken);
-            var mappedStatus = MapPayoutToWithdrawStatus(payout.ApprovalState, payout.FirstTransactionState);
+            var mappedStatus = AuthorWithdrawWalletHelper.MapPayOSPayoutToSettlementStatus(payout.ApprovalState, payout.FirstTransactionState);
 
             if (mappedStatus == null)
             {
@@ -560,7 +563,7 @@ namespace AIStory.API.Controllers
                         var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == current.author_id.Value, cancellationToken);
                         if (wallet != null)
                         {
-                            wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - current.amount_requested);
+                            AuthorWithdrawWalletHelper.ApplyPayoutCompleted(wallet, current.amount_requested);
                             wallet.updated_at = now;
                         }
                     }
@@ -633,17 +636,6 @@ namespace AIStory.API.Controllers
             };
         }
 
-        private static string? MapPayoutToWithdrawStatus(string? approvalState, string? firstTransactionState)
-        {
-            var txState = (firstTransactionState ?? string.Empty).Trim().ToUpperInvariant();
-            if (txState is "SUCCEEDED" or "COMPLETED") return "COMPLETED";
-            if (txState is "FAILED" or "CANCELLED" or "REVERSED") return "FAILED";
-
-            var approval = (approvalState ?? string.Empty).Trim().ToUpperInvariant();
-            if (approval is "SUCCEEDED" or "COMPLETED" or "PARTIAL_COMPLETED") return "COMPLETED";
-            if (approval is "FAILED" or "REJECTED" or "CANCELLED") return "FAILED";
-            return null;
-        }
     }
 }
 

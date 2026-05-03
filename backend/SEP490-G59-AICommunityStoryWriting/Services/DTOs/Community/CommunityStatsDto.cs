@@ -1,6 +1,6 @@
 namespace Services.DTOs.Community
 {
-    /// <summary>Thống kê công khai cho trang chủ — cùng tập truyện với danh sách công khai (guest).</summary>
+    /// <summary>Thống kê công khai cho trang chủ — truyện/views theo tập PUBLISHED + không compliance_hidden; authorsCount theo role AUTHOR trừ BANNED.</summary>
     public class CommunityStatsDto
     {
         public int PublishedStoriesCount { get; set; }

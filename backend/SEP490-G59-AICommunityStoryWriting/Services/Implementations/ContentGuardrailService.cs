@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using Repositories;
 using Services.DTOs.AI;
+using Services.Helpers;
 using Services.Interfaces;
-using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Text;
 
@@ -45,7 +45,6 @@ public class ContentGuardrailService : IContentGuardrailService
             return new GuardrailResult { Passed = true, Violations = violations };
 
         // Chuẩn hóa unicode + chữ thường; GIỮ DẤU tiếng Việt để tránh false-positive
-        // (vd: "cặc" không được match "các", "cách").
         var draftSource = draft.Normalize(NormalizationForm.FormC);
         var draftNorm = NormalizeForMatch(draftSource);
 
@@ -55,13 +54,31 @@ public class ContentGuardrailService : IContentGuardrailService
             var w = word.Trim();
             var wNorm = NormalizeForMatch(w);
             if (wNorm.Length == 0) continue;
-            if (ContainsWholeWord(draftNorm, wNorm))
+
+            var escaped = Regex.Escape(wNorm);
+            var pattern = $@"(?<![\p{{L}}\p{{N}}_]){escaped}(?![\p{{L}}\p{{N}}_])";
+            var matches = Regex.Matches(draftNorm, pattern, RegexOptions.CultureInvariant);
+            if (matches.Count == 0) continue;
+
+            var seenQuote = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (Match m in matches)
+            {
+                var quote = SentenceContextExtractor.TryExtractSentenceAtSpan(draftSource, m.Index, m.Length);
+                if (string.IsNullOrEmpty(quote))
+                    quote = SentenceContextExtractor.TryShortContextSnippetAt(draftSource, m.Index, m.Length);
+                if (string.IsNullOrEmpty(quote))
+                    quote = w;
+
+                if (!seenQuote.Add(quote))
+                    continue;
+
                 violations.Add(new GuardrailViolation
                 {
                     Type = "BannedWord",
                     Message = $"Từ cấm: {w}",
-                    Quote = ExtractContextSnippet(draftSource, draftNorm, wNorm)
+                    Quote = quote
                 });
+            }
         }
 
         return new GuardrailResult
@@ -119,33 +136,4 @@ public class ContentGuardrailService : IContentGuardrailService
         return input.Normalize(NormalizationForm.FormC).ToLowerInvariant();
     }
 
-    private static bool ContainsWholeWord(string textNormalized, string bannedWordNormalized)
-    {
-        if (string.IsNullOrWhiteSpace(textNormalized) || string.IsNullOrWhiteSpace(bannedWordNormalized))
-            return false;
-        var escaped = Regex.Escape(bannedWordNormalized);
-        // Chỉ match theo biên từ để tránh dính chuỗi con.
-        // \p{L}\p{N}: chữ/số Unicode, hỗ trợ tiếng Việt có dấu.
-        var pattern = $@"(?<![\p{{L}}\p{{N}}_]){escaped}(?![\p{{L}}\p{{N}}_])";
-        return Regex.IsMatch(textNormalized, pattern, RegexOptions.CultureInvariant);
-    }
-
-    private static string ExtractContextSnippet(string draftSource, string draftNormalized, string bannedWordNormalized, int contextChars = 24)
-    {
-        if (string.IsNullOrWhiteSpace(draftSource) || string.IsNullOrWhiteSpace(draftNormalized) || string.IsNullOrWhiteSpace(bannedWordNormalized))
-            return bannedWordNormalized;
-
-        var escaped = Regex.Escape(bannedWordNormalized);
-        var pattern = $@"(?<![\p{{L}}\p{{N}}_]){escaped}(?![\p{{L}}\p{{N}}_])";
-        var m = Regex.Match(draftNormalized, pattern, RegexOptions.CultureInvariant);
-        if (!m.Success)
-            return bannedWordNormalized;
-
-        var start = Math.Max(0, m.Index - contextChars);
-        var end = Math.Min(draftSource.Length, m.Index + m.Length + contextChars);
-        var snippet = draftSource[start..end].Trim();
-        if (start > 0) snippet = "..." + snippet;
-        if (end < draftSource.Length) snippet += "...";
-        return snippet;
-    }
 }

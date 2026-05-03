@@ -56,5 +56,7 @@ namespace Services.DTOs.Stories
         public bool CommentsDisabled { get; set; }
         public bool ComplianceHidden { get; set; }
         public bool ComplianceFlagged { get; set; }
+        /// <summary>True khi có ít nhất 1 chương đã xuất bản có tỷ lệ AI &gt; 0 (ai_similarity_percent hoặc ai_contribution_ratio).</summary>
+        public bool UsesAi { get; set; }
     }
 }

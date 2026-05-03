@@ -6,7 +6,7 @@ public interface IStoryReportService
 {
     IReadOnlyList<StoryReportReasonOptionDto> GetReasonOptions();
 
-    Task<Guid> CreateStoryReportAsync(Guid storyId, Guid reporterId, CreateStoryReportRequestDto request);
+    Task<CreateStoryReportResultDto> CreateStoryReportAsync(Guid storyId, Guid reporterId, CreateStoryReportRequestDto request);
 
     Task<PagedComplianceStoryReportsDto> QueryComplianceAsync(ComplianceStoryReportQueryDto query, Guid? actingUserId, bool viewerIsAdmin);
 

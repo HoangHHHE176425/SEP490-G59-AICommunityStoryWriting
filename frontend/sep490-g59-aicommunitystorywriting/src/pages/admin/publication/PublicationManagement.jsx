@@ -5,7 +5,13 @@ import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories, getStoryById } from '../../../api/story/storyApi';
 import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, getRejectedChapterVersionsHistory, claimStory, claimChapter, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getProfileByUserId } from '../../../api/account/accountApi';
-import { reviewDeadlineAfterDaysUtc, worstTimeStatus, pickReviewDeadlineIso } from '../../../utils/moderatorReviewSla';
+import {
+    reviewDeadlineAfterDaysUtc,
+    worstTimeStatus,
+    pickReviewDeadlineIso,
+    MODERATOR_ESCALATION_REASON_MIN_WORDS,
+    countModeratorEscalationReasonWords,
+} from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 import { getActivePolicy } from '../../../api/policy/policyApi';
@@ -154,6 +160,18 @@ function formatDateTimeVi(value) {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return '—';
     return d.toLocaleString('vi-VN');
+}
+
+/** Trích YYYY-MM-DD từ timestamp API mà không tự cộng/trừ múi giờ. */
+function extractApiDateYmd(value) {
+    if (value == null || value === '') return null;
+    const s = String(value).trim().replace(' ', 'T');
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function getDefaultDatetimeLocalForClaim() {
@@ -395,6 +413,9 @@ function mapPendingChapterToItem(c) {
 export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     const [selectedPublication, setSelectedPublication] = useState(null);
     const [filterStatus, setFilterStatus] = useState(initialFilterStatus); // 'pending' | 'approved' | 'rejected'
+    const [searchKeyword, setSearchKeyword] = useState('');
+    const [filterDateFrom, setFilterDateFrom] = useState('');
+    const [filterDateTo, setFilterDateTo] = useState('');
     const [publications, setPublications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -408,7 +429,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     const [releaseConfirmTarget, setReleaseConfirmTarget] = useState(null); // { storyId, storyTitle, chapterCount }
     /** Thông báo sau khi gửi đơn / lỗi. */
     const [releaseResultMessage, setReleaseResultMessage] = useState(null);
-    /** Lý do gửi đơn RELEASE_ASSIGNMENT cấp truyện (tối thiểu 10 ký tự). */
+    /** Lý do gửi đơn RELEASE_ASSIGNMENT cấp truyện (tối thiểu số từ — đồng bộ MODERATOR_ESCALATION_REASON_MIN_WORDS). */
     const [releaseReason, setReleaseReason] = useState('');
     /** Lỗi trong popup gửi đơn (validation / API). */
     const [releaseFormError, setReleaseFormError] = useState('');
@@ -602,6 +623,12 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                 for (const g of byStory.values()) {
                     if (storyIdsInStoryPubs.has(g.storyId)) continue;
                     const rep = g.chapters[0];
+                    const submittedTimes = g.chapters
+                        .map((c) => c.submittedAt)
+                        .filter(Boolean)
+                        .map((d) => new Date(d).getTime())
+                        .filter((t) => Number.isFinite(t));
+                    const submittedAt = submittedTimes.length ? new Date(Math.min(...submittedTimes)).toISOString() : (rep?.submittedAt ?? null);
                     chapterGroups.push({
                         type: 'story_group',
                         id: g.storyId,
@@ -612,6 +639,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                         categories: g.categories || [],
                         description: '',
                         status: 'approved',
+                        submittedAt,
                         chapters: g.chapters,
                         representativePublication: rep,
                         chapterCount: g.chapters.length,
@@ -680,6 +708,12 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                 const chapterGroups = [];
                 for (const g of byStory.values()) {
                     const rep = g.chapters[0];
+                    const submittedTimes = g.chapters
+                        .map((c) => c.submittedAt)
+                        .filter(Boolean)
+                        .map((d) => new Date(d).getTime())
+                        .filter((t) => Number.isFinite(t));
+                    const submittedAt = submittedTimes.length ? new Date(Math.min(...submittedTimes)).toISOString() : (rep?.submittedAt ?? null);
                     chapterGroups.push({
                         type: 'story_group',
                         id: g.storyId,
@@ -690,6 +724,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                         categories: g.categories || [],
                         description: '',
                         status: 'rejected',
+                        submittedAt,
                         chapters: g.chapters,
                         representativePublication: rep,
                         chapterCount: g.chapters.length,
@@ -828,6 +863,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             categories: g.categories,
                             description: rep.description ?? '',
                             status: 'pending',
+                            submittedAt: rep.submittedAt ?? null,
                             chapters: g.chapters,
                             representativePublication: rep,
                             chapterCount: g.chapters.length,
@@ -917,6 +953,12 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                     const chapterGroups = [];
                     for (const g of byStory.values()) {
                         const rep = g.chapters[0];
+                        const submittedTimes = g.chapters
+                            .map((c) => c.submittedAt)
+                            .filter(Boolean)
+                            .map((d) => new Date(d).getTime())
+                            .filter((t) => Number.isFinite(t));
+                        const submittedAt = submittedTimes.length ? new Date(Math.min(...submittedTimes)).toISOString() : (rep?.submittedAt ?? null);
                         chapterGroups.push({
                             type: 'story_group',
                             id: g.storyId,
@@ -926,6 +968,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             author: g.author,
                             categories: g.categories || [],
                             status: 'rejected',
+                            submittedAt,
                             chapters: g.chapters,
                             representativePublication: rep,
                             chapterCount: g.chapters.length,
@@ -979,7 +1022,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
 
     const handlePageChange = (page) => {
         setCurrentPage(page);
-        if (filterStatus === 'pending') loadPublications(page);
+        if (filterStatus === 'pending') loadPublications(page, { silent: true });
     };
 
     const loadStats = useCallback(() => {
@@ -1034,6 +1077,10 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
         }, 0);
         return () => clearTimeout(id);
     }, [loadPublications, filterStatus]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [filterStatus, searchKeyword, filterDateFrom, filterDateTo]);
 
     /** Ngay khi vào màn: preload Đã duyệt và Từ chối để chuyển tab thấy ngay. */
     useEffect(() => {
@@ -1126,9 +1173,33 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
         return reviewDeadlineAfterDaysUtc(days);
     };
 
-    const filteredPublications = (filterStatus === 'pending' || filterStatus === 'rejected' || filterStatus === 'approved')
-        ? publications.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
-        : publications;
+    const publicationDateForFilter = (pub) => {
+        if (pub.type === 'story_group' && pub.representativePublication) {
+            return pub.submittedAt ?? pub.representativePublication.submittedAt ?? null;
+        }
+        return pub.submittedAt ?? null;
+    };
+
+    const normalizedKeyword = String(searchKeyword ?? '').trim().toLowerCase();
+    const baseFilteredPublications = publications.filter((pub) => {
+        if (normalizedKeyword) {
+            const storyTitle = String(pub?.storyTitle ?? '').toLowerCase();
+            const author = String(pub?.author ?? '').toLowerCase();
+            if (!storyTitle.includes(normalizedKeyword) && !author.includes(normalizedKeyword)) return false;
+        }
+        if (!filterDateFrom && !filterDateTo) return true;
+        const rawDate = publicationDateForFilter(pub);
+        if (!rawDate) return false;
+        const itemYmd = extractApiDateYmd(rawDate);
+        if (!itemYmd) return false;
+        if (filterDateFrom && itemYmd < filterDateFrom) return false;
+        if (filterDateTo && itemYmd > filterDateTo) return false;
+        return true;
+    });
+    const derivedTotalCount = baseFilteredPublications.length;
+    const derivedTotalPages = Math.max(1, Math.ceil(derivedTotalCount / PAGE_SIZE));
+    const safeCurrentPage = Math.min(Math.max(1, currentPage), derivedTotalPages);
+    const filteredPublications = baseFilteredPublications.slice((safeCurrentPage - 1) * PAGE_SIZE, safeCurrentPage * PAGE_SIZE);
 
     const handleViewDetail = (publication) => {
         setSelectedPublication(publication);
@@ -1195,8 +1266,11 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
         const target = releaseConfirmTarget;
         if (!target?.storyId) return;
         const reason = releaseReason.trim();
-        if (reason.length < 10) {
-            setReleaseFormError('Lý do cần ít nhất 10 ký tự (theo quy định hệ thống).');
+        const wc = countModeratorEscalationReasonWords(reason);
+        if (wc < MODERATOR_ESCALATION_REASON_MIN_WORDS) {
+            setReleaseFormError(
+                `Lý do cần ít nhất ${MODERATOR_ESCALATION_REASON_MIN_WORDS} từ (hiện tại: ${wc} từ).`,
+            );
             return;
         }
         setReleaseFormError('');
@@ -1444,6 +1518,70 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                 ))}
             </div>
 
+            <div
+                style={{
+                    backgroundColor: '#ffffff',
+                    borderRadius: '12px',
+                    padding: '1rem',
+                    marginBottom: '1rem',
+                    border: '1px solid #e2e8f0',
+                    display: 'flex',
+                    gap: '0.75rem',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                }}
+            >
+                <input
+                    value={searchKeyword}
+                    onChange={(e) => setSearchKeyword(e.target.value)}
+                    placeholder="Tìm theo tên truyện hoặc tên tác giả"
+                    style={{
+                        padding: '0.55rem 0.75rem',
+                        borderRadius: '8px',
+                        border: '1px solid #e2e8f0',
+                        fontSize: '0.875rem',
+                        minWidth: '260px',
+                        flex: 1,
+                    }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <label style={{ fontSize: '0.8125rem', color: '#64748b' }}>Từ ngày</label>
+                    <input
+                        type="date"
+                        value={filterDateFrom}
+                        onChange={(e) => setFilterDateFrom(e.target.value)}
+                        style={{ padding: '0.5rem 0.625rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.875rem' }}
+                    />
+                    <label style={{ fontSize: '0.8125rem', color: '#64748b' }}>Đến ngày</label>
+                    <input
+                        type="date"
+                        value={filterDateTo}
+                        onChange={(e) => setFilterDateTo(e.target.value)}
+                        style={{ padding: '0.5rem 0.625rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.875rem' }}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setSearchKeyword('');
+                            setFilterDateFrom('');
+                            setFilterDateTo('');
+                        }}
+                        style={{
+                            padding: '0.5rem 0.75rem',
+                            fontSize: '0.8125rem',
+                            fontWeight: 600,
+                            backgroundColor: '#f8fafc',
+                            color: '#475569',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        Xóa lọc
+                    </button>
+                </div>
+            </div>
+
             {/* Publications List */}
             {(loading || (filterStatus === 'approved' && approvedCacheLoading) || (filterStatus === 'rejected' && rejectedCacheLoading)) ? (
                 <div style={{
@@ -1479,16 +1617,14 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             onReleaseAllClaimsForStory={handleReleaseAllClaimsForStory}
                             releasingAllClaimsStoryId={releasingAllClaimsStoryId}
                         />
-                        {totalPages > 1 && (
-                            <Pagination
-                                currentPage={currentPage}
-                                totalPages={totalPages}
-                                totalItems={totalCount}
-                                itemsPerPage={PAGE_SIZE}
-                                onPageChange={handlePageChange}
-                                itemLabel="truyện"
-                            />
-                        )}
+                        <Pagination
+                            currentPage={safeCurrentPage}
+                            totalPages={derivedTotalPages}
+                            totalItems={derivedTotalCount}
+                            itemsPerPage={PAGE_SIZE}
+                            onPageChange={handlePageChange}
+                            itemLabel="mục"
+                        />
                     </div>
                 </>
             )}
@@ -1895,10 +2031,10 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <h2 id="release-confirm-title" style={{ margin: '0 0 0.35rem', fontSize: '1.125rem', fontWeight: 700, color: '#0f172a', lineHeight: 1.35 }}>
-                            Trả truyện về hàng đợi kiểm duyệt chung?
+                            Trả truyện về hàng đợi kiểm duyệt chung
                         </h2>
                         <p style={{ margin: '0 0 0.65rem', fontSize: '0.8125rem', fontWeight: 600, color: '#64748b' }}>
-                            Gửi đơn lên quản trị viên — sau khi đơn được <strong>chấp nhận</strong>, hệ thống mới trả các mục về hàng đợi (giống luồng hủy nhận duyệt thông thường).
+                            Gửi đơn lên quản trị viên — sau khi đơn được <strong>chấp nhận</strong>, hệ thống mới trả các mục về hàng đợi.
                         </p>
                         <p style={{ margin: '0 0 0.75rem', fontSize: '0.9375rem', color: '#334155', lineHeight: 1.55 }}>
                             Yêu cầu này áp dụng cho <strong>tất cả chương</strong> bạn đang giữ trong truyện
@@ -1914,12 +2050,12 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             </p>
                         ) : null}
                         <label style={{ display: 'block', marginBottom: '0.75rem', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
-                            Lý do gửi đơn <span style={{ color: '#ef4444' }}>*</span> (tối thiểu 10 ký tự)
+                            Lý do gửi đơn <span style={{ color: '#ef4444' }}>*</span> (tối thiểu {MODERATOR_ESCALATION_REASON_MIN_WORDS} từ)
                             <textarea
                                 value={releaseReason}
                                 onChange={(e) => { setReleaseReason(e.target.value); if (releaseFormError) setReleaseFormError(''); }}
                                 rows={4}
-                                placeholder="Ví dụ: Không đủ thời gian xử lý hết khối chương, đề nghị trả về hàng đợi..."
+                                placeholder={`Trình bày chi tiết (tối thiểu ${MODERATOR_ESCALATION_REASON_MIN_WORDS} từ), ví dụ: không đủ thời gian xử lý hết khối chương, đề nghị trả về hàng đợi chung...`}
                                 disabled={!!releasingAllClaimsStoryId}
                                 style={{
                                     display: 'block',

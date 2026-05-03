@@ -36,17 +36,23 @@ function formatVnd(amount) {
 }
 
 function formatTime(iso) {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString('vi-VN');
+    if (!iso) return '—';
+    const raw = String(iso).trim();
+    const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+    const d = new Date(hasTimezone ? raw : `${raw}Z`);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour12: false,
+    });
 }
 
 function statusPill(status) {
     const s = String(status || '').toUpperCase();
-    if (s === 'SUCCESS' || s === 'COMPLETED') return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
-    if (s === 'PENDING' || s === 'PENDING_REVIEW' || s === 'PROCESSING') return 'bg-amber-50 text-amber-700 ring-amber-200';
+    if (s === 'SUCCESS' || s === 'COMPLETED') return 'bg-[#ecfdf5] text-[#047857] ring-[#c9f0d8]';
+    if (s === 'PENDING' || s === 'PENDING_REVIEW' || s === 'PROCESSING') return 'bg-amber-50 text-amber-800 ring-amber-200';
     if (s === 'FAILED' || s === 'CANCELLED') return 'bg-red-50 text-red-700 ring-red-200';
-    return 'bg-slate-100 text-slate-700 ring-slate-200';
+    return 'bg-slate-50 text-slate-700 ring-[#c9f0d8]';
 }
 
 function typeLabel(type) {
@@ -58,9 +64,9 @@ function typeLabel(type) {
 
 function typeBadge(type) {
     const t = String(type || '').toUpperCase();
-    if (t === 'DEPOSIT') return 'bg-sky-50 text-sky-700 ring-sky-200';
-    if (t === 'WITHDRAW') return 'bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-200';
-    return 'bg-slate-100 text-slate-700 ring-slate-200';
+    if (t === 'DEPOSIT') return 'bg-[#ecfdf5] text-[#047857] ring-[#c9f0d8]';
+    if (t === 'WITHDRAW') return 'bg-[#fdf4ff] text-[#86198f] ring-[#f5d0fe]';
+    return 'bg-slate-50 text-slate-700 ring-[#c9f0d8]';
 }
 
 function safeFraudReview(tx) {
@@ -354,21 +360,21 @@ export function AdminTransactions() {
                             setSelected(null);
                             setReviewNote('');
                         }}
-                        className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
+                        className="inline-flex items-center gap-2 rounded-full border border-[#c9f0d8] bg-[#ecfdf5] px-3 py-1.5 text-[11px] font-semibold text-[#047857] hover:bg-[#d1fae5] transition-colors"
                         title={pendingWithdrawPollError || 'Xem các yêu cầu rút tiền chờ duyệt'}
                     >
                         <span>Rút tiền chờ duyệt</span>
-                        <span className="inline-flex min-w-[18px] justify-center rounded-full bg-white px-2 py-0.5 text-[10px] font-extrabold text-emerald-700">
+                        <span className="inline-flex min-w-[18px] justify-center rounded-full bg-white px-2 py-0.5 text-[10px] font-extrabold text-[#047857] ring-1 ring-[#c9f0d8]">
                             {pendingWithdrawCount}
                         </span>
                     </button>
-                    <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">
+                    <span className="inline-flex items-center rounded-full bg-[#f0faf5] px-2 py-1 text-[10px] font-semibold text-[#047857] ring-1 ring-[#c9f0d8]">
                         {loading ? '...' : `${totalCount} giao dịch`}
                     </span>
                 </div>
             </div>
 
-            <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+            <section className="bg-white rounded-xl border border-[#c9f0d8] shadow-sm p-5 space-y-4">
                 <div className="flex flex-wrap items-center gap-2">
                     {[
                         { id: 'ALL', label: 'Tất cả' },
@@ -381,20 +387,20 @@ export function AdminTransactions() {
                             onClick={() => setTypeFilter(t.id)}
                             className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 transition ${
                                 typeFilter === t.id
-                                    ? 'bg-primary/10 text-primary ring-primary/20'
-                                    : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50'
+                                    ? 'bg-[#ecfdf5] text-[#047857] ring-[#c9f0d8]'
+                                    : 'bg-white text-slate-700 ring-[#cbd5e1] hover:bg-[#f7fcf9]'
                             }`}
                         >
                             {t.label}
                         </button>
                     ))}
 
-                    <div className="h-5 w-px bg-slate-200 mx-1" />
+                    <div className="h-5 w-px bg-[#c9f0d8] mx-1" />
 
                     <select
                         value={statusFilter}
                         onChange={(e) => setStatusFilter(e.target.value)}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] text-slate-900"
+                        className="rounded-lg border border-[#cbd5e1] bg-white px-3 py-1.5 text-[11px] text-slate-900 focus:border-[#22c55e] focus:outline-none focus:ring-2 focus:ring-[#22c55e]/25"
                     >
                         <option value="ALL">Tất cả trạng thái</option>
                         <option value="COMPLETED">Hoàn thành</option>
@@ -411,14 +417,14 @@ export function AdminTransactions() {
                             type="date"
                             value={fromDate}
                             onChange={(e) => setFromDate(e.target.value)}
-                            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] text-slate-900"
+                            className="rounded-lg border border-[#cbd5e1] bg-white px-3 py-1.5 text-[11px] text-slate-900 focus:border-[#22c55e] focus:outline-none focus:ring-2 focus:ring-[#22c55e]/25"
                         />
                         <span className="text-[11px] text-slate-400">→</span>
                         <input
                             type="date"
                             value={toDate}
                             onChange={(e) => setToDate(e.target.value)}
-                            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] text-slate-900"
+                            className="rounded-lg border border-[#cbd5e1] bg-white px-3 py-1.5 text-[11px] text-slate-900 focus:border-[#22c55e] focus:outline-none focus:ring-2 focus:ring-[#22c55e]/25"
                         />
                     </div>
                 </div>
@@ -428,7 +434,7 @@ export function AdminTransactions() {
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         placeholder="Tìm theo mã giao dịch, email, gateway ref…"
-                        className="flex-1 min-w-[240px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                        className="flex-1 min-w-[240px] rounded-lg border border-[#cbd5e1] bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#22c55e]/25 focus:border-[#22c55e]"
                     />
                     {[
                         { id: 'AMOUNT_ANOMALY', label: 'Số tiền bất thường' },
@@ -443,8 +449,8 @@ export function AdminTransactions() {
                                 onClick={() => toggleRiskFlag(flag.id)}
                                 className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 transition ${
                                     active
-                                        ? 'bg-violet-50 text-violet-700 ring-violet-200'
-                                        : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50'
+                                        ? 'bg-[#ecfdf5] text-[#047857] ring-[#c9f0d8]'
+                                        : 'bg-white text-slate-700 ring-[#cbd5e1] hover:bg-[#f7fcf9]'
                                 }`}
                             >
                                 {active ? `Đang lọc: ${flag.label}` : flag.label}
@@ -457,7 +463,7 @@ export function AdminTransactions() {
                         className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 transition ${
                             fraudOnly
                                 ? 'bg-rose-50 text-rose-700 ring-rose-200'
-                                : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50'
+                                : 'bg-white text-slate-700 ring-[#cbd5e1] hover:bg-[#f7fcf9]'
                         }`}
                     >
                         {fraudOnly ? 'Đang lọc: nghi ngờ gian lận' : 'Chỉ xem nghi ngờ gian lận'}
@@ -474,40 +480,54 @@ export function AdminTransactions() {
                             setRiskFlagFilters([]);
                             setPage(1);
                         }}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                        className="rounded-lg border border-[#cbd5e1] bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-[#f7fcf9]"
                     >
                         Reset
                     </button>
                 </div>
 
-                <div className="overflow-hidden rounded-lg border border-slate-200">
-                    <table className="w-full text-[11px]">
-                        <thead className="bg-slate-50">
-                            <tr className="text-left text-slate-500">
-                                <th className="px-3 py-2 font-medium">Thời gian</th>
-                                <th className="px-3 py-2 font-medium">Người dùng</th>
-                                <th className="px-3 py-2 font-medium">Loại</th>
-                                <th className="px-3 py-2 font-medium text-right">Số tiền</th>
-                                <th className="px-3 py-2 font-medium">Phương thức</th>
-                                <th className="px-3 py-2 font-medium">Trạng thái</th>
-                                <th className="px-3 py-2 font-medium">Mã tham chiếu</th>
-                                <th className="px-3 py-2 font-medium text-right">Tác vụ</th>
+                <div className="overflow-hidden rounded-lg border border-[#c9f0d8]">
+                    <table className="w-full border-collapse text-[11px] text-slate-800">
+                        <thead>
+                            <tr className="border-b border-[#c9f0d8] bg-[#f0faf5]">
+                                <th className="px-3 py-2.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                    Thời gian
+                                </th>
+                                <th className="px-3 py-2.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                    Người dùng
+                                </th>
+                                <th className="px-3 py-2.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                    Loại
+                                </th>
+                                <th className="px-3 py-2.5 text-right text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                    Số tiền
+                                </th>
+                                <th className="px-3 py-2.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                    Phương thức
+                                </th>
+                                <th className="px-3 py-2.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                    Trạng thái
+                                </th>
+                                <th className="px-3 py-2.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                    Mã tham chiếu
+                                </th>
+                                <th className="px-3 py-2.5 text-right text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                    Tác vụ
+                                </th>
                             </tr>
                         </thead>
-                        <tbody className="bg-white">
+                        <tbody>
                             {filtered.length === 0 ? (
-                                <tr>
+                                <tr className="bg-white">
                                     <td className="px-3 py-10 text-center text-slate-500" colSpan={8}>
                                         {loading ? 'Đang tải...' : 'Không có giao dịch phù hợp bộ lọc.'}
                                     </td>
                                 </tr>
                             ) : (
-                                filtered.map((tx, idx) => (
+                                filtered.map((tx) => (
                                     <tr
                                         key={tx.id}
-                                        className={`border-t border-slate-100 cursor-pointer ${
-                                            idx % 2 === 1 ? 'bg-slate-50/40' : ''
-                                        } hover:bg-primary/5`}
+                                        className="cursor-pointer border-t border-[#c9f0d8] bg-white transition-colors first:border-t-0 hover:bg-[#f7fcf9]"
                                         onClick={() => {
                                             setReviewNote('');
                                             setSelected(tx);
@@ -566,7 +586,7 @@ export function AdminTransactions() {
                                                     className={`rounded-lg border px-2.5 py-1 text-[10px] font-semibold ${
                                                         syncingWithdrawId === tx.id
                                                             ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
-                                                            : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                                            : 'border-[#c9f0d8] bg-[#ecfdf5] text-[#047857] hover:bg-[#d1fae5]'
                                                     }`}
                                                 >
                                                     {syncingWithdrawId === tx.id ? 'Đang sync…' : 'Sync'}
@@ -635,7 +655,7 @@ export function AdminTransactions() {
                                         className={`rounded-lg border px-3 py-2 text-[11px] font-semibold ${
                                             actionLoading
                                                 ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
-                                                : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                                : 'border-[#c9f0d8] bg-[#ecfdf5] text-[#047857] hover:bg-[#d1fae5]'
                                         }`}
                                     >
                                         {actionLoading ? 'Đang đồng bộ…' : 'Sync trạng thái'}

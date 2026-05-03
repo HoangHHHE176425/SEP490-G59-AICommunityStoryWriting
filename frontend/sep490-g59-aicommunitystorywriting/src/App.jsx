@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { AdminProtectedRoute } from './components/admin/AdminProtectedRoute';
 import { AuthSessionHandler } from './components/auth/AuthSessionHandler';
+import { AuthorPolicyResignGuard } from './components/auth/AuthorPolicyResignGuard';
 import Homepage from './pages/homepage/Homepage';
 import { StoryDetail } from './pages/story-detail/StoryDetail';
 import { AdminPage } from './pages/admin/AdminPage';
@@ -22,6 +23,7 @@ import PolicyPage from './pages/policy/PolicyPage';
 import FaqPage from './pages/faq/FaqPage';
 import Donate from './pages/donate/Donate';
 import GoogleCallback from './pages/auth/GoogleCallback';
+import NotificationListPage from './pages/notifications/NotificationListPage';
 import { ScrollToTop } from './components/routing/ScrollToTop';
 
 export default function App() {
@@ -29,6 +31,7 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <AuthSessionHandler />
+        <AuthorPolicyResignGuard />
         <ScrollToTop />
         <Routes>
           <Route path="/" element={<AboutUs />} />
@@ -55,6 +58,7 @@ export default function App() {
           <Route path="/about-us" element={<AboutUs />} />
           <Route path="/policy" element={<PolicyPage />} />
           <Route path="/faq" element={<FaqPage />} />
+          <Route path="/notifications" element={<NotificationListPage />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

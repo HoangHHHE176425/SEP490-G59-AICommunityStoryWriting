@@ -37,7 +37,7 @@ const ALL_MENU_ITEMS = [
     { id: 'wallet-dashboard', label: 'Ví hệ thống', icon: Wallet },
     { id: 'categories', label: 'Quản lý thể loại', icon: Bookmark },
     { id: 'publication', label: 'Quản lý xuất bản', icon: CheckSquare },
-    { id: 'moderator-logs', label: 'Quản lý nhật ký kiểm duyệt', icon: FileText },
+    { id: 'moderator-logs', label: 'Nhật ký kiểm duyệt', icon: FileText },
     { id: 'review-escalations', label: 'Quản lý đơn kiểm duyệt', icon: Flag },
     { id: 'stories', label: 'Quản lý truyện', icon: FileText },
     { id: 'violations', label: 'Quản lý vi phạm', icon: AlertTriangle },
@@ -595,8 +595,8 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                                         padding: '0.75rem 1rem',
                                         border: 'none',
                                         borderRadius: '0.5rem',
-                                    backgroundColor: isActive ? 'var(--admin-primary-soft)' : 'transparent',
-                                    color: isActive ? 'var(--admin-primary)' : 'var(--admin-muted)',
+                                        backgroundColor: isActive ? 'var(--admin-primary-soft)' : 'transparent',
+                                        color: isActive ? 'var(--admin-primary)' : 'var(--admin-muted)',
                                         fontSize: '0.875rem',
                                         fontWeight: 500,
                                         cursor: 'pointer',
@@ -647,7 +647,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                 }}
                 className={isSidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}
             >
-                <div style={{ padding: '1.5rem' }}>
+                <div style={{ padding: '0 1.5rem 1.5rem' }}>
                     {children}
                 </div>
             </main>

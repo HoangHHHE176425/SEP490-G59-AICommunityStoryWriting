@@ -1,4 +1,5 @@
 using BusinessObjects;
+using BusinessObjects.Account;
 using BusinessObjects.Entities;
 using DataAccessObjects.Queries;
 using Microsoft.EntityFrameworkCore;
@@ -25,10 +26,106 @@ namespace DataAccessObjects.DAOs
 
         public async Task<users?> FindUserById(StoryPlatformDbContext context, Guid id)
         {
+            // Do not Include(stories): tracking many stories on every GetUserById caused SaveChanges to UPDATE
+            // story rows (or hit concurrency) during profile/password/admin updates. Use GetAuthorStoryAggregatesAsync for stats.
             return await context.users
                 .Include(u => u.user_profiles)
-                .Include(u => u.stories) // Include truyện để đếm view, like, số lượng
                 .FirstOrDefaultAsync(u => u.id == id);
+        }
+
+        /// <summary>Aggregates for profile/stats without loading every story entity into the change tracker.</summary>
+        public async Task<(int StoryCount, long TotalViews, int TotalFavorites)> GetAuthorStoryAggregatesAsync(
+            StoryPlatformDbContext context,
+            Guid authorId)
+        {
+            var stats = await context.stories
+                .AsNoTracking()
+                .Where(s => s.author_id == authorId)
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Count = g.Count(),
+                    TotalViews = g.Sum(s => (long)(s.total_views ?? 0)),
+                    TotalFavorites = g.Sum(s => s.total_favorites ?? 0)
+                })
+                .FirstOrDefaultAsync();
+
+            return stats == null
+                ? (0, 0L, 0)
+                : (stats.Count, stats.TotalViews, stats.TotalFavorites);
+        }
+
+        public Task<bool> UserExistsAsync(StoryPlatformDbContext context, Guid userId)
+            => context.users.AnyAsync(u => u.id == userId);
+
+        public async Task<string?> GetUserProfileNicknameAsync(StoryPlatformDbContext context, Guid userId)
+        {
+            return await context.user_profiles
+                .AsNoTracking()
+                .Where(p => p.user_id == userId)
+                .Select(p => p.nickname)
+                .FirstOrDefaultAsync();
+        }
+
+        /// <summary>
+        /// Loads only <see cref="users"/> and <see cref="user_profiles"/> for this user, then saves.
+        /// Avoids re-attaching unrelated tracked entities that can cause UPDATE ... 0 rows (concurrency exceptions).
+        /// </summary>
+        public async Task PersistUserProfileAsync(StoryPlatformDbContext context, Guid userId, UserProfilePersistModel model)
+        {
+            var user = await context.users.FirstOrDefaultAsync(u => u.id == userId);
+            if (user == null)
+            {
+                throw new InvalidOperationException("User not found");
+            }
+
+            var profile = await context.user_profiles.FirstOrDefaultAsync(p => p.user_id == userId);
+            if (profile == null)
+            {
+                profile = new user_profiles
+                {
+                    user_id = userId,
+                    social_links = "{}",
+                    settings = "{\"allow_notif\": true}"
+                };
+                context.user_profiles.Add(profile);
+            }
+
+            if (model.SetNickname)
+            {
+                profile.nickname = model.Nickname;
+            }
+
+            if (model.SetPhone)
+            {
+                profile.phone = model.Phone;
+            }
+
+            if (model.SetIdNumber)
+            {
+                profile.id_number = model.IdNumber;
+            }
+
+            if (model.SetBio)
+            {
+                profile.bio = model.Bio;
+            }
+
+            if (model.SetDescription)
+            {
+                profile.description = model.Description;
+            }
+
+            if (model.SetAvatarUrl)
+            {
+                profile.avatar_url = model.AvatarUrl;
+            }
+
+            var now = DateTime.UtcNow;
+            profile.updated_at = now;
+            user.updated_at = now;
+
+            await context.SaveChangesAsync();
         }
 
         public async Task<bool> CheckEmailExists(StoryPlatformDbContext context, string email)
@@ -44,7 +141,14 @@ namespace DataAccessObjects.DAOs
 
         public async Task UpdateUser(StoryPlatformDbContext context, users user)
         {
-            context.users.Update(user);
+            // Do not use DbSet.Update(user): it marks the whole tracked graph Modified and can UPDATE unrelated rows.
+            var entry = context.Entry(user);
+            if (entry.State == EntityState.Detached)
+            {
+                context.Attach(user);
+                entry.State = EntityState.Modified;
+            }
+
             await context.SaveChangesAsync();
         }
 
@@ -86,6 +190,69 @@ namespace DataAccessObjects.DAOs
             context.auth_tokens.RemoveRange(tokens);
             await context.SaveChangesAsync();
         }
+
+        /// <summary>
+        /// Bật cờ must_resign_policy cho các AUTHOR chưa ký policy AUTHOR đang active.
+        /// </summary>
+        public async Task<int> MarkAuthorsMustResignPolicyAsync(StoryPlatformDbContext context, Guid activeAuthorPolicyId)
+        {
+            var policyEffectiveFrom = await context.system_policies
+                .AsNoTracking()
+                .Where(p => p.id == activeAuthorPolicyId)
+                .Select(p => p.activated_at ?? p.created_at)
+                .FirstOrDefaultAsync() ?? DateTime.MinValue;
+
+            var acceptedAuthorIds = await context.author_policy_acceptances
+                .AsNoTracking()
+                .Where(a => a.policy_id == activeAuthorPolicyId && a.accepted_at >= policyEffectiveFrom)
+                .Select(a => a.user_id)
+                .Distinct()
+                .ToListAsync();
+
+            var targetAuthors = await context.users
+                .Where(u =>
+                    (u.role ?? "").ToUpper() == "AUTHOR" &&
+                    (u.status ?? "").ToUpper() == "ACTIVE" &&
+                    !acceptedAuthorIds.Contains(u.id))
+                .ToListAsync();
+
+            if (targetAuthors.Count == 0) return 0;
+
+            var now = DateTime.UtcNow;
+            foreach (var author in targetAuthors)
+            {
+                author.must_resign_policy = true;
+                author.updated_at = now;
+            }
+
+            await context.SaveChangesAsync();
+            return targetAuthors.Count;
+        }
+
+        /// <summary>
+        /// Xóa cờ must_resign_policy cho tất cả AUTHOR (dùng khi policy active không bắt buộc ký lại).
+        /// </summary>
+        public async Task<int> ClearAuthorMustResignPolicyFlagAsync(StoryPlatformDbContext context)
+        {
+            var authors = await context.users
+                .Where(u =>
+                    (u.role ?? "").ToUpper() == "AUTHOR" &&
+                    u.must_resign_policy == true)
+                .ToListAsync();
+
+            if (authors.Count == 0) return 0;
+
+            var now = DateTime.UtcNow;
+            foreach (var author in authors)
+            {
+                author.must_resign_policy = false;
+                author.updated_at = now;
+            }
+
+            await context.SaveChangesAsync();
+            return authors.Count;
+        }
+
         public async Task<bool> IsNicknameExist(StoryPlatformDbContext context, string nickname, Guid currentUserId)
         {
             return await context.user_profiles
@@ -107,7 +274,6 @@ namespace DataAccessObjects.DAOs
 
                 user.updated_at = DateTime.UtcNow;
 
-                context.users.Update(user);
                 await context.SaveChangesAsync();
             }
         }
@@ -115,6 +281,17 @@ namespace DataAccessObjects.DAOs
         {
             using var context = new StoryPlatformDbContext();
             return context.users.Any(u => u.id == id);
+        }
+
+        public static bool IsAuthor(Guid userId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var user = context.users.AsNoTracking().FirstOrDefault(u => u.id == userId);
+            if (user == null)
+                return false;
+
+            return string.Equals(user.role, "AUTHOR", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(user.status, "BANNED", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>Tìm user id theo email hoặc nickname (chứa chuỗi) — dùng lọc moderator performance.</summary>
@@ -218,23 +395,34 @@ namespace DataAccessObjects.DAOs
                 .Include(u => u.user_profiles)
                 .AsQueryable();
 
+            var isIdSearch = false;
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
-                var s = query.Search.Trim().ToLowerInvariant();
-                q = q.Where(u =>
-                    u.email.ToLower().Contains(s) ||
-                    (u.user_profiles != null && u.user_profiles.nickname != null && u.user_profiles.nickname.ToLower().Contains(s)) ||
-                    (u.user_profiles != null && u.user_profiles.phone != null && u.user_profiles.phone.ToLower().Contains(s)) ||
-                    (u.user_profiles != null && u.user_profiles.id_number != null && u.user_profiles.id_number.ToLower().Contains(s)));
+                var rawSearch = query.Search.Trim();
+                if (Guid.TryParse(rawSearch, out var userId))
+                {
+                    // If the input is a UUID, prioritize an exact id lookup.
+                    isIdSearch = true;
+                    q = q.Where(u => u.id == userId);
+                }
+                else
+                {
+                    var s = rawSearch.ToLowerInvariant();
+                    q = q.Where(u =>
+                        u.email.ToLower().Contains(s) ||
+                        (u.user_profiles != null && u.user_profiles.nickname != null && u.user_profiles.nickname.ToLower().Contains(s)) ||
+                        (u.user_profiles != null && u.user_profiles.phone != null && u.user_profiles.phone.ToLower().Contains(s)) ||
+                        (u.user_profiles != null && u.user_profiles.id_number != null && u.user_profiles.id_number.ToLower().Contains(s)));
+                }
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Role))
+            if (!isIdSearch && !string.IsNullOrWhiteSpace(query.Role))
             {
                 var r = query.Role.Trim().ToUpperInvariant();
                 q = q.Where(u => (u.role ?? "").ToUpper() == r);
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Status))
+            if (!isIdSearch && !string.IsNullOrWhiteSpace(query.Status))
             {
                 var st = query.Status.Trim().ToUpperInvariant();
                 q = q.Where(u => (u.status ?? "").ToUpper() == st);
@@ -283,11 +471,22 @@ namespace DataAccessObjects.DAOs
 
         public static bool IsAuthorWritingSuspended(Guid authorUserId)
         {
+            if (authorUserId == Guid.Empty) return false;
             using var context = new StoryPlatformDbContext();
-            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == authorUserId);
-            if (u?.author_writing_suspended_until == null)
-                return false;
-            return u.author_writing_suspended_until > DateTime.UtcNow;
+            var until = context.users.AsNoTracking()
+                .Where(u => u.id == authorUserId)
+                .Select(u => u.author_writing_suspended_until)
+                .FirstOrDefault();
+            return until.HasValue && until.Value > DateTime.UtcNow;
+        }
+
+        /// <summary>Số user có role AUTHOR, không tính tài khoản đã ban (thống kê công khai /community/stats).</summary>
+        public static int CountAuthorsExcludingBanned()
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.users.AsNoTracking().Count(u =>
+                (u.role ?? "").ToUpper() == "AUTHOR" &&
+                (u.status ?? "").ToUpper() != "BANNED");
         }
 
         /// <summary>Kiểm tra users.status == BANNED (thư viện / lọc danh sách công khai).</summary>
@@ -309,9 +508,12 @@ namespace DataAccessObjects.DAOs
         /// <summary>Mốc đình chỉ quyền viết (UTC) — dùng cho thông báo lỗi / DTO.</summary>
         public static DateTime? GetAuthorWritingSuspendedUntilUtc(Guid userId)
         {
+            if (userId == Guid.Empty) return null;
             using var context = new StoryPlatformDbContext();
-            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == userId);
-            return u?.author_writing_suspended_until;
+            return context.users.AsNoTracking()
+                .Where(u => u.id == userId)
+                .Select(u => u.author_writing_suspended_until)
+                .FirstOrDefault();
         }
 
         /// <summary>Batch: status + author_writing_suspended_until cho hàng đợi compliance.</summary>
@@ -363,10 +565,46 @@ namespace DataAccessObjects.DAOs
 
         public static void SetAuthorWritingSuspendedUntil(Guid userId, DateTime? untilUtc)
         {
+            if (userId == Guid.Empty) return;
             using var context = new StoryPlatformDbContext();
-            var u = context.users.FirstOrDefault(x => x.id == userId)
-                ?? throw new InvalidOperationException("User not found.");
+            var u = context.users.FirstOrDefault(x => x.id == userId);
+            if (u == null) return;
             u.author_writing_suspended_until = untilUtc;
+            u.updated_at = DateTime.UtcNow;
+            context.SaveChanges();
+        }
+
+        public static long GetAiTokenLimit(Guid userId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.users.AsNoTracking()
+                .Where(u => u.id == userId)
+                .Select(u => u.ai_token_limit)
+                .FirstOrDefault();
+        }
+
+        /// <summary>Trừ token AI khỏi số dư. Không cho phép âm (nếu thiếu thì clamp về 0).</summary>
+        public static void DebitAiTokenLimit(Guid userId, long tokens)
+        {
+            if (userId == Guid.Empty || tokens <= 0) return;
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.FirstOrDefault(x => x.id == userId);
+            if (u == null) return;
+            var cur = u.ai_token_limit;
+            var next = cur - tokens;
+            u.ai_token_limit = next >= 0 ? next : 0;
+            u.updated_at = DateTime.UtcNow;
+            context.SaveChanges();
+        }
+
+        /// <summary>Cộng token AI vào số dư.</summary>
+        public static void CreditAiTokenLimit(Guid userId, long tokens)
+        {
+            if (userId == Guid.Empty || tokens <= 0) return;
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.FirstOrDefault(x => x.id == userId);
+            if (u == null) return;
+            u.ai_token_limit = checked(u.ai_token_limit + tokens);
             u.updated_at = DateTime.UtcNow;
             context.SaveChanges();
         }
@@ -390,6 +628,36 @@ namespace DataAccessObjects.DAOs
                 .Where(u => u.id == userId)
                 .Select(u => u.email)
                 .FirstOrDefault();
+        }
+
+        /// <summary>Đặt một hoặc nhiều giới hạn token AI; chỉ cập nhật trường khi cờ set tương ứng là true (null = bỏ giới hạn cột đó).</summary>
+        public async Task<int> SetAuthorAiTokenBudgetLimitsAsync(
+            StoryPlatformDbContext context,
+            Guid userId,
+            bool setLifetime,
+            long? lifetimeLimit,
+            bool setPerDay,
+            long? perDayLimit,
+            bool setPerWeek,
+            long? perWeekLimit,
+            bool setPerMonth,
+            long? perMonthLimit,
+            CancellationToken cancellationToken = default)
+        {
+            var u = await context.users.FirstOrDefaultAsync(x => x.id == userId, cancellationToken);
+            if (u == null) return 0;
+            // Schema mới: chỉ dùng users.ai_token_limit (số dư token).
+            // Giữ signature để tương thích ngược; chỉ lấy lifetimeLimit.
+            _ = setPerDay;
+            _ = perDayLimit;
+            _ = setPerWeek;
+            _ = perWeekLimit;
+            _ = setPerMonth;
+            _ = perMonthLimit;
+            if (setLifetime)
+                u.ai_token_limit = Math.Max(0L, lifetimeLimit ?? 0L);
+            u.updated_at = DateTime.UtcNow;
+            return await context.SaveChangesAsync(cancellationToken);
         }
     }
 }

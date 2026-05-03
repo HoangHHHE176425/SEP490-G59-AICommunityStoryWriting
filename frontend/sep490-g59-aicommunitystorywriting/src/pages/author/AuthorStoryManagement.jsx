@@ -18,6 +18,8 @@ import { useToast } from '../../components/author/story-editor/Toast';
 import { Pagination } from '../../components/pagination/Pagination';
 import { setAuthorChapterListActive } from '../../utils/authorUiFlags';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { getAiUsageLimit } from '../../api/ai/aiApi';
+import { getNotifications } from '../../api/notification/notificationApi';
 
 function mapStoryFromApi(item) {
     const status = item.status || item.Status || '';
@@ -27,7 +29,7 @@ function mapStoryFromApi(item) {
         PENDING_REVIEW: 'Chờ duyệt',
         REJECTED: 'Bị từ chối',
         PUBLISHED: 'Đã xuất bản',
-        HIDDEN: 'Đã ẩn',
+        HIDDEN: 'Đã ẩn vĩnh viễn',
         COMPLETED: 'Hoàn thành',
         CANCELLED: 'Đã hủy',
     };
@@ -49,7 +51,7 @@ function mapStoryFromApi(item) {
         : categoryNamesArr.map((name) => ({ id: name, name })); // fallback: chỉ có tên
     const updatedAt = item.updatedAt || item.UpdatedAt;
     const lastUpdate = updatedAt
-        ? new Date(updatedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        ? new Date(updatedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })
         : '';
     const coverPath = item.coverImage ?? item.CoverImage;
     const summary = item.summary ?? item.Summary ?? '';
@@ -269,6 +271,14 @@ export function AuthorStoryManagement({ onBack }) {
     const MIN_WITHDRAW_VND = 50_000;
     const MIN_WITHDRAW_COINS = Math.floor(MIN_WITHDRAW_VND / COIN_RATE_VND); // 500
 
+    const withdrawBalanceNum =
+        withdrawBalance != null && withdrawBalance !== '' ? Number(withdrawBalance) : null;
+    /** Tránh min > max trên input[type=number] (gây tooltip tiếng Anh sai nghĩa khi số dư < mức tối thiểu). */
+    const withdrawInputUseNativeMinMax =
+        withdrawBalanceNum != null &&
+        Number.isFinite(withdrawBalanceNum) &&
+        withdrawBalanceNum >= MIN_WITHDRAW_COINS;
+
     const formatVnd = (vnd) => {
         try {
             return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(vnd || 0);
@@ -302,6 +312,13 @@ export function AuthorStoryManagement({ onBack }) {
     const [followersTotalCount, setFollowersTotalCount] = useState(0);
     const [followersSearchInput, setFollowersSearchInput] = useState('');
     const [followersSearchKeyword, setFollowersSearchKeyword] = useState('');
+    const [authorAiBudget, setAuthorAiBudget] = useState(null);
+    const [authorAiBudgetLoading, setAuthorAiBudgetLoading] = useState(false);
+    const [authorAiBudgetError, setAuthorAiBudgetError] = useState(null);
+    const [authorReportNotifications, setAuthorReportNotifications] = useState([]);
+    const [authorReportLoading, setAuthorReportLoading] = useState(false);
+    const [authorReportError, setAuthorReportError] = useState(null);
+    const [reportStoryFilterId, setReportStoryFilterId] = useState('');
 
     // Danh sách tài khoản ngân hàng (load từ backend)
     const [bankAccounts, setBankAccounts] = useState([]);
@@ -318,6 +335,40 @@ export function AuthorStoryManagement({ onBack }) {
         if (Number.isNaN(d.getTime())) return iso || '—';
         return d.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
+
+    const parseStoryIdFromNotificationLink = useCallback((linkUrl) => {
+        const value = String(linkUrl || '');
+        const fromStory = value.match(/\/story\/([0-9a-fA-F-]{36})/i);
+        const fromLegacy = value.match(/\/Stories\/Details\/([0-9a-fA-F-]{36})/i);
+        return fromStory?.[1] ?? fromLegacy?.[1] ?? '';
+    }, []);
+
+    const loadAuthorReportNotifications = useCallback(async () => {
+        setAuthorReportLoading(true);
+        setAuthorReportError(null);
+        try {
+            const list = await getNotifications({ limit: 100, onlyUnread: false });
+            const reportTypes = new Set(['STORY_REPORTED_TO_AUTHOR', 'COMMENT_REPORTED_TO_OWNER']);
+            const mapped = (Array.isArray(list) ? list : [])
+                .filter((n) => reportTypes.has(String(n?.type ?? '').toUpperCase()))
+                .map((n) => ({
+                    ...n,
+                    storyIdFromLink: parseStoryIdFromNotificationLink(n?.linkUrl),
+                }))
+                .sort((a, b) => {
+                    const ta = Date.parse(a?.createdAt ?? '') || 0;
+                    const tb = Date.parse(b?.createdAt ?? '') || 0;
+                    return tb - ta;
+                });
+            setAuthorReportNotifications(mapped);
+        } catch (err) {
+            const message = err?.response?.data?.message ?? err?.message ?? 'Không tải được danh sách báo cáo.';
+            setAuthorReportError(message);
+            setAuthorReportNotifications([]);
+        } finally {
+            setAuthorReportLoading(false);
+        }
+    }, [parseStoryIdFromNotificationLink]);
 
     const withdrawBankAccounts = bankAccounts;
     const selectedBankAccount = withdrawBankAccounts[selectedBankAccountIdx] ?? null;
@@ -404,8 +455,10 @@ export function AuthorStoryManagement({ onBack }) {
                             // Giữ lại flag FE để chặn cập nhật trạng thái tiến độ khi có chương đang chờ duyệt.
                             mapped._hasPendingReviewChapter = item._hasPendingReviewChapter === true;
                             if (mapped.isComplianceHidden) {
+                                const isPermanentHidden = String(item.status ?? item.Status ?? '').toUpperCase() === 'HIDDEN';
                                 mapped.status = 'hidden';
-                                mapped.publishStatus = 'Đã ẩn tạm thời';
+                                mapped.publishStatus = isPermanentHidden ? 'Đã ẩn vĩnh viễn' : 'Đã ẩn tạm thời';
+                                mapped.isPermanentlyHidden = isPermanentHidden;
                                 return mapped;
                             }
                             const hasPublished = item._hasPublishedChapter === true;
@@ -513,6 +566,36 @@ export function AuthorStoryManagement({ onBack }) {
     }, [showFollowersModal, followersPage, followersSearchKeyword, loadFollowers]);
 
     useEffect(() => {
+        if (!authorId) {
+            setAuthorAiBudget(null);
+            setAuthorAiBudgetError(null);
+            setAuthorAiBudgetLoading(false);
+            return;
+        }
+        if (activeView !== 'profile') return;
+        let cancelled = false;
+        const loadBudget = async () => {
+            setAuthorAiBudgetLoading(true);
+            setAuthorAiBudgetError(null);
+            try {
+                const data = await getAiUsageLimit();
+                if (cancelled) return;
+                setAuthorAiBudget(data?.authorTokenBudget ?? null);
+            } catch (e) {
+                if (cancelled) return;
+                setAuthorAiBudget(null);
+                setAuthorAiBudgetError(e?.response?.data?.message || e?.message || 'Không tải được token AI.');
+            } finally {
+                if (!cancelled) setAuthorAiBudgetLoading(false);
+            }
+        };
+        loadBudget();
+        return () => {
+            cancelled = true;
+        };
+    }, [authorId, activeView]);
+
+    useEffect(() => {
         if (activeView !== 'bank-accounts' && activeView !== 'history') return;
         setActiveView('profile');
         setActiveMenu('profile');
@@ -540,13 +623,24 @@ export function AuthorStoryManagement({ onBack }) {
 
                 if (res?.success && res?.data?.items) {
                     setAuthorActivityItems(res.data.items);
+                    // Keep withdrawable balance in sync after admin approves / PayOS completes (poll only refreshed activity before).
+                    if (activeView === 'withdraw') {
+                        try {
+                            const w = await coinApi.getMyWallet();
+                            if (!cancelled && w?.success && w?.data != null) {
+                                setWithdrawBalance(w.data.incomeBalance ?? w.data.income_balance ?? 0);
+                            }
+                        } catch {
+                            /* ignore */
+                        }
+                    }
                 } else {
                     if (!silent) {
                         setAuthorActivityItems([]);
                         if (!res?.success) setAuthorActivityError(res?.message ?? 'Không tải được lịch sử.');
                     }
                 }
-            } catch (e) {
+            } catch {
                 if (!cancelled && !silent) {
                     setAuthorActivityItems([]);
                     setAuthorActivityError('Không tải được lịch sử donate và rút tiền.');
@@ -741,6 +835,12 @@ export function AuthorStoryManagement({ onBack }) {
         totalViews: stories.reduce((acc, s) => acc + (Number(s.totalViews) || 0), 0),
         followers: profileFollowersCount,
     };
+    const authorAiUnlimited = !!(authorAiBudget?.unlimitedLifetime);
+    const authorAiLimitText = authorAiBudgetLoading
+        ? '...'
+        : (authorAiUnlimited
+            ? 'Không giới hạn'
+            : Number(authorAiBudget?.tokenLimit ?? 0).toLocaleString('vi-VN'));
 
     const handleCreateStory = () => {
         if (isAuthorWritingSuspended) {
@@ -754,6 +854,17 @@ export function AuthorStoryManagement({ onBack }) {
     const handleEditStory = async (story) => {
         if (isAuthorWritingSuspended) {
             showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
+            return;
+        }
+        const isComplianceHidden = Boolean(
+            story?.isComplianceHidden
+            ?? story?.complianceHidden
+            ?? story?.ComplianceHidden
+            ?? story?.compliance_hidden
+            ?? false
+        ) || String(story?.status ?? '').toLowerCase() === 'hidden';
+        if (isComplianceHidden) {
+            showToast('Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể chỉnh sửa.', 'error');
             return;
         }
         const statusLower = String(story?.status ?? '').toLowerCase();
@@ -789,6 +900,17 @@ export function AuthorStoryManagement({ onBack }) {
     const handleAddChapter = async (story) => {
         if (isAuthorWritingSuspended) {
             showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
+            return;
+        }
+        const isComplianceHidden = Boolean(
+            story?.isComplianceHidden
+            ?? story?.complianceHidden
+            ?? story?.ComplianceHidden
+            ?? story?.compliance_hidden
+            ?? false
+        ) || String(story?.status ?? '').toLowerCase() === 'hidden';
+        if (isComplianceHidden) {
+            showToast('Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể thêm chương mới.', 'error');
             return;
         }
         const storyId = story?.id ?? story?.Id;
@@ -1201,9 +1323,22 @@ export function AuthorStoryManagement({ onBack }) {
             navigate('/author', { replace: true });
             return;
         }
+        if (view === 'reports') {
+            const storyId = String(searchParams.get('storyId') || '').trim();
+            setReportStoryFilterId(storyId);
+            setActiveView('reports');
+            setActiveMenu('reports');
+            navigate('/author', { replace: true });
+            return;
+        }
 
         navigate('/author', { replace: true });
     }, [searchParams, navigate]);
+
+    useEffect(() => {
+        if (activeView !== 'reports') return;
+        loadAuthorReportNotifications();
+    }, [activeView, loadAuthorReportNotifications]);
 
     /** Chỉ xóa toasts khi vừa chuyển SANG màn danh sách chương (từ màn khác), tránh xóa mỗi lần re-render gây nhấp nháy. */
     const prevActiveViewRef = useRef(activeView);
@@ -1287,7 +1422,7 @@ export function AuthorStoryManagement({ onBack }) {
                 };
             });
 
-            showToast('Đã lưu thay đổi thông tin truyện', 'success');
+            showToast('Đã lưu thông tin truyện thành công.', 'success');
         } catch (err) {
             const msg = err?.response?.data?.message ?? err?.response?.data?.error ?? err?.message ?? 'Không thể lưu thay đổi';
             showToast(msg, 'error');
@@ -1386,6 +1521,9 @@ export function AuthorStoryManagement({ onBack }) {
             />
         );
     }
+
+    const filteredAuthorReports = (Array.isArray(authorReportNotifications) ? authorReportNotifications : [])
+        .filter((item) => !reportStoryFilterId || String(item.storyIdFromLink || '').toLowerCase() === reportStoryFilterId.toLowerCase());
 
     return (
         <div>
@@ -1539,6 +1677,41 @@ export function AuthorStoryManagement({ onBack }) {
                         >
                             <Book style={{ width: '20px', height: '20px' }} />
                             Truyện của tôi
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                setActiveMenu('reports');
+                                setActiveView('reports');
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'reports' ? '#f0fdf4' : 'transparent',
+                                border: 'none',
+                                borderLeft: activeMenu === 'reports' ? '3px solid #13ec5b' : '3px solid transparent',
+                                borderRadius: '9999px',
+                                marginLeft: '0.5rem',
+                                marginRight: '0.5rem',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                fontWeight: activeMenu === 'reports' ? 600 : 500,
+                                color: activeMenu === 'reports' ? '#13ec5b' : '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'reports') e.currentTarget.style.backgroundColor = '#f9fafb';
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'reports') e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                        >
+                            <List style={{ width: '20px', height: '20px' }} />
+                            Chi tiết báo cáo
                         </button>
 
                         <button
@@ -1762,8 +1935,9 @@ export function AuthorStoryManagement({ onBack }) {
                                     <input
                                         type="number"
                                         placeholder="0"
-                                        min={MIN_WITHDRAW_COINS}
-                                        max={withdrawBalance != null ? withdrawBalance : undefined}
+                                        min={withdrawInputUseNativeMinMax ? MIN_WITHDRAW_COINS : undefined}
+                                        max={withdrawInputUseNativeMinMax ? withdrawBalanceNum : undefined}
+                                        step={1}
                                         value={withdrawAmount}
                                         onChange={(e) => setWithdrawAmount(e.target.value.replace(/[^0-9]/g, '') || '')}
                                         style={{
@@ -1778,6 +1952,19 @@ export function AuthorStoryManagement({ onBack }) {
                                         onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
                                         onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
                                     />
+                                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.5rem 0 0 0', maxWidth: '520px', lineHeight: 1.45 }}>
+                                        Rút tối thiểu <strong>{MIN_WITHDRAW_COINS.toLocaleString('vi-VN')} coin</strong> (khoảng{' '}
+                                        {formatVnd(MIN_WITHDRAW_VND)}).
+                                        {withdrawBalanceNum != null &&
+                                            Number.isFinite(withdrawBalanceNum) &&
+                                            withdrawBalanceNum > 0 &&
+                                            withdrawBalanceNum < MIN_WITHDRAW_COINS ? (
+                                            <span style={{ display: 'block', color: '#b45309', marginTop: '0.35rem', fontWeight: 500 }}>
+                                                Số dư hiện tại ({withdrawBalanceNum.toLocaleString('vi-VN')} coin) chưa đủ mức rút tối
+                                                thiểu.
+                                            </span>
+                                        ) : null}
+                                    </p>
                                     {!selectedBankAccount && (
                                         <p style={{ fontSize: '0.8125rem', color: '#b45309', margin: '0.5rem 0 0 0' }}>
                                             Vui lòng chọn tài khoản ngân hàng để rút tiền.
@@ -1813,7 +2000,9 @@ export function AuthorStoryManagement({ onBack }) {
                                     onClick={async () => {
                                         const amount = Number(withdrawAmount);
                                         if (!amount || amount < MIN_WITHDRAW_COINS) {
-                                            setWithdrawError('Số tiền rút tối thiểu là 50.000 VND.');
+                                            setWithdrawError(
+                                                `Số coin rút tối thiểu là ${MIN_WITHDRAW_COINS.toLocaleString('vi-VN')} coin (tương đương khoảng ${formatVnd(MIN_WITHDRAW_VND)}).`
+                                            );
                                             return;
                                         }
                                         if (!selectedBankAccount?.bank_bin && !BANK_BIN_MAP[selectedBankAccount?.bank_name || '']) {
@@ -1852,6 +2041,88 @@ export function AuthorStoryManagement({ onBack }) {
                                 </p>
                             </div>
                         </div>
+                    ) : activeView === 'reports' ? (
+                        <div style={{ maxWidth: '980px' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '1rem',
+                                marginBottom: '1.25rem',
+                                flexWrap: 'wrap'
+                            }}>
+                                <div>
+                                    <h2 style={{ margin: 0, fontSize: '1.4rem', color: '#1f2937' }}>Chi tiết báo cáo</h2>
+                                    <p style={{ margin: '0.35rem 0 0 0', color: '#6b7280', fontSize: '0.9rem' }}>
+                                        Danh sách thông báo báo cáo liên quan truyện của bạn
+                                    </p>
+                                </div>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    {reportStoryFilterId && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setReportStoryFilterId('')}
+                                            style={{ border: '1px solid #e5e7eb', background: '#fff', borderRadius: '9999px', padding: '0.45rem 0.9rem', cursor: 'pointer', fontSize: '0.82rem' }}
+                                        >
+                                            Bỏ lọc truyện
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={loadAuthorReportNotifications}
+                                        style={{ border: 'none', background: '#13ec5b', color: '#fff', borderRadius: '9999px', padding: '0.45rem 1rem', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600 }}
+                                    >
+                                        Làm mới
+                                    </button>
+                                </div>
+                            </div>
+
+                            {authorReportError && (
+                                <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', borderRadius: '10px', border: '1px solid #fecaca', background: '#fef2f2', color: '#b91c1c', fontSize: '0.9rem' }}>
+                                    {authorReportError}
+                                </div>
+                            )}
+
+                            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '14px', overflow: 'hidden' }}>
+                                {authorReportLoading ? (
+                                    <div style={{ padding: '1rem', color: '#64748b' }}>Đang tải danh sách báo cáo...</div>
+                                ) : filteredAuthorReports.length === 0 ? (
+                                    <div style={{ padding: '1rem', color: '#64748b' }}>
+                                        {reportStoryFilterId ? 'Không có báo cáo cho truyện này.' : 'Chưa có thông báo báo cáo nào.'}
+                                    </div>
+                                ) : (
+                                    filteredAuthorReports.map((item) => (
+                                        <div key={item.id} style={{ padding: '0.95rem 1rem', borderBottom: '1px solid #f1f5f9' }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start' }}>
+                                                <div>
+                                                    <div style={{ fontWeight: 700, color: '#111827', marginBottom: '0.3rem' }}>{item.title || 'Thông báo báo cáo'}</div>
+                                                    <div style={{ color: '#475569', fontSize: '0.9rem', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                                                        {item.content || 'Không có nội dung chi tiết.'}
+                                                    </div>
+                                                </div>
+                                                <div style={{ fontSize: '0.78rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                                                    {formatTime(item.createdAt)}
+                                                </div>
+                                            </div>
+                                            <div style={{ marginTop: '0.6rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                {item.storyIdFromLink && (
+                                                    <span style={{ fontSize: '0.75rem', color: '#0f766e', background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '9999px', padding: '0.15rem 0.6rem' }}>
+                                                        StoryId: {item.storyIdFromLink}
+                                                    </span>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => navigate(item.linkUrl || '/home')}
+                                                    style={{ fontSize: '0.78rem', border: '1px solid #d1d5db', background: '#fff', borderRadius: '9999px', padding: '0.2rem 0.7rem', cursor: 'pointer' }}
+                                                >
+                                                    Mở truyện liên quan
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
                     ) : activeView === 'profile' ? (
                         <div style={{ maxWidth: '900px' }}>
                             {/* Thành tích + liên kết nhanh */}
@@ -1883,38 +2154,51 @@ export function AuthorStoryManagement({ onBack }) {
                                         { icon: List, color: '#7c3aed', bg: '#f5f3ff', label: 'Chương đã đăng', value: userStats.totalChapters },
                                         { icon: Eye, color: '#0ea5e9', bg: '#f0f9ff', label: 'Lượt xem (tổng)', value: userStats.totalViews.toLocaleString('vi-VN') },
                                         { icon: Heart, color: '#e11d48', bg: '#fff1f2', label: 'Người theo dõi', value: userStats.followers },
-                                    ].map(({ icon: Icon, color, bg, label, value }) => (
-                                        <div
-                                            key={label}
-                                            style={{
-                                                borderRadius: '14px',
-                                                border: '1px solid #e2e8f0',
-                                                padding: '1rem',
-                                                background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
-                                            }}
-                                        >
-                                            <div style={{
-                                                width: '40px',
-                                                height: '40px',
-                                                borderRadius: '12px',
-                                                backgroundColor: bg,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                marginBottom: '0.65rem',
-                                            }}
+                                        { icon: Coins, color: '#b45309', bg: '#fffbeb', label: 'Hạn mức token AI', value: authorAiLimitText },
+                                    ].map((item) => {
+                                        const IconComp = item.icon;
+                                        return (
+                                            <div
+                                                key={item.label}
+                                                style={{
+                                                    borderRadius: '14px',
+                                                    border: '1px solid #e2e8f0',
+                                                    padding: '1rem',
+                                                    background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+                                                }}
                                             >
-                                                <Icon style={{ width: '20px', height: '20px', color }} />
+                                                <div style={{
+                                                    width: '40px',
+                                                    height: '40px',
+                                                    borderRadius: '12px',
+                                                    backgroundColor: item.bg,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    marginBottom: '0.65rem',
+                                                }}
+                                                >
+                                                    <IconComp style={{ width: '20px', height: '20px', color: item.color }} />
+                                                </div>
+                                                <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                                                    {item.value}
+                                                </div>
+                                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.35rem', fontWeight: 500 }}>
+                                                    {item.label}
+                                                </div>
+                                                {item.hint && (
+                                                    <div style={{ fontSize: '0.6875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                                                        {item.hint}
+                                                    </div>
+                                                )}
                                             </div>
-                                            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
-                                                {value}
-                                            </div>
-                                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.35rem', fontWeight: 500 }}>
-                                                {label}
-                                            </div>
-                                        </div>
-                                    ))}
+                                    )})}
                                 </div>
+                                {authorAiBudgetError && (
+                                    <p style={{ margin: 0, marginTop: '-0.5rem', marginBottom: '1rem', fontSize: '0.75rem', color: '#dc2626' }}>
+                                        {authorAiBudgetError}
+                                    </p>
+                                )}
 
                                 <div style={{
                                     display: 'flex',
@@ -2160,6 +2444,9 @@ export function AuthorStoryManagement({ onBack }) {
                                 <>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                                         {stories.map((story) => (
+                                            (() => {
+                                                const storyComplianceLocked = Boolean(story?.isComplianceHidden) || String(story?.status ?? '').toLowerCase() === 'hidden';
+                                                return (
                                             <div
                                                 key={story.id}
                                                 style={{
@@ -2200,9 +2487,14 @@ export function AuthorStoryManagement({ onBack }) {
                                                                 {story.title}
                                                             </h3>
                                                             <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
-                                                                {story.lastUpdate}
+                                                                {story.lastUpdate === 'Chưa cập nhật'
+                                                                    ? 'Chưa cập nhật'
+                                                                    : `Tạo lúc: ${story.lastUpdate}`}
                                                             </div>
                                                             {story.isComplianceHidden ? (
+                                                                (() => {
+                                                                    const isPermanentlyHidden = String(story.status ?? '').toLowerCase() === 'hidden';
+                                                                    return (
                                                                 <div
                                                                     style={{
                                                                         marginTop: '0.5rem',
@@ -2215,16 +2507,20 @@ export function AuthorStoryManagement({ onBack }) {
                                                                         fontWeight: 600,
                                                                     }}
                                                                 >
-                                                                    Truyện này đang bị tạm ẩn để điều tra và xử lý vi phạm.
+                                                                    {isPermanentlyHidden
+                                                                        ? 'Truyện này đã bị ẩn tạm thời để phục vụ quá trình điều tra vi phạm.'
+                                                                        : 'Truyện này đang bị tạm ẩn để điều tra và xử lý vi phạm.'}
                                                                 </div>
+                                                                    );
+                                                                })()
                                                             ) : null}
                                                         </div>
                                                         <div style={{
                                                             padding: '0.25rem 0.75rem',
-                                                            backgroundColor: ['published', 'completed'].includes(story.status) ? '#d1fae5' : '#fef3c7',
+                                                            backgroundColor: storyComplianceLocked ? '#fef3c7' : ['published', 'completed'].includes(story.status) ? '#d1fae5' : '#fef3c7',
                                                             borderRadius: '4px',
                                                             fontSize: '0.75rem',
-                                                            color: ['published', 'completed'].includes(story.status) ? '#065f46' : '#92400e',
+                                                            color: storyComplianceLocked ? '#92400e' : ['published', 'completed'].includes(story.status) ? '#065f46' : '#92400e',
                                                             marginLeft: '1rem',
                                                             flexShrink: 0
                                                         }}>
@@ -2291,11 +2587,11 @@ export function AuthorStoryManagement({ onBack }) {
                                                             </div>
                                                             <div style={{
                                                                 padding: '0.25rem 0.75rem',
-                                                                backgroundColor: (story.status === 'published' || story.status === 'completed') ? '#d1fae5' : '#fef3c7',
+                                                                backgroundColor: storyComplianceLocked ? '#fef3c7' : (story.status === 'published' || story.status === 'completed') ? '#d1fae5' : '#fef3c7',
                                                                 borderRadius: '9999px',
                                                                 fontSize: '0.75rem',
                                                                 fontWeight: 600,
-                                                                color: (story.status === 'published' || story.status === 'completed') ? '#065f46' : '#92400e'
+                                                                color: storyComplianceLocked ? '#92400e' : (story.status === 'published' || story.status === 'completed') ? '#065f46' : '#92400e'
                                                             }}>
                                                                 {story.publishStatus}
                                                             </div>
@@ -2336,6 +2632,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                 }}>
                                                     <button
                                                         onClick={() => handleViewChapters(story)}
+                                                        title={storyComplianceLocked ? 'Truyện đã ẩn vĩnh viễn: chỉ xem danh sách chương, không thể thao tác chỉnh sửa/xuất bản.' : 'Danh sách chương'}
                                                         style={{
                                                             display: 'flex',
                                                             alignItems: 'center',
@@ -2368,10 +2665,12 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </button>
                                                     <button
                                                         onClick={() => handleEditStory(story)}
-                                                        disabled={isAuthorWritingSuspended || story.status === 'pending_review'}
+                                                        disabled={isAuthorWritingSuspended || story.status === 'pending_review' || storyComplianceLocked}
                                                         title={
                                                             isAuthorWritingSuspended
                                                                 ? AUTHOR_WRITING_SUSPENDED_TOOLTIP
+                                                                : storyComplianceLocked
+                                                                    ? 'Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể chỉnh sửa'
                                                                 : story.status === 'pending_review'
                                                                     ? 'Truyện đang ở trạng thái chờ duyệt, không thể chỉnh sửa'
                                                                     : 'Chỉnh sửa truyện'
@@ -2388,19 +2687,19 @@ export function AuthorStoryManagement({ onBack }) {
                                                             fontSize: '0.8125rem',
                                                             fontWeight: 500,
                                                             color: '#475569',
-                                                            cursor: (isAuthorWritingSuspended || story.status === 'pending_review') ? 'not-allowed' : 'pointer',
+                                                            cursor: (isAuthorWritingSuspended || story.status === 'pending_review' || storyComplianceLocked) ? 'not-allowed' : 'pointer',
                                                             whiteSpace: 'nowrap',
                                                             transition: 'all 0.2s',
-                                                            opacity: (isAuthorWritingSuspended || story.status === 'pending_review') ? 0.7 : 1
+                                                            opacity: (isAuthorWritingSuspended || story.status === 'pending_review' || storyComplianceLocked) ? 0.7 : 1
                                                         }}
                                                         onMouseEnter={(e) => {
-                                                            if (isAuthorWritingSuspended || story.status === 'pending_review') return;
+                                                            if (isAuthorWritingSuspended || story.status === 'pending_review' || storyComplianceLocked) return;
                                                             e.currentTarget.style.backgroundColor = '#f1f5f9';
                                                             e.currentTarget.style.borderColor = '#13ec5b';
                                                             e.currentTarget.style.color = '#13ec5b';
                                                         }}
                                                         onMouseLeave={(e) => {
-                                                            if (isAuthorWritingSuspended || story.status === 'pending_review') return;
+                                                            if (isAuthorWritingSuspended || story.status === 'pending_review' || storyComplianceLocked) return;
                                                             e.currentTarget.style.backgroundColor = '#f8fafc';
                                                             e.currentTarget.style.borderColor = '#e2e8f0';
                                                             e.currentTarget.style.color = '#475569';
@@ -2410,35 +2709,35 @@ export function AuthorStoryManagement({ onBack }) {
                                                         Chỉnh sửa
                                                     </button>
                                                     <button
-                                                        onClick={() => !isAuthorWritingSuspended && story.status === 'draft' && handleDeleteStory(story.id)}
-                                                        disabled={isAuthorWritingSuspended || story.status !== 'draft'}
-                                                        title={isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : story.status === 'draft' ? 'Xóa truyện' : 'Chỉ được xóa truyện khi ở trạng thái Bản nháp'}
+                                                        onClick={() => !isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft' && handleDeleteStory(story.id)}
+                                                        disabled={isAuthorWritingSuspended || storyComplianceLocked || story.status !== 'draft'}
+                                                        title={isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : storyComplianceLocked ? 'Truyện đã bị ẩn vĩnh viễn do vi phạm, không thể xóa' : story.status === 'draft' ? 'Xóa truyện' : 'Chỉ được xóa truyện khi ở trạng thái Bản nháp'}
                                                         style={{
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center',
                                                             gap: '0.375rem',
                                                             padding: '0.5rem 1rem',
-                                                            backgroundColor: (!isAuthorWritingSuspended && story.status === 'draft') ? '#fff' : '#f1f5f9',
-                                                            border: `1px solid ${(!isAuthorWritingSuspended && story.status === 'draft') ? '#fecaca' : '#e2e8f0'}`,
+                                                            backgroundColor: (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? '#fff' : '#f1f5f9',
+                                                            border: `1px solid ${(!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? '#fecaca' : '#e2e8f0'}`,
                                                             borderRadius: '9999px',
                                                             fontSize: '0.8125rem',
                                                             fontWeight: 500,
-                                                            color: (!isAuthorWritingSuspended && story.status === 'draft') ? '#dc2626' : '#94a3b8',
-                                                            cursor: (!isAuthorWritingSuspended && story.status === 'draft') ? 'pointer' : 'not-allowed',
+                                                            color: (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? '#dc2626' : '#94a3b8',
+                                                            cursor: (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? 'pointer' : 'not-allowed',
                                                             whiteSpace: 'nowrap',
                                                             transition: 'all 0.2s',
-                                                            opacity: (!isAuthorWritingSuspended && story.status === 'draft') ? 1 : 0.8
+                                                            opacity: (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? 1 : 0.8
                                                         }}
                                                         onMouseEnter={(e) => {
-                                                            if (!isAuthorWritingSuspended && story.status === 'draft') {
+                                                            if (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') {
                                                                 e.currentTarget.style.backgroundColor = '#fef2f2';
                                                                 e.currentTarget.style.borderColor = '#ef4444';
                                                             }
                                                         }}
                                                         onMouseLeave={(e) => {
-                                                            e.currentTarget.style.backgroundColor = (!isAuthorWritingSuspended && story.status === 'draft') ? '#fff' : '#f1f5f9';
-                                                            e.currentTarget.style.borderColor = (!isAuthorWritingSuspended && story.status === 'draft') ? '#fecaca' : '#e2e8f0';
+                                                            e.currentTarget.style.backgroundColor = (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? '#fff' : '#f1f5f9';
+                                                            e.currentTarget.style.borderColor = (!isAuthorWritingSuspended && !storyComplianceLocked && story.status === 'draft') ? '#fecaca' : '#e2e8f0';
                                                         }}
                                                     >
                                                         <Trash2 style={{ width: '14px', height: '14px' }} />
@@ -2446,6 +2745,8 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </button>
                                                 </div>
                                             </div>
+                                                );
+                                            })()
                                         ))}
                                     </div>
                                     {!storiesLoading && !storiesError && storiesTotalPages > 1 && (
@@ -3122,234 +3423,234 @@ export function AuthorStoryManagement({ onBack }) {
                             </div>
 
                             {historyModalTab === 'donate' && (
-                            <>
-                            <div style={{
-                                backgroundColor: '#f0fdf4',
-                                borderRadius: '14px',
-                                padding: '1rem 1.15rem',
-                                border: '1px solid #bbf7d0',
-                                marginBottom: '1.25rem',
-                            }}
-                            >
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                <>
                                     <div style={{
-                                        width: '40px', height: '40px', borderRadius: '12px', backgroundColor: '#dcfce7',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                        backgroundColor: '#f0fdf4',
+                                        borderRadius: '14px',
+                                        padding: '1rem 1.15rem',
+                                        border: '1px solid #bbf7d0',
+                                        marginBottom: '1.25rem',
                                     }}
                                     >
-                                        <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
-                                    </div>
-                                    <div>
-                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 70% cho tác giả, 30% nền tảng</div>
-                                        <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
-                                            Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>30%</b> phí.
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                            <div style={{
+                                                width: '40px', height: '40px', borderRadius: '12px', backgroundColor: '#dcfce7',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                            }}
+                                            >
+                                                <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
+                                            </div>
+                                            <div>
+                                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 30% cho tác giả, 70% nền tảng</div>
+                                                <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
+                                                    Các khoản <b>Donate</b> trong lịch sử hiển thị phần tác giả nhận theo tỉ lệ <b>30%</b>.
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            </div>
 
-                            <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                                    <thead>
-                                        <tr style={{ backgroundColor: '#f8fafc' }}>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỜI GIAN</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>LOẠI</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>SỐ COIN</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỰC NHẬN</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>GHI CHÚ</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {authorActivityLoading ? (
-                                            <tr>
-                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
-                                            </tr>
-                                        ) : authorActivityError ? (
-                                            <tr>
-                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
-                                            </tr>
-                                        ) : authorActivityItems.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={5} style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>Chưa có giao dịch nào.</td>
-                                            </tr>
-                                        ) : (
-                                            authorActivityItems.map((item) => {
-                                                const createdAt = item.createdAt ?? item.CreatedAt;
-                                                const timeStr = createdAt
-                                                    ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-                                                    : '—';
-                                                const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
-                                                const amount = item.amount ?? item.Amount ?? 0;
-                                                const isWithdraw = (item.type || item.Type) === 'WITHDRAW';
-                                                const withdrawStatusRaw = item.withdrawStatus ?? item.WithdrawStatus;
-                                                const statusUpper = String(withdrawStatusRaw ?? '').toUpperCase();
-                                                const netReceived = isWithdraw
-                                                    ? (statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? Number(amount) : 0)
-                                                    : Math.max(0, Number(amount) - Math.floor(Number(amount) * 0.3));
-                                                const statusLabel =
-                                                    statusUpper === 'PENDING' ? 'Chờ xử lý' :
-                                                        statusUpper === 'PENDING_REVIEW' ? 'Chờ xét duyệt' :
-                                                            statusUpper === 'PROCESSING' ? 'Đang xử lý' :
-                                                                statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? 'Hoàn thành' :
-                                                                    statusUpper === 'FAILED' ? 'Thất bại' :
-                                                                        statusUpper === 'CANCELLED' ? 'Đã hủy' :
-                                                                            statusUpper || '—';
-                                                const note = isWithdraw
-                                                    ? (['PENDING', 'PENDING_REVIEW', 'PROCESSING'].includes(statusUpper)
-                                                        ? statusLabel
-                                                        : (item.note ?? item.Note) || statusLabel)
-                                                    : (item.senderDisplayName ?? item.SenderDisplayName
-                                                        ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}`
-                                                        : (item.note ?? item.Note) || '—');
-                                                const canCancelWithdraw = isWithdraw && (statusUpper === 'PENDING' || statusUpper === 'PENDING_REVIEW');
-                                                const vndAmount = Number(amount) * COIN_RATE_VND;
-                                                const vndNet = netReceived * COIN_RATE_VND;
-                                                return (
-                                                    <tr key={item.id ?? item.Id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{timeStr}</td>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{typeLabel}</td>
-                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
-                                                            <div>{(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin</div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndAmount)}</div>
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, color: (item.type || item.Type) === 'WITHDRAW' ? '#b91c1c' : '#16a34a' }}>
-                                                            <div>
-                                                                {isWithdraw ? (netReceived > 0 ? `+${Number(netReceived).toLocaleString()}` : '—') : `+${Number(netReceived).toLocaleString()}`} coin
-                                                            </div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                                                                {isWithdraw ? (netReceived > 0 ? `≈ ${formatVnd(vndNet)}` : '—') : `≈ ${formatVnd(vndNet)}`}
-                                                            </div>
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#64748b', maxWidth: '280px' }}>
-                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</div>
-                                                                {canCancelWithdraw && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleCancelWithdraw(item.id ?? item.Id)}
-                                                                        style={{
-                                                                            alignSelf: 'flex-start',
-                                                                            padding: '0.35rem 0.75rem',
-                                                                            borderRadius: '10px',
-                                                                            border: '1px solid #fecaca',
-                                                                            backgroundColor: '#fef2f2',
-                                                                            color: '#b91c1c',
-                                                                            fontSize: '0.75rem',
-                                                                            fontWeight: 700,
-                                                                            cursor: 'pointer',
-                                                                        }}
-                                                                    >
-                                                                        Hủy
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        </td>
+                                    <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                            <thead>
+                                                <tr style={{ backgroundColor: '#f8fafc' }}>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỜI GIAN</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>LOẠI</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>SỐ COIN</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỰC NHẬN</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>GHI CHÚ</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {authorActivityLoading ? (
+                                                    <tr>
+                                                        <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
                                                     </tr>
-                                                );
-                                            })
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                            </>
+                                                ) : authorActivityError ? (
+                                                    <tr>
+                                                        <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
+                                                    </tr>
+                                                ) : authorActivityItems.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={5} style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>Chưa có giao dịch nào.</td>
+                                                    </tr>
+                                                ) : (
+                                                    authorActivityItems.map((item) => {
+                                                        const createdAt = item.createdAt ?? item.CreatedAt;
+                                                        const timeStr = createdAt
+                                                            ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                                            : '—';
+                                                        const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
+                                                        const amount = item.amount ?? item.Amount ?? 0;
+                                                        const isWithdraw = (item.type || item.Type) === 'WITHDRAW';
+                                                        const withdrawStatusRaw = item.withdrawStatus ?? item.WithdrawStatus;
+                                                        const statusUpper = String(withdrawStatusRaw ?? '').toUpperCase();
+                                                        const netReceived = isWithdraw
+                                                            ? (statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? Number(amount) : 0)
+                                                            : Math.floor(Math.max(0, Number(amount)) * 0.3);
+                                                        const statusLabel =
+                                                            statusUpper === 'PENDING' ? 'Chờ xử lý' :
+                                                                statusUpper === 'PENDING_REVIEW' ? 'Chờ xét duyệt' :
+                                                                    statusUpper === 'PROCESSING' ? 'Đang xử lý' :
+                                                                        statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? 'Hoàn thành' :
+                                                                            statusUpper === 'FAILED' ? 'Thất bại' :
+                                                                                statusUpper === 'CANCELLED' ? 'Đã hủy' :
+                                                                                    statusUpper || '—';
+                                                        const note = isWithdraw
+                                                            ? (['PENDING', 'PENDING_REVIEW', 'PROCESSING'].includes(statusUpper)
+                                                                ? statusLabel
+                                                                : (item.note ?? item.Note) || statusLabel)
+                                                            : (item.senderDisplayName ?? item.SenderDisplayName
+                                                                ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}`
+                                                                : (item.note ?? item.Note) || '—');
+                                                        const canCancelWithdraw = isWithdraw && (statusUpper === 'PENDING' || statusUpper === 'PENDING_REVIEW');
+                                                        const vndAmount = Number(amount) * COIN_RATE_VND;
+                                                        const vndNet = netReceived * COIN_RATE_VND;
+                                                        return (
+                                                            <tr key={item.id ?? item.Id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{timeStr}</td>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{typeLabel}</td>
+                                                                <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
+                                                                    <div>{(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin</div>
+                                                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndAmount)}</div>
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, color: (item.type || item.Type) === 'WITHDRAW' ? '#b91c1c' : '#16a34a' }}>
+                                                                    <div>
+                                                                        {isWithdraw ? (netReceived > 0 ? `+${Number(netReceived).toLocaleString()}` : '—') : `+${Number(netReceived).toLocaleString()}`} coin
+                                                                    </div>
+                                                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                                                        {isWithdraw ? (netReceived > 0 ? `≈ ${formatVnd(vndNet)}` : '—') : `≈ ${formatVnd(vndNet)}`}
+                                                                    </div>
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#64748b', maxWidth: '280px' }}>
+                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                                                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</div>
+                                                                        {canCancelWithdraw && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleCancelWithdraw(item.id ?? item.Id)}
+                                                                                style={{
+                                                                                    alignSelf: 'flex-start',
+                                                                                    padding: '0.35rem 0.75rem',
+                                                                                    borderRadius: '10px',
+                                                                                    border: '1px solid #fecaca',
+                                                                                    backgroundColor: '#fef2f2',
+                                                                                    color: '#b91c1c',
+                                                                                    fontSize: '0.75rem',
+                                                                                    fontWeight: 700,
+                                                                                    cursor: 'pointer',
+                                                                                }}
+                                                                            >
+                                                                                Hủy
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </>
                             )}
 
                             {historyModalTab === 'unlock' && (
-                            <>
-                            <div style={{
-                                backgroundColor: '#f0f9ff',
-                                borderRadius: '14px',
-                                padding: '1rem 1.15rem',
-                                border: '1px solid #bae6fd',
-                                marginBottom: '1.25rem',
-                            }}
-                            >
-                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#0369a1', marginBottom: '0.25rem' }}>Mở khóa chương trả phí</div>
-                                <div style={{ fontSize: '0.8125rem', color: '#0c4a6e', lineHeight: 1.5 }}>
-                                    Mỗi dòng là một lượt độc giả mở khóa chương. <b>Coin đã trả</b> là số coin người đọc bị trừ; <b>Phí NT</b> và <b>Thực nhận</b> theo ghi nhận hệ thống (thu nhập tác giả sau phí nền tảng).
-                                </div>
-                            </div>
-                            <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                                    <thead>
-                                        <tr style={{ backgroundColor: '#f8fafc' }}>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỜI GIAN</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>TRUYỆN</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>CHƯƠNG</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>COIN ĐÃ TRẢ</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>PHÍ NT</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỰC NHẬN</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {authorUnlockLoading ? (
-                                            <tr>
-                                                <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
-                                            </tr>
-                                        ) : authorUnlockError ? (
-                                            <tr>
-                                                <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorUnlockError}</td>
-                                            </tr>
-                                        ) : authorUnlockItems.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={6} style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>Chưa có lượt mở khóa nào.</td>
-                                            </tr>
-                                        ) : (
-                                            authorUnlockItems.map((row, idx) => {
-                                                const unlockedAt = row.unlockedAt ?? row.UnlockedAt;
-                                                const timeStr = unlockedAt
-                                                    ? new Date(unlockedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-                                                    : '—';
-                                                const storyTitle = row.storyTitle ?? row.StoryTitle ?? '—';
-                                                const chapterTitle = row.chapterTitle ?? row.ChapterTitle ?? '—';
-                                                const coinsPaid = Number(row.coinsPaid ?? row.CoinsPaid ?? 0);
-                                                const platformFee = Math.round(Number(row.platformFee ?? row.PlatformFee ?? 0));
-                                                const netAmount = Math.round(Number(row.netAmount ?? row.NetAmount ?? 0));
-                                                const vndPaid = coinsPaid * COIN_RATE_VND;
-                                                const vndNet = netAmount * COIN_RATE_VND;
-                                                const rowKey = row.purchaseId ?? row.PurchaseId ?? idx;
-                                                return (
-                                                    <tr key={String(rowKey)} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{timeStr}</td>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151', maxWidth: '200px' }}>
-                                                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={storyTitle}>{storyTitle}</div>
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151', maxWidth: '180px' }}>
-                                                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={chapterTitle}>{chapterTitle}</div>
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#0f766e' }}>
-                                                            <div>{coinsPaid.toLocaleString()} coin</div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndPaid)}</div>
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', color: '#92400e' }}>
-                                                            {platformFee.toLocaleString()} coin
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
-                                                            <div>
-                                                                +{netAmount.toLocaleString()} coin
-                                                            </div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndNet)}</div>
-                                                        </td>
+                                <>
+                                    <div style={{
+                                        backgroundColor: '#f0f9ff',
+                                        borderRadius: '14px',
+                                        padding: '1rem 1.15rem',
+                                        border: '1px solid #bae6fd',
+                                        marginBottom: '1.25rem',
+                                    }}
+                                    >
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#0369a1', marginBottom: '0.25rem' }}>Mở khóa chương trả phí</div>
+                                        <div style={{ fontSize: '0.8125rem', color: '#0c4a6e', lineHeight: 1.5 }}>
+                                            Mỗi dòng là một lượt độc giả mở khóa chương. <b>Coin đã trả</b> là số coin người đọc bị trừ; <b>Phí NT</b> và <b>Thực nhận</b> theo ghi nhận hệ thống (thu nhập tác giả sau phí nền tảng).
+                                        </div>
+                                    </div>
+                                    <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                            <thead>
+                                                <tr style={{ backgroundColor: '#f8fafc' }}>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỜI GIAN</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>TRUYỆN</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>CHƯƠNG</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>COIN ĐÃ TRẢ</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>PHÍ NT</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỰC NHẬN</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {authorUnlockLoading ? (
+                                                    <tr>
+                                                        <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
                                                     </tr>
-                                                );
-                                            })
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {!authorUnlockLoading && !authorUnlockError && authorUnlockTotalCount > AUTHOR_UNLOCK_PAGE_SIZE && (
-                                <div style={{ marginTop: '1rem' }}>
-                                    <Pagination
-                                        currentPage={authorUnlockPage}
-                                        totalPages={Math.max(1, Math.ceil(authorUnlockTotalCount / AUTHOR_UNLOCK_PAGE_SIZE))}
-                                        totalItems={authorUnlockTotalCount}
-                                        itemsPerPage={AUTHOR_UNLOCK_PAGE_SIZE}
-                                        onPageChange={(p) => loadAuthorUnlockHistory(p)}
-                                        itemLabel="lượt mở khóa"
-                                    />
-                                </div>
-                            )}
-                            </>
+                                                ) : authorUnlockError ? (
+                                                    <tr>
+                                                        <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorUnlockError}</td>
+                                                    </tr>
+                                                ) : authorUnlockItems.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={6} style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>Chưa có lượt mở khóa nào.</td>
+                                                    </tr>
+                                                ) : (
+                                                    authorUnlockItems.map((row, idx) => {
+                                                        const unlockedAt = row.unlockedAt ?? row.UnlockedAt;
+                                                        const timeStr = unlockedAt
+                                                            ? new Date(unlockedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                                            : '—';
+                                                        const storyTitle = row.storyTitle ?? row.StoryTitle ?? '—';
+                                                        const chapterTitle = row.chapterTitle ?? row.ChapterTitle ?? '—';
+                                                        const coinsPaid = Number(row.coinsPaid ?? row.CoinsPaid ?? 0);
+                                                        const platformFee = Math.round(Number(row.platformFee ?? row.PlatformFee ?? 0));
+                                                        const netAmount = Math.round(Number(row.netAmount ?? row.NetAmount ?? 0));
+                                                        const vndPaid = coinsPaid * COIN_RATE_VND;
+                                                        const vndNet = netAmount * COIN_RATE_VND;
+                                                        const rowKey = row.purchaseId ?? row.PurchaseId ?? idx;
+                                                        return (
+                                                            <tr key={String(rowKey)} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{timeStr}</td>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#374151', maxWidth: '200px' }}>
+                                                                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={storyTitle}>{storyTitle}</div>
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#374151', maxWidth: '180px' }}>
+                                                                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={chapterTitle}>{chapterTitle}</div>
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#0f766e' }}>
+                                                                    <div>{coinsPaid.toLocaleString()} coin</div>
+                                                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndPaid)}</div>
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', textAlign: 'right', color: '#92400e' }}>
+                                                                    {platformFee.toLocaleString()} coin
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
+                                                                    <div>
+                                                                        +{netAmount.toLocaleString()} coin
+                                                                    </div>
+                                                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndNet)}</div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {!authorUnlockLoading && !authorUnlockError && authorUnlockTotalCount > AUTHOR_UNLOCK_PAGE_SIZE && (
+                                        <div style={{ marginTop: '1rem' }}>
+                                            <Pagination
+                                                currentPage={authorUnlockPage}
+                                                totalPages={Math.max(1, Math.ceil(authorUnlockTotalCount / AUTHOR_UNLOCK_PAGE_SIZE))}
+                                                totalItems={authorUnlockTotalCount}
+                                                itemsPerPage={AUTHOR_UNLOCK_PAGE_SIZE}
+                                                onPageChange={(p) => loadAuthorUnlockHistory(p)}
+                                                itemLabel="lượt mở khóa"
+                                            />
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>

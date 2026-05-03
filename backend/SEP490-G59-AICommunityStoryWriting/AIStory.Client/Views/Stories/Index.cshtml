@@ -283,7 +283,11 @@
                 return;
             }
 
-            container.innerHTML = stories.map(story => `
+            container.innerHTML = stories.map(story => {
+                const isComplianceHidden = story.complianceHidden === true || story.ComplianceHidden === true;
+                const disabledAttr = isComplianceHidden ? 'disabled' : '';
+                const hiddenTitle = isComplianceHidden ? 'Truyện đang bị ẩn vĩnh viễn, không thể thao tác.' : '';
+                return `
                 <div class="card mb-3">
                     <div class="row g-0">
                         <div class="col-md-2">
@@ -304,6 +308,7 @@
                                             <span class="badge bg-primary">${story.categoryNames || 'N/A'}</span>
                                             <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : story.status === 'PENDING_REVIEW' ? 'bg-warning text-dark' : story.status === 'REJECTED' ? 'bg-danger' : 'bg-secondary'}">${story.status === 'PENDING_REVIEW' ? 'Chờ duyệt' : story.status === 'REJECTED' ? 'Bị từ chối' : story.status === 'PUBLISHED' ? 'Đã xuất bản' : (story.status || 'DRAFT')}</span>
                                             <span class="badge ${({ ONGOING: 'bg-info', COMPLETED: 'bg-success', HIATUS: 'bg-warning' })[story.storyProgressStatus] || 'bg-secondary'}">${({ ONGOING: 'Đang ra', COMPLETED: 'Hoàn thành', HIATUS: 'Tạm dừng' })[story.storyProgressStatus] || story.storyProgressStatus || 'Đang ra'}</span>
+                                            ${isComplianceHidden ? '<span class="badge bg-dark">Ẩn vĩnh viễn</span>' : ''}
                                         </div>
                                         <div class="mt-2">
                                             <span class="badge bg-info" title="Tổng số chương">
@@ -325,13 +330,13 @@
                                         <button class="btn btn-sm btn-info" onclick="viewStoryDetails('${story.id}')" title="Xem chi tiết">
                                             <i class="bi bi-eye"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-primary" onclick="editStory('${story.id}')" title="Sửa">
+                                        <button class="btn btn-sm btn-primary" onclick="editStory('${story.id}')" title="${hiddenTitle || 'Sửa'}" ${disabledAttr}>
                                             <i class="bi bi-pencil"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-success" onclick="publishStory('${story.id}')" title="Gửi duyệt" ${(story.status === 'PUBLISHED' || story.status === 'PENDING_REVIEW') ? 'disabled' : ''}>
+                                        <button class="btn btn-sm btn-success" onclick="publishStory('${story.id}')" title="${hiddenTitle || 'Gửi duyệt'}" ${(story.status === 'PUBLISHED' || story.status === 'PENDING_REVIEW' || isComplianceHidden) ? 'disabled' : ''}>
                                             <i class="bi bi-send-check"></i> Gửi duyệt
                                         </button>
-                                        <button class="btn btn-sm btn-danger" onclick="deleteStory('${story.id}')" title="Xóa">
+                                        <button class="btn btn-sm btn-danger" onclick="deleteStory('${story.id}')" title="${hiddenTitle || 'Xóa'}" ${disabledAttr}>
                                             <i class="bi bi-trash"></i>
                                         </button>
                                     </div>
@@ -340,7 +345,8 @@
                         </div>
                     </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         }
 
         function renderPagination() {
@@ -412,6 +418,12 @@
                 return;
             }
 
+            const selectedStory = stories.find(s => s.id === id);
+            if (selectedStory && (selectedStory.complianceHidden === true || selectedStory.ComplianceHidden === true)) {
+                Utils.showAlert('Truyện đang bị ẩn vĩnh viễn, không thể chỉnh sửa.', 'warning');
+                return;
+            }
+
             try {
                 const story = await ApiService.getStoryById(id);
                 editingStoryId = id;
@@ -462,6 +474,12 @@
 
             try {
                 if (editingStoryId) {
+                    const editingStory = stories.find(s => s.id === editingStoryId);
+                    if (editingStory && (editingStory.complianceHidden === true || editingStory.ComplianceHidden === true)) {
+                        Utils.showAlert('Truyện đang bị ẩn vĩnh viễn, không thể cập nhật.', 'warning');
+                        return;
+                    }
+
                     const formData = new FormData();
                     formData.append('Title', document.getElementById('storyTitle').value);
                     formData.append('Summary', document.getElementById('storySummary').value);
@@ -519,6 +537,12 @@
                 return;
             }
 
+            const selectedStory = stories.find(s => s.id === id);
+            if (selectedStory && (selectedStory.complianceHidden === true || selectedStory.ComplianceHidden === true)) {
+                Utils.showAlert('Truyện đang bị ẩn vĩnh viễn, không thể xóa.', 'warning');
+                return;
+            }
+
             if (!confirm('Bạn có chắc chắn muốn xóa truyện này?')) return;
 
             try {
@@ -531,6 +555,12 @@
         }
 
         async function publishStory(id) {
+            const selectedStory = stories.find(s => s.id === id);
+            if (selectedStory && (selectedStory.complianceHidden === true || selectedStory.ComplianceHidden === true)) {
+                Utils.showAlert('Truyện đang bị ẩn vĩnh viễn, không thể gửi duyệt.', 'warning');
+                return;
+            }
+
             try {
                 await ApiService.publishStory(id);
                 Utils.showAlert('Đã gửi truyện chờ duyệt. Moderator sẽ xem xét và duyệt khi đạt yêu cầu.', 'success');

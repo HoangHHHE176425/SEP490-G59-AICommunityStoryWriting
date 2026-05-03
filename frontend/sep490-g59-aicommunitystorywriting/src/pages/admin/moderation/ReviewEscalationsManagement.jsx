@@ -18,6 +18,29 @@ import { getChapterReviewContent } from '../../../api/moderator/moderatorApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { localDateTimeInputToIsoUtc } from '../../../utils/moderatorReviewSla';
 import { formatApiDateTimeVietnamVi } from '../../../utils/apiDateTime';
+import { sanitizeRichTextHtml } from '../../../utils/richText';
+
+/**
+ * Nội dung chương từ editor thường là HTML; hiển thị trong modal phải render HTML (đã khử script/on*).
+ * Chuỗi thuần vẫn dùng pre-wrap như trước.
+ */
+function renderEscalationModalChapterBody(raw, bodyStyle) {
+    const trimmed = String(raw ?? '').trim();
+    if (!trimmed) {
+        return <div style={bodyStyle}>—</div>;
+    }
+    const hasHtmlTag = /<[a-z][\s\S]*>/i.test(trimmed);
+    if (hasHtmlTag) {
+        const html = sanitizeRichTextHtml(trimmed) || '<p>—</p>';
+        return (
+            <div
+                style={{ ...bodyStyle, whiteSpace: 'normal' }}
+                dangerouslySetInnerHTML={{ __html: html }}
+            />
+        );
+    }
+    return <div style={{ ...bodyStyle, whiteSpace: 'pre-wrap' }}>{trimmed}</div>;
+}
 
 /** Khi từ chối đơn escalation/compliance: ghi chú admin tối thiểu số từ. */
 const ADMIN_REJECT_NOTE_MIN_WORDS = 50;
@@ -292,10 +315,21 @@ const tableBase = {
     width: '100%',
     borderCollapse: 'collapse',
     fontSize: '0.8125rem',
-    background: T.card,
+    background: '#ffffff',
 };
-const thBase = { padding: '0.65rem 0.75rem', borderBottom: `1px solid ${T.border}`, textAlign: 'left', background: T.bg, color: T.title, fontWeight: 600, fontSize: '0.8125rem' };
-const tdBase = { padding: '0.65rem 0.75rem', borderBottom: `1px solid ${T.border}`, verticalAlign: 'middle' };
+/** Header / hàng — cùng palette bảng Compliance (mint) */
+const thBase = {
+    padding: '0.65rem 0.75rem',
+    borderBottom: '1px solid #c9f0d8',
+    textAlign: 'left',
+    background: '#f0faf5',
+    color: '#047857',
+    fontWeight: 700,
+    fontSize: '0.72rem',
+    letterSpacing: '0.02em',
+    textTransform: 'uppercase',
+};
+const tdBase = { padding: '0.65rem 0.75rem', borderBottom: '1px solid #c9f0d8', verticalAlign: 'middle', background: '#ffffff' };
 
 const inputBase = {
     display: 'block',
@@ -765,6 +799,10 @@ export function ReviewEscalationsManagement() {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.05rem' }}>
+            <style>{`
+                .re-compliance-table tbody tr { transition: background-color 0.15s ease; }
+                .re-compliance-table tbody tr:hover { background-color: #f7fcf9 !important; }
+            `}</style>
             {/* Header — cùng format Quản lý xuất bản / Category */}
             <div>
                 <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: T.title, margin: 0, marginBottom: '0.35rem' }}>Quản lý đơn</h1>
@@ -989,8 +1027,8 @@ export function ReviewEscalationsManagement() {
                             ) : (
                                 <>
                                     {orderSourceTab === 'compliance' ? (
-                                        <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
-                                            <table style={tableBase}>
+                                        <div style={{ overflowX: 'auto', border: '1px solid #c9f0d8', borderRadius: '12px' }}>
+                                            <table style={tableBase} className="re-compliance-table">
                                                 <thead>
                                                     <tr>
                                                         {['Kết quả', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Lý do', 'Xử lý lúc', 'Ghi chú quản trị viên'].map((h) => (
@@ -1025,8 +1063,8 @@ export function ReviewEscalationsManagement() {
                                         </div>
                                     ) : (
                                         <>
-                                            <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
-                                                <table style={tableBase}>
+                                            <div style={{ overflowX: 'auto', border: '1px solid #c9f0d8', borderRadius: '12px' }}>
+                                                <table style={tableBase} className="re-compliance-table">
                                                     <thead>
                                                         <tr>
                                                             {['Kết quả', 'Loại', 'Tiêu đề', 'Người gửi', 'Loại đơn', 'Người xử lý', 'Xử lý lúc', 'Hạn xác nhận', 'Ghi chú quản trị viên', 'Lý do'].map((h) => (
@@ -1074,8 +1112,8 @@ export function ReviewEscalationsManagement() {
                         ) : items.length === 0 ? (
                             <p style={{ color: T.slate }}>Không có đơn chờ xử lý.</p>
                         ) : (
-                            <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
-                                <table style={tableBase}>
+                            <div style={{ overflowX: 'auto', border: '1px solid #c9f0d8', borderRadius: '12px' }}>
+                                <table style={tableBase} className="re-compliance-table">
                                     <thead>
                                         <tr>
                                             {(orderSourceTab === 'compliance'
@@ -1396,8 +1434,8 @@ export function ReviewEscalationsManagement() {
                         ) : logItems.length === 0 ? (
                             <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0 }}>Không có bản ghi khớp bộ lọc.</p>
                         ) : (
-                            <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
-                                <table style={tableBase}>
+                            <div style={{ overflowX: 'auto', border: '1px solid #c9f0d8', borderRadius: '12px' }}>
+                                <table style={tableBase} className="re-compliance-table">
                                     <thead>
                                         <tr>
                                             {['Id', 'Trạng thái', 'Mức độ', 'Loại', 'Tiêu đề', 'Yêu cầu', 'Người gửi', 'Tạo lúc', 'Người xử lý', 'Xử lý lúc', 'Lý do'].map((h) => (
@@ -1557,7 +1595,7 @@ export function ReviewEscalationsManagement() {
                                                         borderRadius: 8,
                                                     }}
                                                 >
-                                                    <table style={{ ...tableBase, margin: 0, width: '100%' }}>
+                                                    <table style={{ ...tableBase, margin: 0, width: '100%' }} className="re-compliance-table">
                                                         <thead>
                                                             <tr>
                                                                 {['#', 'Tiêu đề', 'Trạng thái', 'Số từ', 'Gửi duyệt', 'Hạn (SLA)', 'Người nhận duyệt'].map((h) => (
@@ -1663,7 +1701,6 @@ export function ReviewEscalationsManagement() {
                                             {(() => {
                                                 const d = resolveChapterPreview.data;
                                                 const origTitle = d.originalTitle ?? d.OriginalTitle ?? '—';
-                                                const origContent = (d.originalContent ?? d.OriginalContent ?? '').trim() || '—';
                                                 const pending = d.pendingVersions ?? d.PendingVersions ?? [];
                                                 const hasPv = Boolean(d.hasPendingVersion ?? d.HasPendingVersion) && pending.length > 0;
                                                 const kindExt = String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase().includes('EXTEND');
@@ -1688,9 +1725,11 @@ export function ReviewEscalationsManagement() {
                                                         <div style={{ fontWeight: 600, color: T.title, marginBottom: 6 }}>
                                                             {v.titleSnapshot ?? v.TitleSnapshot ?? '—'}
                                                         </div>
-                                                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: T.title }}>
-                                                            {(v.contentSnapshot ?? v.ContentSnapshot ?? '').trim() || '—'}
-                                                        </div>
+                                                        {renderEscalationModalChapterBody(v.contentSnapshot ?? v.ContentSnapshot ?? '', {
+                                                            wordBreak: 'break-word',
+                                                            color: T.title,
+                                                            lineHeight: 1.55,
+                                                        })}
                                                     </div>
                                                 ));
 
@@ -1703,7 +1742,10 @@ export function ReviewEscalationsManagement() {
                                                         <div style={{ marginBottom: hasPv ? 12 : 0 }}>
                                                             <div style={{ fontWeight: 600, color: T.slate, marginBottom: 4 }}>Bản đang duyệt</div>
                                                             <div style={{ fontWeight: 600, color: T.title, marginBottom: 6 }}>{origTitle}</div>
-                                                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: T.title }}>{origContent}</div>
+                                                            {renderEscalationModalChapterBody(
+                                                                d.originalContent ?? d.OriginalContent ?? '',
+                                                                { wordBreak: 'break-word', color: T.title, lineHeight: 1.55 },
+                                                            )}
                                                         </div>
                                                         {hasPv ? versionBlocks : null}
                                                     </>

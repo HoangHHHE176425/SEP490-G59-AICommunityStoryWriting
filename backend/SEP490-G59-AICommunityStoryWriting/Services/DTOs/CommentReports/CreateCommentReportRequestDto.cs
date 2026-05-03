@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Services.StoryReporting;
 
 namespace Services.DTOs.CommentReports;
 
@@ -8,8 +9,8 @@ public class CreateCommentReportRequestDto
     [MaxLength(50)]
     public string ReasonCode { get; set; } = null!;
 
-    /// <summary>Ma trận nghiệp vụ: tối đa 200 ký tự.</summary>
-    [MaxLength(200)]
+    /// <summary>Bắt buộc có nội dung; tối thiểu 50 từ — kiểm tra chi tiết ở <see cref="UserReportDescriptionRules"/>.</summary>
+    [MaxLength(UserReportDescriptionRules.MaxLength)]
     public string? Description { get; set; }
 }
 

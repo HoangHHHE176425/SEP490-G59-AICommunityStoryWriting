@@ -25,7 +25,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 // - GET /api/admin/wallet/top-authors, top-spenders
 // - GET /api/admin/wallet/transactions (phân trang, lọc)
 
-/** Tab lịch sử ví hệ thống: chỉ donate + mở khóa chương (phí nền tảng 30%). API: type=UNLOCK_AND_DONATE | UNLOCK | DONATE */
+/** Tab lịch sử ví hệ thống: chỉ donate + mở khóa chương (phí nền tảng 70%). API: type=UNLOCK_AND_DONATE | UNLOCK | DONATE */
 const LEDGER_EVENT_TYPES = [
     { value: 'UNLOCK_AND_DONATE', label: 'Tất cả (donate + mở khóa)' },
     { value: 'UNLOCK', label: 'Mở khóa chương' },
@@ -69,7 +69,7 @@ function IdLine({ roleLabel, id }) {
         <div className="flex min-w-0 items-center gap-1">
             <span className="w-[4.5rem] shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-500">{roleLabel}</span>
             <code
-                className="min-w-0 flex-1 truncate rounded border-l-2 border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-800"
+                className="min-w-0 flex-1 truncate rounded border-l-2 border-[#86efac] bg-[#f7fcf9] px-1.5 py-0.5 text-[11px] text-slate-800"
                 title={full}
             >
                 {shortenGuidLike(full)}
@@ -202,10 +202,10 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
     };
     const getTypeBadgeClass = (type) => {
         const map = {
-            UNLOCK: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80',
-            DONATE: 'bg-fuchsia-100 text-fuchsia-800 ring-1 ring-fuchsia-200/80',
+            UNLOCK: 'bg-[#ecfdf5] text-[#047857] ring-1 ring-[#c9f0d8]',
+            DONATE: 'bg-[#fdf4ff] text-[#86198f] ring-1 ring-[#f5d0fe]',
         };
-        return map[type] || 'bg-slate-100 text-slate-600 ring-1 ring-slate-200/80';
+        return map[type] || 'bg-slate-50 text-slate-600 ring-1 ring-[#c9f0d8]';
     };
 
     const exportHistoryCsv = () => {
@@ -244,9 +244,18 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
         a.remove();
         URL.revokeObjectURL(url);
     };
-    const formatDate = (iso) => {
-        const d = new Date(iso);
-        return d.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' });
+    const formatDate = (value) => {
+        if (!value) return '—';
+        const raw = String(value).trim();
+        const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+        const d = new Date(hasTimezone ? raw : `${raw}Z`);
+        if (Number.isNaN(d.getTime())) return raw;
+        return d.toLocaleString('vi-VN', {
+            timeZone: 'Asia/Ho_Chi_Minh',
+            hour12: false,
+            dateStyle: 'short',
+            timeStyle: 'short',
+        });
     };
 
     const formatSignedCoins = (value) => {
@@ -461,99 +470,13 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                             : '—'}
                                 </p>
                                 <p className="mt-1 text-xs text-slate-400">
-                                    Tổng phí nền tảng thu được (30%) quy đổi theo tỷ giá cố định.
+                                    Tổng phí nền tảng thu được (70%) quy đổi theo tỷ giá cố định.
                                 </p>
                             </div>
                         </div>
                     </div>
 
-                    {/* Balances + Chart */}
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-5">
-                            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                                <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
-                                    Phân bổ số dư ví
-                                </h2>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs text-slate-400">Thu nhập theo:</span>
-                                    <select
-                                        value={chartRange}
-                                        onChange={(e) => setChartRange(e.target.value)}
-                                        className="text-xs border border-slate-200 rounded px-2 py-1 text-slate-700"
-                                    >
-                                        <option value="7">7 ngày</option>
-                                        <option value="30">30 ngày</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                <div className="flex items-center gap-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2.5">
-                                    <div className="w-9 h-9 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                                        <Wallet className="w-5 h-5 text-emerald-500" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-slate-500">Thu nhập khả dụng của tác giả</p>
-                                        <p className="text-sm font-semibold text-slate-900">
-                                            {formatCoins(summarySafe.totalIncomeBalance)}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5">
-                                    <div className="w-9 h-9 rounded-full bg-slate-500/10 flex items-center justify-center">
-                                        <Lock className="w-5 h-5 text-slate-500" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-slate-500">Số dư bị khóa</p>
-                                        <p className="text-sm font-semibold text-slate-900">
-                                            {formatCoins(summarySafe.totalFrozenBalance)}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3 rounded-lg border border-amber-100 bg-amber-50/60 px-3 py-2.5">
-                                    <div className="w-9 h-9 rounded-full bg-amber-500/10 flex items-center justify-center">
-                                        <ArrowDownCircle className="w-5 h-5 text-amber-500" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-slate-500">Coin đang treo (escrow)</p>
-                                        <p className="text-sm font-semibold text-slate-900">
-                                            {formatCoins(summarySafe.totalPendingEscrow)}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="mt-6">
-                                <p className="text-xs font-medium text-slate-500 mb-2">
-                                    Thu nhập theo ngày {chartRange === '30' ? '(30 ngày gần nhất)' : '(7 ngày)'}
-                                </p>
-                                <div className="h-52 flex items-end justify-between gap-2">
-                                    {dailyIncome.map((d) => {
-                                        const height = Math.round((d.income / maxIncome) * 100);
-                                        return (
-                                            <div
-                                                key={d.day}
-                                                className="flex-1 flex flex-col items-center gap-1"
-                                            >
-                                                <div className="relative w-full h-full flex items-end">
-                                                    <div
-                                                        className="w-full bg-primary/30 hover:bg-primary/60 rounded-t-md transition-colors cursor-pointer relative group"
-                                                        style={{ height: `${Math.max(height, 10)}%` }}
-                                                    >
-                                                        <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10">
-                                                            {formatVnd(d.income)}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <span className="text-[11px] text-slate-500">{d.day}</span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
-
+                    <div className="grid grid-cols-1 gap-6">
                         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
                             <h2 className="text-sm font-semibold text-slate-900">Hoạt động ví</h2>
                             <div className="grid grid-cols-2 gap-3">
@@ -576,14 +499,6 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                     </p>
                                 </div>
                             </div>
-                            <div className="border-t border-slate-200 pt-4">
-                                <p className="text-xs font-medium text-slate-500 mb-2">Gợi ý luồng dữ liệu</p>
-                                <ul className="text-xs text-slate-500 space-y-1 list-disc pl-4">
-                                    <li>Nguồn tiền vào: PayOS/VNPAY → coin_orders (PAID) → cập nhật ví.</li>
-                                    <li>Chi tiêu: mua chương VIP → chuyển coin từ ví độc giả sang thu nhập tác giả.</li>
-                                    <li>Rút tiền: trừ income_balance, tăng frozen cho tới khi admin thanh toán.</li>
-                                </ul>
-                            </div>
                         </div>
                     </div>
 
@@ -605,7 +520,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                             <p className="text-[11px] text-slate-500">{a.stories} truyện đang bật chương VIP</p>
                                         </div>
                                         <div className="text-right">
-                                            <p className="text-sm font-semibold text-emerald-600">{formatVnd(a.income)}</p>
+                                            <p className="text-sm font-semibold text-emerald-600">{formatCoins(a.income)}</p>
                                         </div>
                                     </div>
                                 ))}
@@ -637,9 +552,9 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
             )}
 
             {activeTab === 'history' && (
-                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="overflow-hidden rounded-2xl border border-[#c9f0d8] bg-white shadow-sm">
                     {/* Phạm vi dữ liệu */}
-                    <div className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-6">
+                    <div className="border-b border-[#c9f0d8] bg-[#f0faf5]/60 px-5 py-4 sm:px-6">
                         <div className="flex gap-3">
                             <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-200 text-slate-700">
                                 <Info className="h-4 w-4" aria-hidden />
@@ -648,7 +563,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                 <p className="text-sm font-semibold text-slate-900">Phạm vi bảng này</p>
                                 <p className="text-sm leading-relaxed text-slate-600">
                                     Chỉ <span className="font-semibold text-slate-800">ủng hộ (donate)</span> và{' '}
-                                    <span className="font-semibold text-slate-800">mở khóa chương</span> (phí nền tảng 30% / thu nhập tác giả).
+                                    <span className="font-semibold text-slate-800">mở khóa chương</span> (phí nền tảng 70% / thu nhập tác giả).
                                     Lịch <span className="font-medium text-slate-800">nạp coin / rút tiền</span> nằm ở khối{' '}
                                     <span className="rounded-md bg-white px-1.5 py-0.5 font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200">
                                         Lịch sử giao dịch (Nạp / Rút)
@@ -660,7 +575,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                     </div>
 
                     {/* Filters */}
-                    <div className="border-b border-slate-200 bg-slate-50/40 px-4 py-4 sm:px-6">
+                    <div className="border-b border-[#c9f0d8] bg-[#f8fdfb] px-4 py-4 sm:px-6">
                         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-end">
                             <label className="block min-w-0 lg:col-span-4">
                                 <span className="mb-1.5 block text-xs font-semibold text-slate-500">Tìm kiếm</span>
@@ -739,34 +654,55 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                         </div>
                     </div>
 
-                    {/* Table */}
+                    {/* Table — palette giống bảng Compliance (mint header, viền #c9f0d8) */}
                     <div className="overflow-x-auto">
-                        <table className="w-full min-w-[920px] table-fixed border-collapse text-left text-sm text-slate-700">
+                        <table className="w-full min-w-[920px] table-fixed border-collapse text-left text-sm text-slate-800">
                             <thead>
-                                <tr className="border-b border-slate-200 bg-slate-50/90">
-                                    <th className="w-[11%] px-4 py-3.5 text-xs font-semibold text-slate-600" title="Thời điểm ghi nhận">
+                                <tr className="border-b border-[#c9f0d8] bg-[#f0faf5]">
+                                    <th
+                                        className="w-[11%] px-4 py-3.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]"
+                                        title="Thời điểm ghi nhận"
+                                    >
                                         Thời gian
                                     </th>
-                                    <th className="w-[12%] px-4 py-3.5 text-xs font-semibold text-slate-600">Loại</th>
-                                    <th className="w-[9%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Thay đổi ví nền tảng">
+                                    <th className="w-[12%] px-4 py-3.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                        Loại
+                                    </th>
+                                    <th
+                                        className="w-[9%] px-0 py-3.5 text-center text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]"
+                                        title="Thay đổi ví nền tảng"
+                                    >
                                         Ví HT
                                     </th>
-                                    <th className="w-[9%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Thay đổi ví độc giả">
+                                    <th
+                                        className="w-[9%] px-0 py-3.5 text-center text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]"
+                                        title="Thay đổi ví độc giả"
+                                    >
                                         Độc giả
                                     </th>
-                                    <th className="w-[9%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Thu nhập tác giả">
+                                    <th
+                                        className="w-[9%] px-0 py-3.5 text-center text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]"
+                                        title="Thu nhập tác giả"
+                                    >
                                         Tác giả
                                     </th>
-                                    <th className="w-[8%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Coin khóa">
+                                    <th
+                                        className="w-[8%] px-0 py-3.5 text-center text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]"
+                                        title="Coin khóa"
+                                    >
                                         Khóa
                                     </th>
-                                    <th className="w-[32%] min-w-[240px] px-4 py-3.5 text-xs font-semibold text-slate-600">Chi tiết</th>
+                                    <th className="w-[32%] min-w-[240px] px-4 py-3.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                        Chi tiết
+                                    </th>
                                     {hasAnyNote ? (
-                                        <th className="w-[10%] px-4 py-3.5 text-xs font-semibold text-slate-600">Ghi chú</th>
+                                        <th className="w-[10%] px-4 py-3.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                            Ghi chú
+                                        </th>
                                     ) : null}
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100">
+                            <tbody>
                                 {paginatedTransactions.length === 0 ? (
                                     <tr>
                                         <td
@@ -789,7 +725,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                     paginatedTransactions.map((tx) => (
                                         <tr
                                             key={`${tx.eventType}-${tx.eventTime}-${tx.adminId || ''}-${tx.authorUserId || ''}-${tx.buyerUserId || ''}`}
-                                            className="align-top transition-colors hover:bg-slate-50/80"
+                                            className="align-top border-t border-[#c9f0d8] bg-white transition-colors first:border-t-0 hover:bg-[#f7fcf9]"
                                         >
                                             <td className="px-4 py-3.5">
                                                 <span className="font-medium text-slate-800">{formatDate(tx.eventTime)}</span>
@@ -857,10 +793,10 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
 
                     {/* Pagination */}
                     {filteredTransactions.length > 0 && (
-                        <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50/30 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                        <div className="flex flex-col gap-3 border-t border-[#c9f0d8] bg-[#f8fdfb] px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                             <p className="text-xs text-slate-600">
                                 Hiển thị{' '}
-                                <span className="font-semibold text-slate-700">
+                                <span className="font-semibold text-[#047857]">
                                     {(historyPage - 1) * historyPageSize + 1}–{Math.min(historyPage * historyPageSize, historyTotalCount)}
                                 </span>{' '}
                                 / <span className="font-semibold text-slate-700">{historyTotalCount}</span> bản ghi
@@ -870,19 +806,19 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                     type="button"
                                     onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
                                     disabled={historyPage <= 1}
-                                    className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="rounded-lg border border-[#cbd5e1] bg-white p-2 text-slate-700 shadow-sm transition hover:bg-[#f7fcf9] disabled:cursor-not-allowed disabled:opacity-40"
                                     aria-label="Trang trước"
                                 >
                                     <ChevronLeft className="h-4 w-4" />
                                 </button>
-                                <span className="min-w-[7rem] px-2 text-center text-sm font-semibold text-slate-700">
+                                <span className="min-w-[7rem] rounded-lg border border-[#22c55e] bg-[#22c55e] px-2 py-1.5 text-center text-sm font-semibold text-white">
                                     Trang {historyPage} / {totalHistoryPages}
                                 </span>
                                 <button
                                     type="button"
                                     onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
                                     disabled={historyPage >= totalHistoryPages}
-                                    className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="rounded-lg border border-[#cbd5e1] bg-white p-2 text-slate-700 shadow-sm transition hover:bg-[#f7fcf9] disabled:cursor-not-allowed disabled:opacity-40"
                                     aria-label="Trang sau"
                                 >
                                     <ChevronRight className="h-4 w-4" />
@@ -891,7 +827,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                         </div>
                     )}
 
-                    <div className="border-t border-slate-200 bg-slate-50/20 p-4 sm:p-6">
+                    <div className="border-t border-[#c9f0d8] bg-[#f8fdfb] p-4 sm:p-6">
                         <AdminTransactions />
                     </div>
                 </div>

@@ -1,8 +1,12 @@
 using AIStory.Services.Helpers;
+using BusinessObjects;
+using BusinessObjects.Account;
 using BusinessObjects.Entities;
+using Microsoft.Extensions.Configuration;
 using Repositories.Interfaces;
 using Services.DTOs.Account;
 using Services.Interfaces;
+using Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -17,17 +21,26 @@ namespace Services.Implementations
         private readonly IPolicyRepository _policyRepo;
         private readonly IAuthorPolicyAcceptanceRepository _authorPolicyAcceptanceRepo;
         private readonly JwtHelper _jwtHelper;
+        private readonly StoryPlatformDbContext _db;
+        private readonly IConfiguration _config;
+        private readonly IAuthorAiTokenAutoGrantService _authorAiTokenAutoGrant;
 
         public AccountService(
             IUserRepository userRepo,
             IPolicyRepository policyRepo,
             IAuthorPolicyAcceptanceRepository authorPolicyAcceptanceRepo,
-            JwtHelper jwtHelper)
+            JwtHelper jwtHelper,
+            StoryPlatformDbContext db,
+            IConfiguration config,
+            IAuthorAiTokenAutoGrantService authorAiTokenAutoGrant)
         {
             _userRepo = userRepo;
             _policyRepo = policyRepo;
             _authorPolicyAcceptanceRepo = authorPolicyAcceptanceRepo;
             _jwtHelper = jwtHelper;
+            _db = db;
+            _config = config;
+            _authorAiTokenAutoGrant = authorAiTokenAutoGrant;
         }
         public async Task DeleteAccountAsync(Guid userId)
         {
@@ -68,44 +81,44 @@ namespace Services.Implementations
 
         public async Task UpdateProfileAsync(Guid userId, UpdateProfileRequest request)
         {
-            var user = await _userRepo.GetUserById(userId);
-            if (user == null) throw new Exception("User not found");
-
-            if (user.user_profiles == null)
+            if (!await _userRepo.UserExistsAsync(userId))
             {
-                user.user_profiles = new user_profiles
-                {
-                    user_id = userId,
-                    social_links = "{}",
-                    settings = "{\"allow_notif\": true}"
-                };
+                throw new Exception("User not found");
             }
 
-            //  KIỂM TRA TRÙNG NICKNAME
+            var currentNickname = await _userRepo.GetUserProfileNicknameAsync(userId);
+
+            var setNickname = false;
+            string? nickname = null;
             if (!string.IsNullOrEmpty(request.DisplayName))
             {
-                // Chỉ check nếu nickname thay đổi so với cái cũ
-                if (request.DisplayName != user.user_profiles.nickname)
+                if (request.DisplayName != currentNickname)
                 {
-                    bool isExist = await _userRepo.IsNicknameExist(request.DisplayName, userId);
-                    if (isExist)
+                    if (await _userRepo.IsNicknameExist(request.DisplayName, userId))
                     {
                         throw new Exception($"Tên hiển thị '{request.DisplayName}' đã được sử dụng. Vui lòng chọn tên khác.");
                     }
-                    user.user_profiles.nickname = request.DisplayName;
+
+                    setNickname = true;
+                    nickname = request.DisplayName;
                 }
             }
 
-            if (!string.IsNullOrEmpty(request.Phone)) user.user_profiles.phone = request.Phone;
-            if (!string.IsNullOrEmpty(request.IdNumber)) user.user_profiles.id_number = request.IdNumber;
-            if (request.Bio != null) user.user_profiles.bio = request.Bio;
-            if (request.Description != null) user.user_profiles.description = request.Description;
-            if (!string.IsNullOrEmpty(request.AvatarUrl)) user.user_profiles.avatar_url = request.AvatarUrl;
-
-            user.user_profiles.updated_at = DateTime.UtcNow;
-            user.updated_at = DateTime.UtcNow;
-
-            await _userRepo.UpdateUser(user);
+            await _userRepo.PersistUserProfileAsync(userId, new UserProfilePersistModel
+            {
+                SetNickname = setNickname,
+                Nickname = nickname,
+                SetPhone = !string.IsNullOrEmpty(request.Phone),
+                Phone = request.Phone,
+                SetIdNumber = !string.IsNullOrEmpty(request.IdNumber),
+                IdNumber = request.IdNumber,
+                SetBio = request.Bio != null,
+                Bio = request.Bio,
+                SetDescription = request.Description != null,
+                Description = request.Description,
+                SetAvatarUrl = !string.IsNullOrEmpty(request.AvatarUrl),
+                AvatarUrl = request.AvatarUrl
+            });
         }
 
         public async Task<UserProfileResponse> GetProfileAsync(Guid userId)
@@ -113,9 +126,7 @@ namespace Services.Implementations
             var user = await _userRepo.GetUserById(userId);
             if (user == null) throw new Exception("User not found");
 
-            int storyCount = user.stories?.Count ?? 0;
-            long totalReads = user.stories?.Sum(s => s.total_views ?? 0) ?? 0;
-            int totalLikes = user.stories?.Sum(s => s.total_favorites ?? 0) ?? 0;
+            var (storyCount, totalReads, totalLikes) = await _userRepo.GetAuthorStoryAggregatesAsync(userId);
 
             // 2. Tạo Tags (Giả lập logic hiển thị)
             var tags = new List<string>();
@@ -144,11 +155,7 @@ namespace Services.Implementations
                 IsVerified = user.status == "ACTIVE",
 
                 Role = (user.role ?? "USER").Trim().ToUpperInvariant(),
-                AuthorWritingSuspendedUntilUtc = user.author_writing_suspended_until.HasValue
-                    ? (user.author_writing_suspended_until.Value.Kind == DateTimeKind.Unspecified
-                        ? DateTime.SpecifyKind(user.author_writing_suspended_until.Value, DateTimeKind.Utc)
-                        : user.author_writing_suspended_until.Value.ToUniversalTime())
-                    : null,
+                AuthorWritingSuspendedUntilUtc = ApiDateTime.AsUtcForJson(user.author_writing_suspended_until),
 
                 Tags = tags,
 
@@ -172,6 +179,7 @@ namespace Services.Implementations
             var acceptance = activePolicy == null
                 ? null
                 : await _authorPolicyAcceptanceRepo.GetAcceptanceAsync(userId, activePolicy.id);
+            var hasAcceptedActivePolicy = activePolicy != null && IsAcceptanceValidForPolicy(acceptance, activePolicy);
 
             var isAuthor = role == "AUTHOR";
             var missingRequirements = isAuthor
@@ -185,8 +193,8 @@ namespace Services.Implementations
                 HasActiveAuthorPolicy = activePolicy != null,
                 ActiveAuthorPolicyId = activePolicy?.id,
                 ActiveAuthorPolicyVersion = activePolicy?.version,
-                HasAcceptedActivePolicy = acceptance != null,
-                AcceptedAt = acceptance?.accepted_at,
+                HasAcceptedActivePolicy = hasAcceptedActivePolicy,
+                AcceptedAt = hasAcceptedActivePolicy ? acceptance?.accepted_at : null,
                 CanBecomeAuthor = !isAuthor && missingRequirements.Count == 0,
                 MissingRequirements = missingRequirements
             };
@@ -221,22 +229,35 @@ namespace Services.Implementations
 
             var acceptedNow = false;
             var acceptedAt = acceptance?.accepted_at ?? DateTime.UtcNow;
-
-            if (acceptance == null)
+            var hasAcceptedCurrent = IsAcceptanceValidForPolicy(acceptance, activePolicy);
+            if (!hasAcceptedCurrent)
             {
-                var row = new author_policy_acceptances
-                {
-                    id = Guid.NewGuid(),
-                    user_id = userId,
-                    policy_id = activePolicy.id,
-                    accepted_at = acceptedAt,
-                    ip_address = ipAddress,
-                    user_agent = userAgent,
-                    accepted_for = "AUTHOR"
-                };
-
-                await _authorPolicyAcceptanceRepo.AddAcceptanceAsync(row);
                 acceptedNow = true;
+                acceptedAt = DateTime.UtcNow;
+
+                if (acceptance != null)
+                {
+                    acceptance.accepted_at = acceptedAt;
+                    acceptance.ip_address = ipAddress;
+                    acceptance.user_agent = userAgent;
+                    acceptance.accepted_for = "AUTHOR";
+                    await _authorPolicyAcceptanceRepo.UpdateAcceptanceAsync(acceptance);
+                }
+                else
+                {
+                    var row = new author_policy_acceptances
+                    {
+                        id = Guid.NewGuid(),
+                        user_id = userId,
+                        policy_id = activePolicy.id,
+                        accepted_at = acceptedAt,
+                        ip_address = ipAddress,
+                        user_agent = userAgent,
+                        accepted_for = "AUTHOR"
+                    };
+
+                    await _authorPolicyAcceptanceRepo.AddAcceptanceAsync(row);
+                }
             }
 
             if (role != "AUTHOR")
@@ -245,6 +266,14 @@ namespace Services.Implementations
                 user.must_resign_policy = false;
                 user.updated_at = DateTime.UtcNow;
                 await _userRepo.UpdateUser(user);
+
+                // Khi user lần đầu trở thành AUTHOR: add vào selected_user_ids của rule mặc định
+                // và cộng ngay grant_amount vào users.ai_token_limit.
+                try
+                {
+                    await _authorAiTokenAutoGrant.OnAuthorBecameAuthorAsync(user.id).ConfigureAwait(false);
+                }
+                catch { /* best-effort */ }
             }
 
             return new BecomeAuthorResponse
@@ -294,5 +323,15 @@ namespace Services.Implementations
 
             return missing;
         }
+
+        private static bool IsAcceptanceValidForPolicy(author_policy_acceptances? acceptance, system_policies policy)
+        {
+            if (acceptance == null) return false;
+            var effectiveFrom = policy.activated_at ?? policy.created_at ?? DateTime.MinValue;
+            return acceptance.accepted_at >= effectiveFrom;
+        }
+
+        // NOTE: Cơ chế cấp token cho tác giả mới đã chuyển sang singleton rule trong author_ai_token_auto_grant_rules
+        // (bảng author_ai_token_auto_grant_rules) và xử lý trong IAuthorAiTokenAutoGrantService.OnAuthorBecameAuthorAsync.
     }
 }

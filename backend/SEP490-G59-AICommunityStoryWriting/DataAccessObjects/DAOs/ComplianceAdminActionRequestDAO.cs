@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,23 @@ public static class ComplianceAdminActionRequestDAO
 
     /// <summary>Tiền tố trong message khi compliance gửi đơn từ báo cáo comment (gắn đúng thread).</summary>
     public const string CommentReportMessageTagPrefix = "[COMMENT_REPORT:";
+
+    private static readonly Regex CommentReportMessageTagRegex = new(
+        @"\[COMMENT_REPORT:([0-9a-fA-F-]{36})\]",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    /// <summary>Trích các commentId từ message đơn admin (tag <see cref="FormatCommentReportSourceTag"/>).</summary>
+    public static IReadOnlyList<Guid> ParseCommentIdsFromMessage(string? message)
+    {
+        if (string.IsNullOrEmpty(message)) return Array.Empty<Guid>();
+        var set = new HashSet<Guid>();
+        foreach (Match m in CommentReportMessageTagRegex.Matches(message))
+        {
+            if (Guid.TryParse(m.Groups[1].Value, out var id) && id != Guid.Empty)
+                set.Add(id);
+        }
+        return set.Count == 0 ? Array.Empty<Guid>() : set.ToList();
+    }
 
     public static string FormatCommentReportSourceTag(Guid commentId) =>
         $"{CommentReportMessageTagPrefix}{commentId}]";

@@ -26,14 +26,14 @@ public class StoryContextBuilder : IStoryContextBuilder
         _configuration = configuration;
     }
 
-    public string GetStoryAndMemoryBlock(Guid storyId, Guid? afterChapterId)
+    public string GetStoryAndMemoryBlock(Guid storyId, Guid? upToChapterId)
     {
         var story = _storyRepository.GetById(storyId);
         if (story == null)
             return string.Empty;
 
         var (lastN, maxCharsPerChapter) = GetConfig();
-        var chapters = GetChaptersForContext(storyId, afterChapterId);
+        var chapters = GetChaptersForContext(storyId, upToChapterId);
         var memoryBlock = StoryContextHelper.BuildLastChaptersContext(chapters, lastN, maxCharsPerChapter);
 
         var lines = new List<string>
@@ -46,14 +46,14 @@ public class StoryContextBuilder : IStoryContextBuilder
         return string.Join("\n\n", lines.Where(s => !string.IsNullOrWhiteSpace(s)));
     }
 
-    public string BuildForSuggestNextChapter(Guid storyId, Guid? afterChapterId)
+    public string BuildForSuggestNextChapter(Guid storyId, Guid? upToChapterId)
     {
         var story = _storyRepository.GetById(storyId);
         if (story == null)
             return string.Empty;
 
         var (lastN, maxCharsPerChapter) = GetConfig();
-        var chapters = GetChaptersForContext(storyId, afterChapterId);
+        var chapters = GetChaptersForContext(storyId, upToChapterId);
         var memoryBlock = StoryContextHelper.BuildLastChaptersContext(chapters, lastN, maxCharsPerChapter);
 
         var lines = new List<string>
@@ -66,14 +66,14 @@ public class StoryContextBuilder : IStoryContextBuilder
         return string.Join("\n\n", lines.Where(s => !string.IsNullOrWhiteSpace(s)));
     }
 
-    public string BuildForCheckConsistency(Guid storyId, string draftContent, Guid? afterChapterId, string? chapterTitle)
+    public string BuildForCheckConsistency(Guid storyId, string draftContent, Guid? upToChapterId, string? chapterTitle)
     {
         var story = _storyRepository.GetById(storyId);
         if (story == null)
             return string.Empty;
 
         var (lastN, maxCharsPerChapter) = GetConfig();
-        var chapters = GetChaptersForContext(storyId, afterChapterId);
+        var chapters = GetChaptersForContext(storyId, upToChapterId);
         var memoryBlock = StoryContextHelper.BuildLastChaptersContext(chapters, lastN, maxCharsPerChapter);
 
         var lines = new List<string>
@@ -99,14 +99,14 @@ public class StoryContextBuilder : IStoryContextBuilder
         return (lastN, maxCharsPerChapter);
     }
 
-    private List<chapters> GetChaptersForContext(Guid storyId, Guid? afterChapterId)
+    private List<chapters> GetChaptersForContext(Guid storyId, Guid? upToChapterId)
     {
         var chapters = _chapterRepository.GetByStoryId(storyId).OrderBy(c => c.order_index).ToList();
-        if (!afterChapterId.HasValue)
+        if (!upToChapterId.HasValue)
             return chapters;
-        var afterIdx = chapters.FirstOrDefault(c => c.id == afterChapterId.Value)?.order_index;
-        if (!afterIdx.HasValue)
+        var upToIdx = chapters.FirstOrDefault(c => c.id == upToChapterId.Value)?.order_index;
+        if (!upToIdx.HasValue)
             return chapters;
-        return chapters.Where(c => c.order_index <= afterIdx.Value).ToList();
+        return chapters.Where(c => c.order_index <= upToIdx.Value).ToList();
     }
 }

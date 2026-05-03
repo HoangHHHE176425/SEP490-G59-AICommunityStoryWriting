@@ -17,6 +17,12 @@ public partial class ai_usage_logs
 
     public string? model_name { get; set; }
 
+    /// <summary>OpenRouter generation id (chat completion id), dùng với GET /api/v1/generation.</summary>
+    public string? generation_id { get; set; }
+
+    /// <summary>Chi phí ước tính (USD) nếu provider trả về.</summary>
+    public decimal? cost_usd { get; set; }
+
     public int? prompt_tokens { get; set; }
 
     public int? completion_tokens { get; set; }

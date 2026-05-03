@@ -34,6 +34,8 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<author_income_logs> author_income_logs { get; set; }
 
+    public virtual DbSet<author_ai_token_auto_grant_rules> author_ai_token_auto_grant_rules { get; set; }
+
     public virtual DbSet<author_policy_acceptances> author_policy_acceptances { get; set; }
 
     public virtual DbSet<categories> categories { get; set; }
@@ -128,8 +130,13 @@ public partial class StoryPlatformDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
+            var connectionString =
+                Environment.GetEnvironmentVariable("ConnectionStrings__StoryPlatformDb")
+                ?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+                ?? "Server= QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;";
+
             optionsBuilder.UseSqlServer(
-                "Server= localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                connectionString,
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                     maxRetryCount: 5,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -191,7 +198,9 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.action_type).HasMaxLength(50);
             entity.Property(e => e.completion_tokens).HasDefaultValue(0);
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
-            entity.Property(e => e.model_name).HasMaxLength(50);
+            entity.Property(e => e.model_name).HasMaxLength(200);
+            entity.Property(e => e.generation_id).HasMaxLength(128);
+            entity.Property(e => e.cost_usd).HasColumnType("decimal(18, 8)");
             entity.Property(e => e.prompt_tokens).HasDefaultValue(0);
             entity.Property(e => e.status).HasMaxLength(20);
             entity.Property(e => e.total_tokens).HasDefaultValue(0);
@@ -269,6 +278,20 @@ public partial class StoryPlatformDbContext : DbContext
             entity.HasOne(d => d.author).WithMany(p => p.author_income_logs)
                 .HasForeignKey(d => d.author_id)
                 .HasConstraintName("fk_income_auth");
+        });
+
+        modelBuilder.Entity<author_ai_token_auto_grant_rules>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_author_ai_token_auto_grant_rules");
+
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.display_name).HasMaxLength(200);
+            entity.Property(e => e.period_kind).HasMaxLength(20).IsUnicode(false);
+            entity.Property(e => e.grant_limit_field).HasMaxLength(30).IsUnicode(false);
+            entity.Property(e => e.selected_user_ids).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.last_executed_period_key).HasMaxLength(64).IsUnicode(false);
+            entity.Property(e => e.created_at_utc).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.updated_at_utc).HasDefaultValueSql("(sysutcdatetime())");
         });
 
         modelBuilder.Entity<author_policy_acceptances>(entity =>
@@ -1085,6 +1108,7 @@ public partial class StoryPlatformDbContext : DbContext
                 .HasMaxLength(20)
                 .HasDefaultValue("PENDING");
             entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.ai_token_limit).HasDefaultValue(0);
             entity.Property(e => e.author_writing_suspended_until).HasColumnType("datetime2");
 
             entity.HasMany(d => d.comment).WithMany(p => p.user)

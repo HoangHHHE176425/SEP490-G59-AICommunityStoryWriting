@@ -74,7 +74,7 @@ namespace AIStory.API.Controllers
         /// <summary>Tạo story mới - Chỉ AUTHOR</summary>
         [HttpPost]
         [Consumes("multipart/form-data")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public async Task<IActionResult> Create([FromForm] CreateStoryRequestDto request)
         {
             try
@@ -249,15 +249,15 @@ namespace AIStory.API.Controllers
         {
             if (request == null || string.IsNullOrWhiteSpace(request.ReasonCode))
                 return BadRequest(new { message = "ReasonCode is required." });
+            if (string.IsNullOrWhiteSpace(request.Description))
+                return BadRequest(new { message = "Vui lòng nhập mô tả báo cáo (tối thiểu 50 từ)." });
             var userId = GetCurrentUserId();
             if (!userId.HasValue)
                 return Unauthorized(new { message = "Cần đăng nhập để báo cáo." });
             try
             {
-                var reportId = await _storyReportService.CreateStoryReportAsync(id, userId.Value, request);
-                if (reportId == Guid.Empty)
-                    return Conflict(new { message = "Bạn đã báo cáo truyện này trước đó." });
-                return Ok(new { id = reportId, message = "Đã gửi báo cáo." });
+                var result = await _storyReportService.CreateStoryReportAsync(id, userId.Value, request);
+                return Ok(new { id = result.ReportId, message = result.Message });
             }
             catch (ArgumentException ex)
             {
@@ -419,6 +419,8 @@ namespace AIStory.API.Controllers
                     return NotFound(new { message = "Story not found." });
                 if (!string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
                     return BadRequest(new { message = "Chỉ có thể theo dõi truyện đã xuất bản (PUBLISHED)." });
+                if (story.author_id.HasValue && story.author_id.Value == userId.Value)
+                    return BadRequest(new { message = "Không thể theo dõi truyện của chính bạn." });
                 UserLibraryDAO.Follow(userId.Value, id);
                 return Ok(new { following = true, message = "Đã theo dõi truyện." });
             }
@@ -657,6 +659,7 @@ namespace AIStory.API.Controllers
                 ParentId = c.parent_id,
                 UserId = c.user_id ?? Guid.Empty,
                 UserDisplayName = display,
+                UserAvatarUrl = c.userNavigation?.user_profiles?.avatar_url,
                 UserRole = ResolveCommentDisplayUserRole(c.userNavigation?.role, c.user_id, storyAuthorId),
                 UserCreatedAt = c.userNavigation?.created_at,
                 Content = content,
@@ -761,7 +764,7 @@ namespace AIStory.API.Controllers
         /// <summary>Cập nhật story (với hỗ trợ upload ảnh) - Chỉ AUTHOR (chỉ được sửa story của chính mình)</summary>
         [HttpPut("{id:guid}")]
         [Consumes("multipart/form-data")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public async Task<IActionResult> Update(Guid id, [FromForm] UpdateStoryWithImageRequestDto request)
         {
             try
@@ -859,7 +862,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Xóa story - Chỉ AUTHOR (chỉ được xóa story của chính mình)</summary>
         [HttpDelete("{id:guid}")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Delete(Guid id)
         {
             try
@@ -879,7 +882,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Publish story - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/publish")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Publish(Guid id)
         {
             try
@@ -919,7 +922,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Unpublish story - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/unpublish")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Unpublish(Guid id)
         {
             try
@@ -935,7 +938,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Xem lý do từ chối truyện - Chỉ AUTHOR (chỉ truyện của mình).</summary>
         [HttpGet("{id:guid}/rejection-reason")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult GetRejectionReason(Guid id)
         {
             try

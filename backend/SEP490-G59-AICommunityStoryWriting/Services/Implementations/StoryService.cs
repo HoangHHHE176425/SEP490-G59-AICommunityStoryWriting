@@ -6,6 +6,8 @@ using Repositories;
 using Services.DTOs.Community;
 using Services.DTOs.Stories;
 using Services.Interfaces;
+using System.Globalization;
+using System.Text;
 
 namespace Services.Implementations
 {
@@ -148,14 +150,6 @@ namespace Services.Implementations
                     || s.author.status.ToUpper() != "BANNED");
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Search))
-            {
-                var searchLower = query.Search.ToLower();
-                storiesQuery = storiesQuery.Where(s =>
-                    s.title.ToLower().Contains(searchLower) ||
-                    (s.summary != null && s.summary.ToLower().Contains(searchLower)));
-            }
-
             if (query.CategoryId.HasValue)
             {
                 storiesQuery = storiesQuery.Where(s => s.category.Any(c => c.id == query.CategoryId.Value));
@@ -189,14 +183,14 @@ namespace Services.Implementations
                 var ps = query.StoryProgressStatus.Trim().ToUpperInvariant();
                 storiesQuery = storiesQuery.Where(s =>
                     s.story_progress_status != null &&
-                    string.Equals(s.story_progress_status.Trim(), ps, StringComparison.OrdinalIgnoreCase));
+                    s.story_progress_status.Trim().ToUpper() == ps);
             }
 
             if (!string.IsNullOrWhiteSpace(query.AgeRating))
             {
                 var ar = query.AgeRating.Trim().ToUpperInvariant();
                 storiesQuery = storiesQuery.Where(s =>
-                    string.Equals((s.age_rating ?? "ALL").Trim(), ar, StringComparison.OrdinalIgnoreCase));
+                    (s.age_rating ?? "ALL").Trim().ToUpper() == ar);
             }
 
             if (query.MinTotalChapters.HasValue)
@@ -218,16 +212,20 @@ namespace Services.Implementations
                     storiesQuery = storiesQuery.Where(s => s.chapters.Any(c =>
                         c.status != null &&
                         c.status.Trim().ToUpper() == "PUBLISHED" &&
-                        c.ai_contribution_ratio.HasValue &&
-                        c.ai_contribution_ratio.Value > 0));
+                        (
+                            (c.ai_contribution_ratio.HasValue && c.ai_contribution_ratio.Value > 0) ||
+                            (c.ai_similarity_percent.HasValue && c.ai_similarity_percent.Value > 0)
+                        )));
                 }
                 else
                 {
                     storiesQuery = storiesQuery.Where(s => !s.chapters.Any(c =>
                         c.status != null &&
                         c.status.Trim().ToUpper() == "PUBLISHED" &&
-                        c.ai_contribution_ratio.HasValue &&
-                        c.ai_contribution_ratio.Value > 0));
+                        (
+                            (c.ai_contribution_ratio.HasValue && c.ai_contribution_ratio.Value > 0) ||
+                            (c.ai_similarity_percent.HasValue && c.ai_similarity_percent.Value > 0)
+                        )));
                 }
             }
 
@@ -242,44 +240,180 @@ namespace Services.Implementations
                 storiesQuery = storiesQuery.Where(s => s.status == query.Status);
             }
 
-            storiesQuery = query.SortBy?.ToLower() switch
+            var hasSearch = !string.IsNullOrWhiteSpace(query.Search);
+            var sortBy = query.SortBy?.ToLower();
+            var sortOrder = query.SortOrder == "asc" ? "asc" : "desc";
+
+            if (!hasSearch)
             {
-                "updated_at" => query.SortOrder == "asc"
-                    ? storiesQuery.OrderBy(s => s.updated_at)
-                    : storiesQuery.OrderByDescending(s => s.updated_at),
-                "total_views" => query.SortOrder == "asc"
-                    ? storiesQuery.OrderBy(s => s.total_views)
-                    : storiesQuery.OrderByDescending(s => s.total_views),
-                "avg_rating" => query.SortOrder == "asc"
-                    ? storiesQuery.OrderBy(s => s.avg_rating)
-                    : storiesQuery.OrderByDescending(s => s.avg_rating),
-                _ => query.SortOrder == "asc"
-                    ? storiesQuery.OrderBy(s => s.created_at)
-                    : storiesQuery.OrderByDescending(s => s.created_at)
-            };
+                storiesQuery = sortBy switch
+                {
+                    "updated_at" => sortOrder == "asc"
+                        ? storiesQuery.OrderBy(s => s.updated_at)
+                        : storiesQuery.OrderByDescending(s => s.updated_at),
+                    "total_views" => sortOrder == "asc"
+                        ? storiesQuery.OrderBy(s => s.total_views)
+                        : storiesQuery.OrderByDescending(s => s.total_views),
+                    "avg_rating" => sortOrder == "asc"
+                        ? storiesQuery.OrderBy(s => s.avg_rating)
+                        : storiesQuery.OrderByDescending(s => s.avg_rating),
+                    _ => sortOrder == "asc"
+                        ? storiesQuery.OrderBy(s => s.created_at)
+                        : storiesQuery.OrderByDescending(s => s.created_at)
+                };
 
-            var totalCount = storiesQuery.Count();
+                var totalCount = storiesQuery.Count();
 
-            var stories = storiesQuery
-                .Skip((query.Page - 1) * query.PageSize)
-                .Take(query.PageSize)
+                var stories = storiesQuery
+                    .Skip((query.Page - 1) * query.PageSize)
+                    .Take(query.PageSize)
+                    .ToList();
+
+                var authorIdsForAvatars = stories
+                    .Select(s => s.author_id)
+                    .Where(id => id.HasValue)
+                    .Select(id => id!.Value)
+                    .Distinct()
+                    .ToList();
+                var authorAvatarByUserId = UserProfileDAO.GetAvatarUrlsByUserIds(authorIdsForAvatars);
+
+                return new PagedResultDto<StoryListItemDto>
+                {
+                    Items = stories.Select(s => MapToListItemDto(s, authorAvatarByUserId)).ToList(),
+                    TotalCount = totalCount,
+                    Page = query.Page,
+                    PageSize = query.PageSize
+                };
+            }
+
+            var rawSearch = query.Search ?? string.Empty;
+            var normalizedSearch = NormalizeSearchText(rawSearch);
+            var searchTokens = normalizedSearch
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToArray();
+
+            var allFilteredStories = storiesQuery.ToList();
+            var authorDisplayNameByUserId = allFilteredStories
+                .Where(s => s.author_id.HasValue)
+                .Select(s => s.author_id!.Value)
+                .Distinct()
+                .ToDictionary(id => id, id => NotificationDAO.GetUserDisplayName(id) ?? string.Empty);
+
+            var searchedWithRank = allFilteredStories
+                .Select(s => new
+                {
+                    Story = s,
+                    Rank = GetSearchRank(s, normalizedSearch, searchTokens, authorDisplayNameByUserId)
+                })
+                .Where(x => x.Rank < int.MaxValue)
                 .ToList();
 
-            var authorIdsForAvatars = stories
+            // Nếu đã có truyện match theo tác giả (rank 0) thì ưu tiên tuyệt đối nhóm này,
+            // tránh lẫn các truyện chỉ match title/summary/email khi user đang tìm tên tác giả.
+            if (searchedWithRank.Any(x => x.Rank == 0))
+            {
+                searchedWithRank = searchedWithRank
+                    .Where(x => x.Rank == 0)
+                    .ToList();
+            }
+
+            var rankedStories = sortBy switch
+            {
+                "updated_at" => sortOrder == "asc"
+                    ? searchedWithRank.OrderBy(x => x.Rank).ThenBy(x => x.Story.updated_at).ToList()
+                    : searchedWithRank.OrderBy(x => x.Rank).ThenByDescending(x => x.Story.updated_at).ToList(),
+                "total_views" => sortOrder == "asc"
+                    ? searchedWithRank.OrderBy(x => x.Rank).ThenBy(x => x.Story.total_views).ToList()
+                    : searchedWithRank.OrderBy(x => x.Rank).ThenByDescending(x => x.Story.total_views).ToList(),
+                "avg_rating" => sortOrder == "asc"
+                    ? searchedWithRank.OrderBy(x => x.Rank).ThenBy(x => x.Story.avg_rating).ToList()
+                    : searchedWithRank.OrderBy(x => x.Rank).ThenByDescending(x => x.Story.avg_rating).ToList(),
+                _ => sortOrder == "asc"
+                    ? searchedWithRank.OrderBy(x => x.Rank).ThenBy(x => x.Story.created_at).ToList()
+                    : searchedWithRank.OrderBy(x => x.Rank).ThenByDescending(x => x.Story.created_at).ToList()
+            };
+
+            var searchedTotalCount = rankedStories.Count;
+            var pagedStories = rankedStories
+                .Skip((query.Page - 1) * query.PageSize)
+                .Take(query.PageSize)
+                .Select(x => x.Story)
+                .ToList();
+
+            var authorIdsForAvatarsInPage = pagedStories
                 .Select(s => s.author_id)
                 .Where(id => id.HasValue)
                 .Select(id => id!.Value)
                 .Distinct()
                 .ToList();
-            var authorAvatarByUserId = UserProfileDAO.GetAvatarUrlsByUserIds(authorIdsForAvatars);
+            var authorAvatarByUserIdInPage = UserProfileDAO.GetAvatarUrlsByUserIds(authorIdsForAvatarsInPage);
 
             return new PagedResultDto<StoryListItemDto>
             {
-                Items = stories.Select(s => MapToListItemDto(s, authorAvatarByUserId)).ToList(),
-                TotalCount = totalCount,
+                Items = pagedStories.Select(s => MapToListItemDto(s, authorAvatarByUserIdInPage)).ToList(),
+                TotalCount = searchedTotalCount,
                 Page = query.Page,
                 PageSize = query.PageSize
             };
+        }
+
+        private static string NormalizeSearchText(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            var normalized = text.Trim().Normalize(NormalizationForm.FormD);
+            var sb = new StringBuilder(normalized.Length);
+            foreach (var ch in normalized)
+            {
+                var uc = CharUnicodeInfo.GetUnicodeCategory(ch);
+                if (uc != UnicodeCategory.NonSpacingMark)
+                    sb.Append(ch);
+            }
+            return sb.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant();
+        }
+
+        private static bool ContainsAllTokens(string haystack, string[] tokens)
+        {
+            if (tokens.Length == 0) return false;
+            return tokens.All(t => haystack.Contains(t));
+        }
+
+        private static int GetSearchRank(
+            stories story,
+            string normalizedSearch,
+            string[] tokens,
+            IReadOnlyDictionary<Guid, string> authorDisplayNameByUserId)
+        {
+            var authorDisplayName = story.author_id.HasValue && authorDisplayNameByUserId.TryGetValue(story.author_id.Value, out var name)
+                ? name
+                : string.Empty;
+            var authorHaystack = NormalizeSearchText(string.Join(" ", new[]
+            {
+                authorDisplayName,
+                story.author?.user_profiles?.nickname ?? string.Empty
+            }));
+            var titleHaystack = NormalizeSearchText(story.title ?? string.Empty);
+            var summaryHaystack = NormalizeSearchText(story.summary ?? string.Empty);
+            var emailHaystack = NormalizeSearchText(story.author?.email ?? string.Empty);
+
+            var authorMatch = (!string.IsNullOrEmpty(normalizedSearch) && authorHaystack.Contains(normalizedSearch))
+                || ContainsAllTokens(authorHaystack, tokens);
+            if (authorMatch) return 0;
+
+            // Ưu tiên truyện match theo thông tin tác giả trước, nhưng vẫn cho phép
+            // tìm theo tên truyện để không làm mất hành vi search cũ.
+            var titleMatch = (!string.IsNullOrEmpty(normalizedSearch) && titleHaystack.Contains(normalizedSearch))
+                || ContainsAllTokens(titleHaystack, tokens);
+            if (titleMatch) return 1;
+
+            var summaryMatch = (!string.IsNullOrEmpty(normalizedSearch) && summaryHaystack.Contains(normalizedSearch))
+                || ContainsAllTokens(summaryHaystack, tokens);
+            if (summaryMatch) return 2;
+
+            var emailMatch = (!string.IsNullOrEmpty(normalizedSearch) && emailHaystack.Contains(normalizedSearch))
+                || ContainsAllTokens(emailHaystack, tokens);
+            if (emailMatch) return 3;
+
+            return int.MaxValue;
         }
 
         public StoryResponseDto? GetById(Guid id, Guid? userId = null)
@@ -642,6 +776,8 @@ namespace Services.Implementations
                 throw new InvalidOperationException("Truyện không tồn tại.");
             if (!string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Chỉ có thể đánh giá truyện đã được phát hành (PUBLISHED).");
+            if (story.author_id.HasValue && story.author_id.Value == userId)
+                throw new InvalidOperationException("Tác giả không thể đánh giá truyện của chính mình.");
 
             // Chặn rating khi chưa đọc chapter: yêu cầu có log READ_CHAPTER cho story.
             if (!UserActivityLogDAO.HasReadAnyChapterOfStory(userId, storyId))
@@ -660,20 +796,22 @@ namespace Services.Implementations
 
         public CommunityStatsDto GetPublicCommunityStats()
         {
+            // Khớp danh sách truyện công khai (GET /stories): không tính truyện tác giả BANNED —
+            // số truyện / lượt xem / tác giả phải đồng bộ với nội dung khách thực sự thấy.
             var publishedVisibleStories = _storyRepository
                 .GetAll()
                 // EF Core không dịch được string.Equals(..., StringComparison) sang SQL.
                 .Where(s => s.status != null && s.status.ToUpper() == "PUBLISHED")
-                .Where(s => !s.compliance_hidden);
+                .Where(s => !s.compliance_hidden)
+                .Where(s =>
+                    s.author == null
+                    || s.author.status == null
+                    || s.author.status.ToUpper() != "BANNED");
 
             return new CommunityStatsDto
             {
                 PublishedStoriesCount = publishedVisibleStories.Count(),
-                AuthorsCount = publishedVisibleStories
-                    .Where(s => s.author_id.HasValue)
-                    .Select(s => s.author_id!.Value)
-                    .Distinct()
-                    .Count(),
+                AuthorsCount = _userLookup.CountAuthorsExcludingBanned(),
                 TotalViews = publishedVisibleStories.Sum(s => (long?)(s.total_views ?? 0)) ?? 0
             };
         }
@@ -809,6 +947,7 @@ namespace Services.Implementations
             DateTime? latestUpdatedAt = story.updated_at;
             string? authorName = null;
             string? authorAvatarUrl = null;
+            var usesAi = false;
 
             if (includeComputedLookups)
             {
@@ -824,6 +963,14 @@ namespace Services.Implementations
 
                 authorName = story.author_id.HasValue ? NotificationDAO.GetUserDisplayName(story.author_id.Value) : null;
                 authorAvatarUrl = story.author_id.HasValue ? UserProfileDAO.GetAvatarUrlForUser(story.author_id.Value) : null;
+                usesAi = _chapterRepository
+                    .GetByStoryId(story.id)
+                    .Any(c =>
+                        string.Equals(c.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase) &&
+                        (
+                            (c.ai_similarity_percent.HasValue && c.ai_similarity_percent.Value > 0) ||
+                            (c.ai_contribution_ratio.HasValue && c.ai_contribution_ratio.Value > 0)
+                        ));
             }
             string? authorAccountStatus = null;
             if (includeComputedLookups && story.author_id.HasValue)
@@ -858,7 +1005,8 @@ namespace Services.Implementations
                 LastPublishedAt = story.last_published_at,
                 CommentsDisabled = story.comments_disabled,
                 ComplianceHidden = story.compliance_hidden,
-                ComplianceFlagged = story.compliance_flagged
+                ComplianceFlagged = story.compliance_flagged,
+                UsesAi = usesAi
             };
         }
 

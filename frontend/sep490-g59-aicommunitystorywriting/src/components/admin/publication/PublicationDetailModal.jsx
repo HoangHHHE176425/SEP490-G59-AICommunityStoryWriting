@@ -4,7 +4,16 @@ import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
 import { getStoryById } from '../../../api/story/storyApi';
 import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion, getReviewAssignmentSelf, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
-import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus, addUtcDaysToDeadlineIso, validateModeratorExtendPresetDays, EXTEND_DEADLINE_DAY_CHOICES } from '../../../utils/moderatorReviewSla';
+import {
+    getSlaBadgeStyle,
+    formatPolicySlaCountdown,
+    normalizeTimeStatus,
+    addUtcDaysToDeadlineIso,
+    validateModeratorExtendPresetDays,
+    EXTEND_DEADLINE_DAY_CHOICES,
+    MODERATOR_ESCALATION_REASON_MIN_WORDS,
+    countModeratorEscalationReasonWords,
+} from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { sanitizeRichTextHtml } from '../../../utils/richText';
 import { useToast } from '../../author/story-editor/Toast';
@@ -72,16 +81,8 @@ function normalizeModeratorRejectionHistory(raw) {
 
 /** Lý do từ chối xuất bản: tối thiểu số từ (phân tách bằng khoảng trắng). */
 const MODERATOR_REJECTION_REASON_MIN_WORDS = 200;
-/** Lý do gửi escalation (gia hạn/hủy nhận duyệt): tối thiểu số từ. */
-const MODERATOR_ESCALATION_REASON_MIN_WORDS = 50;
 
 function countModeratorRejectionWords(text) {
-    const t = String(text ?? '').trim();
-    if (!t) return 0;
-    return t.split(/\s+/).filter(Boolean).length;
-}
-
-function countModeratorEscalationWords(text) {
     const t = String(text ?? '').trim();
     if (!t) return 0;
     return t.split(/\s+/).filter(Boolean).length;
@@ -541,7 +542,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             setEscalateReasonError('Vui lòng nhập lý do.');
             return;
         }
-        const reasonWordCount = countModeratorEscalationWords(trimmedReason);
+        const reasonWordCount = countModeratorEscalationReasonWords(trimmedReason);
         if (reasonWordCount < MODERATOR_ESCALATION_REASON_MIN_WORDS) {
             setEscalateReasonError(`Lý do cần ít nhất ${MODERATOR_ESCALATION_REASON_MIN_WORDS} từ (hiện tại: ${reasonWordCount} từ).`);
             return;

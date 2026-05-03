@@ -17,7 +17,14 @@ const STATUS_LABELS = {
 
 function formatDate(value) {
     if (!value) return '—';
-    return new Date(value).toLocaleString('vi-VN');
+    const raw = String(value).trim();
+    const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+    const d = new Date(hasTimezone ? raw : `${raw}Z`);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour12: false,
+    });
 }
 
 export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignModerator, onDeleteUser }) {
@@ -25,6 +32,7 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
     const [selectedRole, setSelectedRole] = useState('USER');
     const [savingRole, setSavingRole] = useState(false);
     const [roleError, setRoleError] = useState('');
+    const [deleteIntroConfirmOpen, setDeleteIntroConfirmOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [deleteEmailInput, setDeleteEmailInput] = useState('');
     const [deleteLoading, setDeleteLoading] = useState(false);
@@ -35,6 +43,7 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
             setSelectedRole(String(user.role).toUpperCase());
         }
         setRoleError('');
+        setDeleteIntroConfirmOpen(false);
         setDeleteOpen(false);
         setDeleteEmailInput('');
         setDeleteError('');
@@ -99,7 +108,7 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
             <div
-                className="bg-white rounded-2xl shadow-xl max-w-xl w-full max-h-[90vh] overflow-hidden flex flex-col"
+                className="relative bg-white rounded-2xl shadow-xl max-w-xl w-full max-h-[90vh] overflow-hidden flex flex-col"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between p-4 border-b border-slate-200">
@@ -239,7 +248,7 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                                 <button
                                     type="button"
                                     onClick={() => {
-                                        setDeleteOpen(true);
+                                        setDeleteIntroConfirmOpen(true);
                                         setDeleteEmailInput('');
                                         setDeleteError('');
                                     }}
@@ -305,11 +314,59 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                             <CheckCircle className="w-4 h-4" /> Mở khóa
                         </button>
                     ) : !isDeleted ? (
-                        <button type="button" onClick={() => { onBlock?.(user); onClose(); }} className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 flex items-center justify-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => onBlock?.(user)}
+                            className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 flex items-center justify-center gap-2"
+                        >
                             <Ban className="w-4 h-4" /> Khóa tài khoản
                         </button>
                     ) : null}
                 </div>
+
+                {deleteIntroConfirmOpen ? (
+                    <div
+                        className="absolute inset-0 z-[20] flex items-center justify-center bg-slate-900/45 p-4 rounded-2xl"
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="delete-intro-title"
+                    >
+                        <div
+                            className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl border border-slate-200"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <h4 id="delete-intro-title" className="text-base font-bold text-slate-900">
+                                Xác nhận xóa tài khoản
+                            </h4>
+                            <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+                                Bạn sắp thực hiện <strong className="text-red-700">xóa mềm</strong> tài khoản{' '}
+                                <span className="font-semibold">{getUserDisplayName(user)}</span>. Ở bước tiếp theo cần nhập
+                                đúng email để xác nhận. Hành động không hoàn tác qua giao diện này.
+                            </p>
+                            <div className="mt-4 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+                                <button
+                                    type="button"
+                                    onClick={() => setDeleteIntroConfirmOpen(false)}
+                                    className="px-4 py-2 rounded-lg border border-slate-300 font-semibold text-slate-700 text-sm hover:bg-slate-50"
+                                >
+                                    Hủy
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setDeleteIntroConfirmOpen(false);
+                                        setDeleteOpen(true);
+                                        setDeleteEmailInput('');
+                                        setDeleteError('');
+                                    }}
+                                    className="px-4 py-2 rounded-lg bg-red-600 text-white font-semibold text-sm hover:bg-red-700"
+                                >
+                                    Tiếp tục
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : null}
             </div>
         </div>
     );

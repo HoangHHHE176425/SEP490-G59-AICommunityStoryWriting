@@ -302,6 +302,16 @@ function normalizeStoryQueueItem(x) {
         hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
         authorAccountStatus: pick(x, 'authorAccountStatus', 'AuthorAccountStatus') ?? null,
         authorWritingSuspendedUntilUtc: pick(x, 'authorWritingSuspendedUntilUtc', 'AuthorWritingSuspendedUntilUtc') ?? null,
+        oldestReportAtUtc: pick(x, 'oldestReportAtUtc', 'OldestReportAtUtc') ?? null,
+        complianceClaimedAtUtc:
+            pick(x, 'complianceClaimedAtUtc', 'ComplianceClaimedAtUtc')
+            ?? pick(x, 'claimedAtUtc', 'ClaimedAtUtc')
+            ?? pick(x, 'claimedAt', 'ClaimedAt')
+            ?? pick(x, 'lockAcquiredAtUtc', 'LockAcquiredAtUtc')
+            ?? pick(x, 'lockedAtUtc', 'LockedAtUtc')
+            ?? pick(x, 'updatedAtUtc', 'UpdatedAtUtc')
+            ?? pick(x, 'updatedAt', 'UpdatedAt')
+            ?? null,
     };
 }
 
@@ -313,6 +323,15 @@ function normalizeStoryReportRow(x) {
         severityScore: Number(pick(x, 'severityScore', 'SeverityScore') ?? 0) || 0,
         status: pick(x, 'status', 'Status'),
         createdAtUtc: pick(x, 'createdAtUtc', 'CreatedAtUtc'),
+        complianceClaimedAtUtc:
+            pick(x, 'complianceClaimedAtUtc', 'ComplianceClaimedAtUtc')
+            ?? pick(x, 'claimedAtUtc', 'ClaimedAtUtc')
+            ?? pick(x, 'claimedAt', 'ClaimedAt')
+            ?? pick(x, 'lockAcquiredAtUtc', 'LockAcquiredAtUtc')
+            ?? pick(x, 'lockedAtUtc', 'LockedAtUtc')
+            ?? pick(x, 'updatedAtUtc', 'UpdatedAtUtc')
+            ?? pick(x, 'updatedAt', 'UpdatedAt')
+            ?? null,
         isComplianceLocked: coerceBool(pick(x, 'isComplianceLocked', 'IsComplianceLocked')),
         complianceClaimedByDisplayName: pick(x, 'complianceClaimedByDisplayName', 'ComplianceClaimedByDisplayName'),
         complianceHandlingSlaMessageVi: pick(x, 'complianceHandlingSlaMessageVi', 'ComplianceHandlingSlaMessageVi'),
@@ -355,6 +374,8 @@ function groupStoryRows(rawRows) {
             hasApprovedAdminBanRequest: false,
             authorAccountStatus: null,
             authorWritingSuspendedUntilUtc: null,
+            oldestReportAtUtc: null,
+            complianceClaimedAtUtc: null,
         };
         prev.reportCount += 1;
         prev.priorityScore = Math.max(prev.priorityScore, row.severityScore || 0);
@@ -377,9 +398,33 @@ function groupStoryRows(rawRows) {
             const tRow = row.authorWritingSuspendedUntilUtc ? new Date(row.authorWritingSuspendedUntilUtc).getTime() : 0;
             if (tRow > tPrev) prev.authorWritingSuspendedUntilUtc = row.authorWritingSuspendedUntilUtc;
         }
+        if (row.createdAtUtc) {
+            const tRow = new Date(row.createdAtUtc).getTime();
+            if (Number.isFinite(tRow)) {
+                if (!prev.oldestReportAtUtc) {
+                    prev.oldestReportAtUtc = row.createdAtUtc;
+                } else {
+                    const tPrev = new Date(prev.oldestReportAtUtc).getTime();
+                    if (Number.isFinite(tPrev) && tRow < tPrev) prev.oldestReportAtUtc = row.createdAtUtc;
+                }
+            }
+        }
+        if (row.complianceClaimedAtUtc) {
+            const tRow = new Date(row.complianceClaimedAtUtc).getTime();
+            const tPrev = prev.complianceClaimedAtUtc ? new Date(prev.complianceClaimedAtUtc).getTime() : 0;
+            if (Number.isFinite(tRow) && (!Number.isFinite(tPrev) || tRow > tPrev)) {
+                prev.complianceClaimedAtUtc = row.complianceClaimedAtUtc;
+            }
+        }
         m.set(storyId, prev);
     }
     return Array.from(m.values());
+}
+
+function toUnixTimeOrZero(value) {
+    if (!value) return 0;
+    const t = new Date(value).getTime();
+    return Number.isFinite(t) ? t : 0;
 }
 
 function normalizeCommentQueueItem(x) {
@@ -414,6 +459,17 @@ function normalizeCommentQueueItem(x) {
         storyComplianceHidden: coerceBool(pick(x, 'storyComplianceHidden', 'StoryComplianceHidden')),
         storyAuthorWritingSuspendedUntilUtc: pick(x, 'storyAuthorWritingSuspendedUntilUtc', 'StoryAuthorWritingSuspendedUntilUtc') ?? null,
         hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
+        /** BE gán = thời điểm báo cáo sớm nhất trong nhóm bình luận. */
+        createdAtUtc: pick(x, 'createdAtUtc', 'CreatedAtUtc') ?? null,
+        complianceClaimedAtUtc:
+            pick(x, 'complianceClaimedAtUtc', 'ComplianceClaimedAtUtc')
+            ?? pick(x, 'claimedAtUtc', 'ClaimedAtUtc')
+            ?? pick(x, 'claimedAt', 'ClaimedAt')
+            ?? pick(x, 'lockAcquiredAtUtc', 'LockAcquiredAtUtc')
+            ?? pick(x, 'lockedAtUtc', 'LockedAtUtc')
+            ?? pick(x, 'updatedAtUtc', 'UpdatedAtUtc')
+            ?? pick(x, 'updatedAt', 'UpdatedAt')
+            ?? null,
     };
 }
 
@@ -699,6 +755,15 @@ function complianceHistoryMessageVi(item) {
     return item?.message || '—';
 }
 
+function complianceHistoryOrderCode(item) {
+    const targetType = String(item?.targetType ?? item?.TargetType ?? '').trim().toUpperCase();
+    const targetId = item?.targetId ?? item?.TargetId;
+    if ((targetType === 'STORY' || targetType === 'COMMENT') && targetId) return targetId;
+    const reportId = item?.reportId ?? item?.ReportId;
+    if (reportId) return reportId;
+    return item?.rowId ?? item?.RowId ?? item?.id ?? item?.Id ?? null;
+}
+
 function complianceAdminActionKindVi(k) {
     const u = String(k ?? '').trim().toUpperCase();
     if (u === 'BAN_USER') return 'Chặn tài khoản';
@@ -709,10 +774,15 @@ function complianceAdminActionKindVi(k) {
 function Modal({ title, onClose, children, maxWidth = 1100 }) {
     return (
         <div className="fixed inset-0 z-[1200] bg-slate-900/45 flex items-center justify-center p-3">
-            <div className="bg-white w-[96vw] max-h-[88vh] rounded-xl border border-slate-200 shadow-2xl flex flex-col" style={{ maxWidth }}>
-                <div className="flex justify-between items-center border-b border-slate-200 px-4 py-3">
-                    <h3 className="m-0 text-base font-bold text-slate-900">{title}</h3>
-                    <button className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" onClick={onClose}>
+            <div className="bg-white w-[96vw] max-h-[88vh] rounded-xl border border-[#c9f0d8] shadow-2xl flex flex-col" style={{ maxWidth }}>
+                <div className="flex justify-between items-center border-b border-white/20 bg-primary px-4 py-3 rounded-t-xl">
+                    <h3 className="m-0 text-base font-bold text-primary-foreground">{title}</h3>
+                    <button
+                        type="button"
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-white/40 bg-white/15 text-primary-foreground hover:bg-white/25"
+                        onClick={onClose}
+                        aria-label="Đóng"
+                    >
                         <X style={{ width: 16, height: 16 }} />
                     </button>
                 </div>
@@ -1032,6 +1102,11 @@ export default function ViolationManagement() {
                         String(x.storyId ?? '').toLowerCase().includes(q)
                         || String(x.storyTitle ?? '').toLowerCase().includes(q)
                         || String(x.authorDisplayName ?? '').toLowerCase().includes(q));
+                    filtered.sort((a, b) =>
+                        toUnixTimeOrZero(b.complianceClaimedAtUtc) - toUnixTimeOrZero(a.complianceClaimedAtUtc)
+                        || toUnixTimeOrZero(b.updatedAtUtc) - toUnixTimeOrZero(a.updatedAtUtc)
+                        || toUnixTimeOrZero(b.oldestReportAtUtc) - toUnixTimeOrZero(a.oldestReportAtUtc),
+                    );
                     const from = (storyReportPage - 1) * REPORT_PAGE_SIZE;
                     setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
                     setTotalCount(filtered.length);
@@ -1043,6 +1118,11 @@ export default function ViolationManagement() {
                         || String(x.storyId ?? '').toLowerCase().includes(q)
                         || String(x.storyTitle ?? '').toLowerCase().includes(q)
                         || String(x.commentUserDisplayName ?? '').toLowerCase().includes(q));
+                    filtered.sort((a, b) =>
+                        toUnixTimeOrZero(b.complianceClaimedAtUtc) - toUnixTimeOrZero(a.complianceClaimedAtUtc)
+                        || toUnixTimeOrZero(b.updatedAtUtc) - toUnixTimeOrZero(a.updatedAtUtc)
+                        || toUnixTimeOrZero(b.createdAtUtc) - toUnixTimeOrZero(a.createdAtUtc),
+                    );
                     const from = (commentReportPage - 1) * REPORT_PAGE_SIZE;
                     setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
                     setTotalCount(filtered.length);
@@ -1055,13 +1135,27 @@ export default function ViolationManagement() {
                         || String(x.status ?? '').toLowerCase().includes(q)
                         || String(x.message ?? '').toLowerCase().includes(q)
                         || String(x.targetType ?? '').toLowerCase().includes(q)
-                        || String(x.rowId ?? x.reportId ?? x.id ?? '').toLowerCase().includes(q)
+                        || String(x.reportId ?? x.rowId ?? x.id ?? '').toLowerCase().includes(q)
                         || String(x.targetId ?? '').toLowerCase().includes(q));
                     const from = (historyPage - 1) * REPORT_PAGE_SIZE;
                     setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
                     setTotalCount(filtered.length);
                     return;
                 }
+            }
+            if (activeTab === 'story-reports') {
+                normalizedItems.sort((a, b) =>
+                    toUnixTimeOrZero(b.complianceClaimedAtUtc) - toUnixTimeOrZero(a.complianceClaimedAtUtc)
+                    || toUnixTimeOrZero(b.updatedAtUtc) - toUnixTimeOrZero(a.updatedAtUtc)
+                    || toUnixTimeOrZero(b.oldestReportAtUtc) - toUnixTimeOrZero(a.oldestReportAtUtc),
+                );
+            }
+            if (activeTab === 'comment-reports') {
+                normalizedItems.sort((a, b) =>
+                    toUnixTimeOrZero(b.complianceClaimedAtUtc) - toUnixTimeOrZero(a.complianceClaimedAtUtc)
+                    || toUnixTimeOrZero(b.updatedAtUtc) - toUnixTimeOrZero(a.updatedAtUtc)
+                    || toUnixTimeOrZero(b.createdAtUtc) - toUnixTimeOrZero(a.createdAtUtc),
+                );
             }
             setRows(normalizedItems);
             setTotalCount(activeTab === 'lock-requests' ? (paged.items?.length ?? 0) : paged.totalCount);
@@ -1855,13 +1949,13 @@ export default function ViolationManagement() {
                 <div className="w-full overflow-visible">
                     <table className="w-full border-collapse table-fixed">
                         <thead>
-                            <tr className="bg-slate-50">
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Ưu tiên</th>
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Mã đơn</th>
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Truyện</th>
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Tác giả</th>
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Số người báo cáo</th>
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Thao tác</th>
+                            <tr className="bg-[#f0faf5]">
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>STT</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Mã đơn</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Truyện</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Tác giả</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Số người báo cáo</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Thao tác</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1870,10 +1964,10 @@ export default function ViolationManagement() {
                                     <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
-                            {rows.map((r) => (
+                            {rows.map((r, idx) => (
                                 <tr
                                     key={r.storyId}
-                                    className={`border-t border-slate-200 hover:bg-slate-50/70 ${r.complianceFlagged ? 'bg-amber-200/70 ring-1 ring-amber-300' : ''}`}
+                                    className={`border-t border-[#c9f0d8] hover:bg-[#f7fcf9] ${r.complianceFlagged ? 'bg-amber-200/70 ring-1 ring-amber-300' : ''}`}
                                     style={r.complianceFlagged ? { borderLeft: '4px solid #d97706' } : undefined}
                                 >
                                     {(() => {
@@ -1884,7 +1978,7 @@ export default function ViolationManagement() {
                                         const storyFlags = { hasPendingReleaseRequest, hasPendingAdminAction };
                                         return (
                                             <>
-                                                <td style={td}>{(r.priorityScore ?? 0).toFixed?.(1) ?? r.priorityScore}</td>
+                                                <td style={td}>{(storyReportPage - 1) * REPORT_PAGE_SIZE + idx + 1}</td>
                                                 <td style={td}><span className="text-xs text-slate-700 break-all">{r.storyId || '—'}</span></td>
                                                 <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                                 <td style={td}>{r.authorDisplayName || '—'}</td>
@@ -2024,8 +2118,8 @@ export default function ViolationManagement() {
             <div>
                 <div className="w-full overflow-visible">
                     <table className="w-full border-collapse table-fixed">
-                        <thead><tr className="bg-slate-50">
-                            <th style={th}>Ưu tiên</th>
+                        <thead><tr className="bg-[#f0faf5]">
+                            <th style={th}>STT</th>
                             <th style={th}>Mã đơn</th>
                             <th style={th}>Truyện</th>
                             <th style={th}>Người bình luận</th>
@@ -2038,8 +2132,8 @@ export default function ViolationManagement() {
                                     <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
-                            {rows.map((r) => (
-                                <tr key={r.commentId} className="border-t border-slate-200 hover:bg-slate-50/70">
+                            {rows.map((r, idx) => (
+                                <tr key={r.commentId} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
                                     {(() => {
                                         const hasPendingAdmin = !!r.hasPendingAdminActionRequest;
                                         const hasPendingLockRel = !!pendingReleaseByComment[r.commentId]
@@ -2052,7 +2146,7 @@ export default function ViolationManagement() {
                                         const reporterCount = reporters.length;
                                         return (
                                             <>
-                                                <td style={td}>{Number(r.priorityScore ?? 0).toFixed(1)}</td>
+                                                <td style={td}>{(commentReportPage - 1) * REPORT_PAGE_SIZE + idx + 1}</td>
                                                 <td style={td}><span className="text-xs text-slate-700 break-all">{r.commentId || r.reportId || '—'}</span></td>
                                                 <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                                 <td style={td}>{r.commentUserDisplayName || '—'}</td>
@@ -2215,11 +2309,11 @@ export default function ViolationManagement() {
     const renderLockRequests = () => (
         <div className="overflow-x-auto">
             <table className="w-full border-collapse">
-                <thead><tr className="bg-slate-50">
+                <thead><tr className="bg-[#f0faf5]">
                     <th style={th}>Truyện</th><th style={th}>Người gửi</th><th style={th}>Nội dung</th><th style={th}>Thời điểm</th><th style={th}>Thao tác quản trị</th>
                 </tr></thead>
                 <tbody>{rows.map((r) => (
-                    <tr key={r.id} className="border-t border-slate-200 hover:bg-slate-50/70">
+                    <tr key={r.id} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
                         <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                         <td style={td}>{r.requesterDisplayName || r.requesterEmail || '—'}</td>
                         <td style={td}>{r.message || '—'}</td>
@@ -2242,7 +2336,7 @@ export default function ViolationManagement() {
             <div>
                 <div className="overflow-x-auto">
                     <table className="w-full border-collapse">
-                        <thead><tr className="bg-slate-50">
+                        <thead><tr className="bg-[#f0faf5]">
                             <th style={th}>Mã đơn</th>
                             <th style={th}>Thời điểm</th>
                             <th style={th}>Nguồn</th>
@@ -2258,8 +2352,8 @@ export default function ViolationManagement() {
                                 </tr>
                             )}
                             {rows.map((r) => (
-                                <tr key={r.rowId || r.reportId || r.id} className="border-t border-slate-200 hover:bg-slate-50/70">
-                                    <td style={td}><span className="text-xs text-slate-700 break-all">{r.rowId || r.reportId || r.id || '—'}</span></td>
+                                <tr key={r.rowId || r.reportId || r.id} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
+                                    <td style={td}><span className="text-xs text-slate-700 break-all">{complianceHistoryOrderCode(r) || '—'}</span></td>
                                     <td style={td}>{formatDate(r.createdAtUtc || r.resolvedAtUtc)}</td>
                                     <td style={td}>{complianceHistorySourceVi(r.source)}</td>
                                     <td style={td}>{complianceHistoryActionVi(r.action, r.source)}</td>
@@ -2299,7 +2393,7 @@ export default function ViolationManagement() {
     };
 
     return (
-        <div className="max-w-[1720px] mx-auto px-4 md:px-6 py-6 space-y-6">
+        <div className="max-w-[1720px] mx-auto px-4 md:px-6 pt-0 pb-6 space-y-6">
             <div>
                 <h1 className="text-2xl font-bold text-slate-900 mb-1">Xử lý báo cáo vi phạm</h1>
                 <p className="text-sm text-slate-500">
@@ -2324,7 +2418,7 @@ export default function ViolationManagement() {
             </div>
 
             <div className="space-y-4 pb-8">
-                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                <div className="bg-white rounded-xl border border-[#c9f0d8] p-4 shadow-sm">
                     <h2 className="text-lg font-bold text-slate-900 mb-3">Bộ lọc và điều hướng</h2>
                     {(activeTab === 'story-reports' || activeTab === 'comment-reports') && (
                         <div className="mb-3 flex flex-wrap gap-2 items-center">
@@ -2488,7 +2582,7 @@ export default function ViolationManagement() {
                     )}
                 </div>
 
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm min-h-[62vh] flex flex-col overflow-visible">
+                <div className="bg-white rounded-xl border border-[#c9f0d8] shadow-sm min-h-[62vh] flex flex-col overflow-visible">
                     <div className="flex-1 overflow-visible">
                         {loading ? <div className="p-8 text-center text-slate-500 text-sm">Đang tải...</div> : error ? <div className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : (
                             activeTab === 'story-reports'
@@ -2503,7 +2597,7 @@ export default function ViolationManagement() {
                                         ? renderComplianceHistory()
                                         : activeTab === 'lock-requests' ? renderLockRequests()
                                             : activeTab === 'compliance-logs' ? (
-                                                <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{formatLogTimestampVi(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
+                                                <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-[#f0faf5]"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]"><td style={td}>{formatLogTimestampVi(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
                                             ) : (
                                                 <div className="p-8 text-center text-slate-500 text-sm">Không có dữ liệu hiển thị.</div>
                                             )
@@ -2534,8 +2628,6 @@ export default function ViolationManagement() {
                                     </div>
                                 </div>
                                 <div className="flex flex-wrap gap-2 mt-3">
-                                    <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Ưu tiên: {(selectedStory.priorityScore ?? 0).toFixed?.(1) ?? selectedStory.priorityScore}</span>
-                                    <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700 border border-amber-100">Mức độ: {(selectedStory.maxSeverityScore ?? 0).toFixed?.(1) ?? selectedStory.maxSeverityScore ?? '—'}</span>
                                     <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Số báo cáo: {selectedStory.reportCount ?? 0}</span>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
@@ -2740,8 +2832,6 @@ export default function ViolationManagement() {
                                             <div className="text-xs text-slate-500 truncate">{meta.authorName || r.authorDisplayName || 'Tác giả ẩn danh'}</div>
                                             <div className="text-xs text-slate-400 truncate">{r.storyId}</div>
                                             <div className="flex items-center gap-2 mt-2 overflow-x-auto whitespace-nowrap">
-                                                <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Ưu tiên: {(r.priorityScore ?? 0).toFixed?.(1) ?? r.priorityScore}</span>
-                                                <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700 border border-amber-100">Mức độ: {(r.maxSeverityScore ?? 0).toFixed?.(1) ?? r.maxSeverityScore ?? '—'}</span>
                                                 <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Số báo cáo: {r.reportCount ?? 0}</span>
                                                 <span className="px-2 py-0.5 rounded-full text-xs bg-slate-50 text-slate-700 border border-slate-200">Vi phạm: {(r.distinctReasonCodes ?? []).slice(0, 2).map(reasonCodeToViLabel).join(', ') || 'Khác'}</span>
                                             </div>
@@ -2780,10 +2870,8 @@ export default function ViolationManagement() {
                                         <div className="min-w-0 flex-1">
                                             <div className="font-semibold text-slate-900 truncate">{r.storyTitle || '—'}</div>
                                             <div className="text-xs text-slate-500 truncate">{meta.authorName ? `Truyện — ${meta.authorName}` : (r.storyId || '')}</div>
-                                            <div className="text-xs text-slate-600 truncate">Bình luận: {r.commentUserDisplayName || '—'} · {r.commentId}</div>
+                                            <div className="text-xs text-slate-600 truncate">Người bình luận: {r.commentUserDisplayName || '—'}</div>
                                             <div className="flex items-center gap-2 mt-2 overflow-x-auto whitespace-nowrap">
-                                                <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Ưu tiên: {Number(r.priorityScore ?? 0).toFixed(1)}</span>
-                                                <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700 border border-amber-100">Mức độ: {Number(r.maxSeverityScore ?? 0).toFixed(1)}</span>
                                                 <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Số báo cáo: {r.reportCount ?? 0}</span>
                                                 <span className="px-2 py-0.5 rounded-full text-xs bg-slate-50 text-slate-700 border border-slate-200">Vi phạm: {r.reasonLabelVi || reasonCodeToViLabel(r.reasonCode) || 'Khác'}</span>
                                             </div>
@@ -3293,7 +3381,7 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
                         <div className="text-sm text-slate-600">Đang tải...</div>
                     ) : (
                         <div className="flex flex-col gap-4">
-                            <div className="flex flex-wrap gap-1 border-b border-slate-200">
+                            <div className="flex flex-wrap gap-1 border-b border-[#c9f0d8]">
                                 <button
                                     type="button"
                                     className={`px-3 py-2 text-sm font-semibold rounded-t-md border-b-2 -mb-px transition-colors ${myRequestsTab === 'cancel_claim'
@@ -3317,10 +3405,10 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
                             </div>
 
                             {myRequestsTab === 'cancel_claim' && (
-                                <div className="overflow-x-auto">
+                                <div className="overflow-x-auto rounded-lg border border-[#c9f0d8]">
                                     <table className="w-full border-collapse text-sm">
                                         <thead>
-                                            <tr className="bg-slate-50">
+                                            <tr className="bg-[#f0faf5]">
                                                 <th style={th}>Truyện</th>
                                                 <th style={th}>Trạng thái</th>
                                                 <th style={th}>Gửi lúc</th>
@@ -3340,7 +3428,7 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
                                                     const complianceMsg = requestFieldDisplay(row.message ?? row.Message);
                                                     const adminNote = requestFieldDisplay(row.resolutionNote ?? row.ResolutionNote);
                                                     return (
-                                                        <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
+                                                        <tr key={String(row.id ?? row.Id)} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
                                                             <td style={td}>{row.storyTitle ?? row.StoryTitle ?? '—'}</td>
                                                             <td style={td}>
                                                                 <ComplianceRequestStatusPill status={row.status ?? row.Status} />
@@ -3360,10 +3448,10 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
                             )}
 
                             {myRequestsTab === 'ban_suspend' && (
-                                <div className="overflow-x-auto">
+                                <div className="overflow-x-auto rounded-lg border border-[#c9f0d8]">
                                     <table className="w-full border-collapse text-sm">
                                         <thead>
-                                            <tr className="bg-slate-50">
+                                            <tr className="bg-[#f0faf5]">
                                                 <th style={th}>Truyện</th>
                                                 <th style={th}>Loại</th>
                                                 <th style={th}>Trạng thái</th>
@@ -3384,7 +3472,7 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
                                                     const complianceMsg = requestFieldDisplay(row.message ?? row.Message);
                                                     const adminNote = requestFieldDisplay(row.resolutionNote ?? row.ResolutionNote);
                                                     return (
-                                                        <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
+                                                        <tr key={String(row.id ?? row.Id)} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
                                                             <td style={td}>{row.storyTitle ?? row.StoryTitle ?? '—'}</td>
                                                             <td style={td}>{complianceAdminActionKindVi(row.requestKind ?? row.RequestKind)}</td>
                                                             <td style={td}>
@@ -3412,17 +3500,19 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
     );
 }
 
+/** Cùng palette nút "Xem chính sách…" / "Xem quy trình…": nền mint, chữ teal đậm, viền xanh nhạt. */
 const th = {
     textAlign: 'left',
     padding: '0.75rem',
-    borderBottom: '1px solid #e2e8f0',
+    borderBottom: '1px solid #c9f0d8',
     fontSize: '0.72rem',
     letterSpacing: '0.02em',
-    color: '#64748b',
+    color: '#047857',
+    background: '#f0faf5',
     fontWeight: 700,
     textTransform: 'uppercase',
 };
-const td = { padding: '0.75rem', color: '#334155', verticalAlign: 'top', fontSize: '0.875rem' };
+const td = { padding: '0.75rem', color: '#0f172a', verticalAlign: 'top', fontSize: '0.875rem' };
 const input = { border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.6rem 0.75rem', fontSize: '0.875rem', color: '#0f172a', background: '#f8fafc' };
 const btn = { display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', borderRadius: 8, padding: '0.4rem 0.7rem', cursor: 'pointer', whiteSpace: 'nowrap' };
 const menuBtn = {

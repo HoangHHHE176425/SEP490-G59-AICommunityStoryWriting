@@ -1,6 +1,6 @@
 import * as signalR from '@microsoft/signalr';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://localhost:7117/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 /** Base URL không có /api (ví dụ https://localhost:7117). */
 function getHubBaseUrl() {

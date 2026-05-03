@@ -1,6 +1,7 @@
 import { ThumbsUp, Flag } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { getCommentRoleBadge } from '../../utils/commentRoleBadge';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 /** Chuẩn hóa 1 comment từ API (id, content, userDisplayName, userRole, userCreatedAt, …). */
 function norm(c) {
@@ -8,6 +9,7 @@ function norm(c) {
         id: c.id ?? c.Id,
         parentId: c.parentId ?? c.ParentId ?? null,
         userDisplayName: c.userDisplayName ?? c.UserDisplayName ?? 'Ẩn danh',
+        userAvatarUrl: c.userAvatarUrl ?? c.UserAvatarUrl ?? c.avatarUrl ?? c.AvatarUrl ?? null,
         userRole: c.userRole ?? c.UserRole ?? null,
         userCreatedAt: c.userCreatedAt ?? c.UserCreatedAt ?? null,
         content: c.content ?? c.Content ?? '',
@@ -54,6 +56,7 @@ function CommentBlock({
     submitting,
     onLike,
     isLoggedIn,
+    canPost,
     onReportComment,
     formatTimeAgo,
     visibleRepliesCount,
@@ -62,11 +65,23 @@ function CommentBlock({
 }) {
     const timeStr = node.createdAt ? (formatTimeAgo ? formatTimeAgo(node.createdAt) : new Date(node.createdAt).toLocaleString()) : '';
     const roleBadge = getCommentRoleBadge(node.userRole, node.userCreatedAt);
+    const [avatarFailed, setAvatarFailed] = useState(false);
+    const avatarSrc = !avatarFailed && node.userAvatarUrl ? resolveBackendUrl(node.userAvatarUrl) : '';
+    const avatarFallback = (node.userDisplayName || '?').charAt(0).toUpperCase();
     return (
         <div id={node.id ? `comment-${node.id}` : undefined} className={isReply ? 'ml-10 mt-2' : ''}>
             <div className="flex gap-3">
                 <div className="w-10 h-10 rounded-full bg-primary/20 shrink-0 flex items-center justify-center text-primary font-bold text-sm">
-                    {(node.userDisplayName || '?').charAt(0).toUpperCase()}
+                    {avatarSrc ? (
+                        <img
+                            src={avatarSrc}
+                            alt={node.userDisplayName || 'Avatar'}
+                            className="w-full h-full rounded-full object-cover"
+                            onError={() => setAvatarFailed(true)}
+                        />
+                    ) : (
+                        avatarFallback
+                    )}
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
@@ -96,7 +111,7 @@ function CommentBlock({
                             <ThumbsUp className={`w-3.5 h-3.5 ${node.userHasLiked ? 'fill-primary' : ''}`} />
                             {node.likesCount}
                         </button>
-                        {isLoggedIn && (
+                        {canPost && (
                             <button
                                 type="button"
                                 onClick={() => { onSetReplyingTo(node.id); onReplyTextChange(''); }}
@@ -113,7 +128,7 @@ function CommentBlock({
                             <Flag className="w-3.5 h-3.5 inline" />
                         </button>
                     </div>
-                    {replyingTo === node.id && (
+                    {replyingTo === node.id && canPost && (
                         <div className="mt-2">
                             <textarea
                                 value={replyText}
@@ -160,6 +175,7 @@ function CommentBlock({
                                         submitting={submitting}
                                         onLike={onLike}
                                         isLoggedIn={isLoggedIn}
+                                        canPost={canPost}
                                         onReportComment={onReportComment}
                                         formatTimeAgo={formatTimeAgo}
                                     />
@@ -194,6 +210,7 @@ function CommentBlock({
 export function CommentSection({
     comments,
     isLoggedIn,
+    commentsDisabled = false,
     commentError,
     commentsLoading,
     onSubmitComment,
@@ -208,8 +225,15 @@ export function CommentSection({
     const [replyingTo, setReplyingTo] = useState(null);
     const [replyText, setReplyText] = useState('');
 
+    useEffect(() => {
+        if (!commentsDisabled) return;
+        setReplyingTo(null);
+        setReplyText('');
+    }, [commentsDisabled]);
+
     const tree = buildCommentTree(comments);
     const visibleTree = tree.slice(0, visibleCount);
+    const canPost = Boolean(isLoggedIn) && !commentsDisabled;
 
     const handleSubmitMain = async () => {
         const text = newCommentText.trim();
@@ -257,21 +281,33 @@ export function CommentSection({
         submitting,
         onLike: handleLike,
         isLoggedIn,
+        canPost,
         onReportComment,
         formatTimeAgo,
         onShowMoreReplies: showMoreReplies,
         onHideReplies: hideReplies,
     };
 
+    const mainPlaceholder = !isLoggedIn
+        ? 'Vui lòng đăng nhập để bình luận.'
+        : commentsDisabled
+            ? 'Bình luận đang bị khóa cho truyện này.'
+            : 'Viết bình luận của bạn...';
+
     return (
         <div className="space-y-4">
             {/* Form gửi bình luận: disable nút khi chưa đăng nhập */}
             <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
+                {commentsDisabled ? (
+                    <p className="text-sm text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 mb-3">
+                        Truyện này đang trong quá trình xử lý vi phạm nên hiện không thể bình luận.
+                    </p>
+                ) : null}
                 <textarea
                     value={newCommentText}
                     onChange={(e) => setNewCommentText(e.target.value)}
-                    placeholder={isLoggedIn ? 'Viết bình luận của bạn...' : 'Vui lòng đăng nhập để bình luận.'}
-                    disabled={!isLoggedIn}
+                    placeholder={mainPlaceholder}
+                    disabled={!canPost}
                     className="w-full p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/50 resize-none disabled:opacity-70 disabled:cursor-not-allowed"
                     rows={3}
                 />
@@ -279,7 +315,7 @@ export function CommentSection({
                     <button
                         type="button"
                         onClick={handleSubmitMain}
-                        disabled={!isLoggedIn || !newCommentText.trim() || submitting}
+                        disabled={!canPost || !newCommentText.trim() || submitting}
                         className="px-4 py-2 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {submitting ? 'Đang gửi...' : 'Gửi bình luận'}

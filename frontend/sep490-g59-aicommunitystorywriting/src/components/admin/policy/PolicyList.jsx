@@ -4,13 +4,20 @@ const TYPE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', AI: 'AI', DE
 
 function formatDate(value) {
     if (!value) return '—';
-    return new Date(value).toLocaleString('vi-VN');
+    const raw = String(value).trim();
+    const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+    const d = new Date(hasTimezone ? raw : `${raw}Z`);
+    if (Number.isNaN(d.getTime())) return raw;
+    return d.toLocaleString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour12: false,
+    });
 }
 
 export function PolicyList({ policies, loading, onView, onEdit, onToggleActive, onDelete }) {
     if (loading) {
         return (
-            <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
+            <div className="rounded-xl border border-[#c9f0d8] bg-white p-12 text-center">
                 <div className="text-4xl mb-4">⏳</div>
                 <p className="text-slate-500 text-sm">Đang tải...</p>
             </div>
@@ -19,7 +26,7 @@ export function PolicyList({ policies, loading, onView, onEdit, onToggleActive, 
 
     if (!policies?.length) {
         return (
-            <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
+            <div className="rounded-xl border border-[#c9f0d8] bg-white p-12 text-center">
                 <div className="text-4xl mb-4">📄</div>
                 <h3 className="text-lg font-semibold text-slate-800 mb-1">Chưa có policy nào</h3>
                 <p className="text-slate-500 text-sm">Thêm policy mới hoặc thay đổi bộ lọc</p>
@@ -28,23 +35,23 @@ export function PolicyList({ policies, loading, onView, onEdit, onToggleActive, 
     }
 
     return (
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div className="rounded-xl border border-[#c9f0d8] bg-white overflow-hidden">
             <div className="overflow-x-auto">
-                <table className="w-full text-left">
+                <table className="w-full border-collapse text-left text-slate-800">
                     <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 text-xs font-semibold uppercase tracking-wider">
-                            <th className="px-4 py-3">Loại</th>
-                            <th className="px-4 py-3">Phiên bản</th>
-                            <th className="px-4 py-3">Trạng thái</th>
-                            <th className="px-4 py-3">Yêu cầu ký lại</th>
-                            <th className="px-4 py-3">Ngày tạo</th>
-                            <th className="px-4 py-3">Kích hoạt lúc</th>
-                            <th className="px-4 py-3 text-right">Thao tác</th>
+                        <tr className="border-b border-[#c9f0d8] bg-[#f0faf5]">
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Loại</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Phiên bản</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Trạng thái</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Yêu cầu ký lại</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Ngày tạo</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Kích hoạt lúc</th>
+                            <th className="px-4 py-3 text-right text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Thao tác</th>
                         </tr>
                     </thead>
                     <tbody>
                         {policies.map((policy) => (
-                            <tr key={policy.id} className="border-b border-slate-100 hover:bg-emerald-50/50 transition-colors">
+                            <tr key={policy.id} className="border-t border-[#c9f0d8] bg-white transition-colors first:border-t-0 hover:bg-[#f7fcf9]">
                                 <td className="px-4 py-3">
                                     <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium">
                                         <FileText className="w-4 h-4" />

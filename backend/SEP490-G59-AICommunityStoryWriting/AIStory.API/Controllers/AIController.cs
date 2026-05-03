@@ -4,14 +4,17 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Threading.Channels;
 using AIStory.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using System.Text.Json.Serialization;
 using Repositories;
+using Services;
+using Services.DTOs.Admin;
 using Services.DTOs.AI;
+using Services.Helpers;
 using Services.Interfaces;
 
 namespace AIStory.API.Controllers
@@ -44,14 +47,23 @@ namespace AIStory.API.Controllers
         public int Remaining { get; set; }
         [JsonPropertyName("resetsAtUtc")]
         public DateTime? ResetsAtUtc { get; set; }
+
+        /// <summary>Chi tiết token AI đã dùng so với hạn (ngày/tuần/tháng/tích lũy). Null nếu không lấy được.</summary>
+        [JsonPropertyName("authorTokenBudget")]
+        public AuthorAiTokenBudgetDto? AuthorTokenBudget { get; set; }
+
+        /// <summary>True khi số dư token AI đã cạn (khớp logic <see cref="IAuthorAiTokenBudgetService.EnsureWithinBudgetAsync"/>).</summary>
+        [JsonPropertyName("authorTokenBudgetBlocked")]
+        public bool AuthorTokenBudgetBlocked { get; set; }
     }
 
     /// <summary>API AI: gợi ý chương tiếp theo, đồng sáng tác (dàn ý + viết + guardrail).</summary>
     [ApiController]
     [Route("api/ai")]
-    [Authorize(Roles = "AUTHOR,ADMIN")]
+    [Authorize(Policy = "AuthorOnly")]
     public class AIController : ControllerBase
     {
+        private const int CoCreateAuthorIdeaMaxChars = 1500;
         private readonly IAINextChapterService _aiNextChapterService;
         private readonly IAICoCreationService _aiCoCreationService;
         private readonly IChapterCheckService _chapterCheckService;
@@ -60,6 +72,8 @@ namespace AIStory.API.Controllers
         private readonly IStoryRagService _ragService;
         private readonly IStoryRepository _storyRepository;
         private readonly IAISuggestRateLimitService _rateLimitService;
+        private readonly IAuthorAiTokenBudgetService _authorAiTokenBudget;
+        private readonly IConfiguration _configuration;
         private readonly IWebHostEnvironment _env;
         private readonly ILogger<AIController> _logger;
 
@@ -72,6 +86,8 @@ namespace AIStory.API.Controllers
             IStoryRagService ragService,
             IStoryRepository storyRepository,
             IAISuggestRateLimitService rateLimitService,
+            IAuthorAiTokenBudgetService authorAiTokenBudget,
+            IConfiguration configuration,
             IWebHostEnvironment env,
             ILogger<AIController> logger)
         {
@@ -83,19 +99,42 @@ namespace AIStory.API.Controllers
             _ragService = ragService;
             _storyRepository = storyRepository;
             _rateLimitService = rateLimitService;
+            _authorAiTokenBudget = authorAiTokenBudget;
+            _configuration = configuration;
             _env = env;
             _logger = logger;
         }
 
+        private static object BuildTokenBudgetExceededPayload(AuthorAiTokenBudgetExceededException ex) => new
+        {
+            message = string.IsNullOrWhiteSpace(ex.Message) ? "Tài khoản bạn đã sử dụng hết token AI. Vui lòng đợi đến kỳ cấp token tiếp theo." : ex.Message,
+            tokensUsed = ex.UsedTokens,
+            tokenLimit = ex.LimitTokens,
+            period = ex.Period.ToString()
+        };
+
+        private static bool IsAuthorTokenBudgetBlocked(AuthorAiTokenBudgetDto b)
+            => (b.TokensRemaining ?? 0) <= 0;
+
         /// <summary>Xem giới hạn sử dụng AI (mặc định 3 lần/24h mỗi loại). Hai bộ đếm tách: suggest-next-chapter và co-create.</summary>
         [HttpGet("usage-limit")]
-        public IActionResult GetUsageLimit()
+        public async Task<IActionResult> GetUsageLimit(CancellationToken cancellationToken)
         {
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
                 return Unauthorized(new { message = "Vui lòng đăng nhập." });
             var suggest = _rateLimitService.GetDailyLimitInfo(userId, AiRateLimitKind.SuggestNextChapter);
             var coCreate = _rateLimitService.GetDailyLimitInfo(userId, AiRateLimitKind.CoCreate);
+
+            AuthorAiTokenBudgetDto? authorBudget = null;
+            try
+            {
+                authorBudget = await _authorAiTokenBudget.GetBudgetAsync(userId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "GetBudgetAsync failed for UserId={UserId}", userId);
+            }
 
             var payload = new AiUsageLimitResponse
             {
@@ -116,38 +155,43 @@ namespace AIStory.API.Controllers
                 LimitPerDay = suggest.LimitPerDay,
                 UsedInWindow = suggest.UsedInWindow,
                 Remaining = suggest.Remaining,
-                ResetsAtUtc = suggest.ResetsAtUtc
+                ResetsAtUtc = suggest.ResetsAtUtc,
+                AuthorTokenBudget = authorBudget,
+                AuthorTokenBudgetBlocked = authorBudget != null && IsAuthorTokenBudgetBlocked(authorBudget)
             };
 
             return Ok(payload);
         }
 
-        /// <summary>Gợi ý 3 hướng đi khác nhau cho chương tiếp theo. Chỉ tác giả của truyện được gọi. Có giới hạn số lần gọi theo user (tránh 429).</summary>
+        /// <summary>Gợi ý 3 hướng đi khác nhau cho chương tiếp theo. Chỉ tác giả của truyện được gọi. Kiểm soát bằng token budget của tác giả.</summary>
         [HttpPost("suggest-next-chapter")]
         public async Task<IActionResult> SuggestNextChapter([FromBody] SuggestNextChapterRequest request, CancellationToken cancellationToken)
         {
-            if (request.StoryId == Guid.Empty)
-                return BadRequest(new { message = "StoryId là bắt buộc." });
-
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))
                 return Unauthorized(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." });
-
-            if (!_rateLimitService.TryAcquire(authorUserId, AiRateLimitKind.SuggestNextChapter, out var retryAfterSeconds))
-            {
-                Response.Headers.RetryAfter = retryAfterSeconds.ToString();
-                return StatusCode(429, new
-                {
-                    message = "Bạn đã đạt giới hạn gợi ý chương (suggest-next-chapter) trong cửa sổ 24h. Vui lòng thử lại sau.",
-                    retryAfterSeconds,
-                    kind = "suggestNextChapter"
-                });
-            }
 
             try
             {
                 var response = await _aiNextChapterService.SuggestNextChapterAsync(request, authorUserId, cancellationToken);
                 return Ok(response);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (AuthorAiTokenBudgetExceededException ex)
+            {
+                return StatusCode(403, BuildTokenBudgetExceededPayload(ex));
+            }
+            catch (AuthorAiEstimatedTokensInsufficientException ex)
+            {
+                return StatusCode(403, new
+                {
+                    message = ex.Message,
+                    tokensRemaining = ex.TokensRemaining,
+                    minRequiredTokens = ex.MinRequiredTokens
+                });
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -155,8 +199,6 @@ namespace AIStory.API.Controllers
             }
             catch (InvalidOperationException ex)
             {
-                if (ex.Message.Contains("không tồn tại"))
-                    return NotFound(new { message = ex.Message });
                 return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)
@@ -172,107 +214,74 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Đồng sáng tác (SSE): ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → guardrail từ cấm. Trả về stream event: progress từng bước, cuối cùng event result chứa CoCreationResponse. Client đọc response body theo chuẩn SSE (event: progress / result / error).</summary>
-        [Produces("text/event-stream")]
+        /// <summary>Đồng sáng tác: ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → guardrail từ cấm. Trả về JSON kết quả hoặc lỗi chuẩn HTTP.</summary>
         [HttpPost("co-create")]
-        public async Task CoCreate([FromBody] CoCreationRequest request, CancellationToken cancellationToken)
+        public async Task<IActionResult> CoCreate([FromBody] CoCreationRequest request, CancellationToken cancellationToken)
         {
             if (request.StoryId == Guid.Empty)
             {
-                Response.StatusCode = 400;
-                await Response.WriteAsJsonAsync(new { message = "StoryId là bắt buộc." }, cancellationToken);
-                return;
+                return BadRequest(new { message = "StoryId là bắt buộc." });
             }
             // AuthorIdea là tùy chọn (option 1: để trống → AI tự viết theo mạch truyện).
+            var trimmedCoCreateIdea = request.AuthorIdea?.Trim();
+            if (!string.IsNullOrWhiteSpace(trimmedCoCreateIdea) && CoCreateAuthorIdeaLengthHelper.GetDisplayLength(trimmedCoCreateIdea) > CoCreateAuthorIdeaLengthHelper.MaxDisplayLength)
+            {
+                return BadRequest(new { message = $"Ý tưởng tác giả không được vượt quá {CoCreateAuthorIdeaLengthHelper.MaxDisplayLength} ký tự." });
+            }
 
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))
             {
-                Response.StatusCode = 401;
-                await Response.WriteAsJsonAsync(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." }, cancellationToken);
-                return;
+                return Unauthorized(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." });
             }
 
-            if (!_rateLimitService.TryAcquire(authorUserId, AiRateLimitKind.CoCreate, out var retryAfterSeconds))
-            {
-                Response.StatusCode = 429;
-                Response.Headers.RetryAfter = retryAfterSeconds.ToString();
-                await Response.WriteAsJsonAsync(new
-                {
-                    message = "Bạn đã đạt giới hạn đồng sáng tác (co-create) trong cửa sổ 24h. Vui lòng thử lại sau.",
-                    retryAfterSeconds,
-                    kind = "coCreate"
-                }, cancellationToken);
-                return;
-            }
-
-            Response.ContentType = "text/event-stream";
-            Response.Headers.CacheControl = "no-cache";
-            Response.Headers.Connection = "keep-alive";
-            await Response.StartAsync(cancellationToken);
-
-            var jsonOptions = new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-            };
-            var channel = Channel.CreateUnbounded<(string EventType, object Data)>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
-            var progress = new Progress<CoCreateProgressEvent>(evt => channel.Writer.TryWrite(("progress", evt)));
-
-            async Task WriteSseEventAsync(string eventType, object data, CancellationToken ct)
-            {
-                var json = JsonSerializer.Serialize(data, jsonOptions);
-                var payload = $"event: {eventType}\ndata: {json}\n\n";
-                var bytes = Encoding.UTF8.GetBytes(payload);
-                await Response.Body.WriteAsync(bytes, ct);
-                await Response.Body.FlushAsync(ct);
-            }
-
-            async Task ConsumeProgressChannelAsync(CancellationToken ct)
-            {
-                try
-                {
-                    await foreach (var item in channel.Reader.ReadAllAsync(ct))
-                        await WriteSseEventAsync(item.EventType, item.Data, ct);
-                }
-                catch (OperationCanceledException) { }
-            }
-
-            var consumerTask = ConsumeProgressChannelAsync(cancellationToken);
             try
             {
-                CoCreationResponse response;
-                try
+                var response = await _aiCoCreationService.CoCreateAsync(request, authorUserId, cancellationToken);
+                return Ok(response);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (AuthorAiTokenBudgetExceededException ex)
+            {
+                return StatusCode(403, BuildTokenBudgetExceededPayload(ex));
+            }
+            catch (AuthorAiEstimatedTokensInsufficientException ex)
+            {
+                return StatusCode(403, new
                 {
-                    response = await _aiCoCreationService.CoCreateAsync(request, authorUserId, cancellationToken, progress);
-                }
-                finally
-                {
-                    channel.Writer.Complete();
-                }
-                await consumerTask;
-                await WriteSseEventAsync("result", response, cancellationToken);
+                    message = ex.Message,
+                    tokensRemaining = ex.TokensRemaining,
+                    minRequiredTokens = ex.MinRequiredTokens
+                });
             }
             catch (OperationCanceledException)
             {
                 _logger.LogInformation("Co-create cancelled for StoryId={StoryId}", request.StoryId);
+                return StatusCode(499, new { message = "Yêu cầu đã bị hủy." });
             }
             catch (UnauthorizedAccessException ex)
             {
-                try { await consumerTask; } catch (OperationCanceledException) { }
-                try { await WriteSseEventAsync("error", new { message = ex.Message }, cancellationToken); } catch { }
+                const string missingUserMsg = "Không xác định được người dùng. Vui lòng đăng nhập lại.";
+                if (string.Equals(ex.Message, missingUserMsg, StringComparison.Ordinal))
+                    return Unauthorized(new { message = ex.Message });
+                return StatusCode(403, new { message = ex.Message });
             }
             catch (InvalidOperationException ex)
             {
-                try { await consumerTask; } catch (OperationCanceledException) { }
-                try { await WriteSseEventAsync("error", new { message = ex.Message }, cancellationToken); } catch { }
+                if (ex.Message.Contains("không tồn tại"))
+                    return NotFound(new { message = ex.Message });
+                return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)
             {
-                try { await consumerTask; } catch (OperationCanceledException) { }
                 _logger.LogError(ex, "AI co-create failed for StoryId={StoryId}", request.StoryId);
-                var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi gọi dịch vụ AI. Vui lòng thử lại sau.";
-                try { await WriteSseEventAsync("error", new { message }, cancellationToken); } catch { }
+                var message = _env.IsDevelopment()
+                    ? (ex.InnerException?.Message ?? ex.Message)
+                    : "Lỗi khi gọi dịch vụ AI. Vui lòng thử lại sau.";
+                return StatusCode(500, new { message });
             }
         }
 
@@ -308,7 +317,7 @@ namespace AIStory.API.Controllers
 
             try
             {
-                await _ragService.EnsureIndexedAsync(request.StoryId, request.AfterChapterId, cancellationToken);
+                await _ragService.EnsureIndexedAsync(request.StoryId, request.UpToChapterId, cancellationToken);
                 return Ok(new { message = "Đã index xong cho RAG.", storyId = request.StoryId });
             }
             catch (UnauthorizedAccessException ex)

@@ -1,9 +1,11 @@
-﻿namespace Services.DTOs.Admin.Compliance;
+namespace Services.DTOs.Admin.Compliance;
 
 public class ComplianceLogItemDto
 {
     public string Source { get; set; } = "";
     public Guid RowId { get; set; }
+    /// <summary>Mã đơn báo cáo gốc (report.id) nếu xác định được.</summary>
+    public Guid? ReportId { get; set; }
     public Guid ComplianceUserId { get; set; }
     public string? ComplianceUserName { get; set; }
     public string? TargetType { get; set; }

@@ -257,7 +257,7 @@ export function CategoryManagement() {
         }
 
         // Get base URL (remove /api if present, as static files are served from root)
-        let baseUrl = import.meta.env.VITE_API_URL || 'https://localhost:7117/api';
+        let baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
         // Remove /api suffix if present, as static files are served from root
         baseUrl = baseUrl.replace(/\/api\/?$/, '');
         // Ensure baseUrl doesn't end with /
@@ -432,9 +432,9 @@ export function CategoryManagement() {
             </div>
 
             {/* Filters & Table */}
-            <div style={{ backgroundColor: '#ffffff', borderRadius: '0.75rem', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+            <div style={{ backgroundColor: '#ffffff', borderRadius: '0.75rem', border: '1px solid #c9f0d8', overflow: 'hidden' }}>
                 {/* Filters */}
-                <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0' }}>
+                <div style={{ padding: '1rem', borderBottom: '1px solid #c9f0d8', background: '#f8fdfb' }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
                         {/* Search */}
                         <div style={{ flex: '1 1 300px', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#f8fafc', borderRadius: '0.5rem' }}>
@@ -522,40 +522,41 @@ export function CategoryManagement() {
                     <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
-                                <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                                <tr style={{ borderBottom: '1px solid #c9f0d8', background: '#f0faf5' }}>
+                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.72rem', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
                                         Icon
                                     </th>
-                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.72rem', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
                                         Tên thể loại
                                     </th>
-                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.72rem', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
                                         Slug
                                     </th>
-                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.72rem', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
                                         Mô tả
                                     </th>
-                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.72rem', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
                                         Trạng thái
                                     </th>
-                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.72rem', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
                                         Ngày tạo
                                     </th>
-                                    <th style={{ textAlign: 'right', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                                    <th style={{ textAlign: 'right', padding: '1rem', fontSize: '0.72rem', fontWeight: 700, color: '#047857', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
                                         Thao tác
                                     </th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {filteredCategories.map((category) => (
+                                {filteredCategories.map((category, rowIdx) => (
                                     <tr
                                         key={category.id}
                                         style={{
-                                            borderBottom: '1px solid #e2e8f0',
+                                            borderTop: rowIdx === 0 ? 'none' : '1px solid #c9f0d8',
+                                            backgroundColor: '#ffffff',
                                             transition: 'background-color 0.2s'
                                         }}
-                                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
-                                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f7fcf9'}
+                                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ffffff'}
                                     >
                                         <td style={{ padding: '1rem' }}>
                                             <div style={{ position: 'relative', width: '40px', height: '40px' }}>

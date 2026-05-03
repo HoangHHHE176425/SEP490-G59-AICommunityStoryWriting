@@ -110,7 +110,8 @@ namespace Services.Implementations
             if (coinsGranted <= 0) throw new InvalidOperationException("Invalid coin package configuration.");
             if (pkg.price_amount <= 0) throw new InvalidOperationException("Invalid coin package price.");
 
-            // Create order (PENDING)
+            // Build order in memory first: only persist after PayOS returns a link (PENDING + gateway),
+            // or on failure as FAILED so there is no orphan PENDING without paymentLinkId.
             var order = new coin_orders
             {
                 id = Guid.NewGuid(),
@@ -122,9 +123,6 @@ namespace Services.Implementations
                 status = "PENDING",
                 created_at = DateTime.UtcNow
             };
-
-            _db.coin_orders.Add(order);
-            await _db.SaveChangesAsync(cancellationToken);
 
             // Generate a PayOS orderCode (numeric) with low collision risk.
             var unixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -145,20 +143,43 @@ namespace Services.Implementations
             ttlMinutes = Math.Clamp(ttlMinutes, 1, 7 * 24 * 60); // 1 minute .. 7 days (sane bound)
             var expiredAt = checked((int)DateTimeOffset.UtcNow.AddMinutes(ttlMinutes).ToUnixTimeSeconds());
 
-            var payosRes = await _payos.CreatePaymentLinkAsync(
-                orderCode,
-                pkg.price_amount,
-                description,
-                cancelUrl,
-                returnUrl,
-                expiredAt,
-                cancellationToken
-            );
+            PayOSClient.CreatePaymentLinkResult payosRes;
+            try
+            {
+                payosRes = await _payos.CreatePaymentLinkAsync(
+                    orderCode,
+                    pkg.price_amount,
+                    description,
+                    cancelUrl,
+                    returnUrl,
+                    expiredAt,
+                    cancellationToken
+                );
 
-            // Store PayOS identifiers for webhook correlation.
+                if (!string.IsNullOrWhiteSpace(payosRes.Code) &&
+                    !string.Equals(payosRes.Code, "00", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException($"PayOS rejected payment link: code={payosRes.Code}");
+                }
+            }
+            catch (Exception ex)
+            {
+                order.status = "FAILED";
+                order.completed_at = DateTime.UtcNow;
+                order.gateway_transaction_id = null;
+                order.gateway_response_code = BuildCompactPayosFailureNote(ex);
+                _db.coin_orders.Add(order);
+                await _db.SaveChangesAsync(cancellationToken);
+                _logger.LogWarning(ex, "[PayOS] Create payment link failed coin_order={OrderId} user={UserId}", order.id, userId);
+                throw;
+            }
+
             order.gateway_transaction_id = payosRes.PaymentLinkId;
             order.gateway_response_code = payosRes.Code;
+            _db.coin_orders.Add(order);
             await _db.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("[PayOS] Payment link created coin_order={OrderId} user={UserId} paymentLinkId={PaymentLinkId}", order.id, userId, payosRes.PaymentLinkId);
 
             return new CreatePayOSPaymentResponseDto
             {
@@ -414,9 +435,9 @@ namespace Services.Implementations
                     throw new InvalidOperationException("Số dư coin không đủ để thực hiện ủng hộ.");
                 }
 
-                // Platform fee: 30% goes to system wallet, 70% goes to author.
+                // Platform fee: 70% goes to system wallet, 30% goes to author.
                 // Use floor to avoid charging more than intended; net + fee == amount.
-                var platformFee = (int)Math.Floor(amount * 0.30m);
+                var platformFee = (int)Math.Floor(amount * 0.70m);
                 platformFee = Math.Clamp(platformFee, 0, amount);
                 var authorNet = amount - platformFee;
 
@@ -856,6 +877,15 @@ namespace Services.Implementations
             if (dt == null) return null;
             var value = dt.Value;
             return value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        }
+
+        /// <summary>Short single-line note for coin_orders.gateway_response_code (DB-safe length).</summary>
+        private static string BuildCompactPayosFailureNote(Exception ex, int maxLen = 200)
+        {
+            var raw = $"{ex.GetType().Name}: {ex.Message}".Replace('\r', ' ').Replace('\n', ' ').Trim();
+            if (string.IsNullOrWhiteSpace(raw)) raw = "LINK_FAIL";
+            if (raw.Length <= maxLen) return raw;
+            return raw[..maxLen];
         }
     }
 }

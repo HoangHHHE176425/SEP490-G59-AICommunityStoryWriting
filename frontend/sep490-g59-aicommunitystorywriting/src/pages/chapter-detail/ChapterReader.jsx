@@ -6,12 +6,15 @@ import { ChapterSidebar } from '../../components/chapter-detail/ChapterSidebar';
 import { ChapterContent } from '../../components/chapter-detail/ChapterContent';
 import { ChapterNavigation } from '../../components/chapter-detail/ChapterNavigation';
 import { ChapterComments } from '../../components/chapter-detail/ChapterComments';
+import { ReportModal } from '../../components/story-detail/ReportModal';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getStoryById, saveReadingProgress } from '../../api/story/storyApi';
 import { getChapterById, getChapters, getChapterComments, addChapterComment, setChapterCommentReaction, unlockPaidChapter } from '../../api/chapter/chapterApi';
+import { getCommentReportReasons, reportChapterComment } from '../../api/report/reportApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
+import { countChapterWords } from '../../utils/chapterWordCount';
 
 function formatTimeAgo(dateStr) {
     if (!dateStr) return '';
@@ -35,6 +38,29 @@ export function ChapterReader({ onBack }) {
     const location = useLocation();
     const urlStoryId = searchParams.get('storyId');
     const urlChapterId = searchParams.get('chapterId');
+
+    useEffect(() => {
+        if (!urlChapterId || urlStoryId) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const ch = await getChapterById(urlChapterId);
+                if (cancelled) return;
+                const sid = ch?.storyId ?? ch?.StoryId;
+                if (sid) {
+                    navigate(
+                        `/chapter?storyId=${encodeURIComponent(sid)}&chapterId=${encodeURIComponent(urlChapterId)}`,
+                        { replace: true }
+                    );
+                }
+            } catch {
+                // ignore
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [urlChapterId, urlStoryId, navigate]);
 
     // Chưa đăng nhập thì không gọi các API có `[Authorize]` (tránh 401 + trang lỗi).
     useEffect(() => {
@@ -64,6 +90,34 @@ export function ChapterReader({ onBack }) {
     const [comments, setComments] = useState([]);
     const [commentsLoading, setCommentsLoading] = useState(false);
     const [commentError, setCommentError] = useState(null);
+    const [isReportCommentModalOpen, setIsReportCommentModalOpen] = useState(false);
+    const [reportingCommentId, setReportingCommentId] = useState(null);
+    const [reportSubmitting, setReportSubmitting] = useState(false);
+    const [reportError, setReportError] = useState(null);
+    const [commentReportReasonOptions, setCommentReportReasonOptions] = useState([]);
+
+    const normalizeCommentReportReasonOptions = useCallback((list) => {
+        const rows = Array.isArray(list) ? list : [];
+        return rows
+            .map((x) => {
+                const value = String(x?.code ?? x?.Code ?? '').trim();
+                if (!value) return null;
+                const label = String(x?.labelVi ?? x?.LabelVi ?? x?.label ?? x?.Label ?? value).trim();
+                return { value, label };
+            })
+            .filter(Boolean);
+    }, []);
+
+    const loadCommentReportReasons = useCallback(async () => {
+        try {
+            const list = await getCommentReportReasons();
+            setCommentReportReasonOptions((prev) =>
+                (prev?.length ?? 0) > 0 ? prev : normalizeCommentReportReasonOptions(list));
+        } catch (e) {
+            const msg = e?.response?.data?.message ?? e?.message ?? 'Không tải được lý do báo cáo.';
+            showToast(msg, 'error');
+        }
+    }, [normalizeCommentReportReasonOptions, showToast]);
 
     useEffect(() => {
         let cancelled = false;
@@ -92,6 +146,7 @@ export function ChapterReader({ onBack }) {
                     setStory({
                         title: storyRes?.title ?? storyRes?.Title ?? '',
                         author: storyRes?.authorName ?? storyRes?.AuthorName ?? 'Ẩn danh',
+                        commentsDisabled: !!(storyRes?.commentsDisabled ?? storyRes?.CommentsDisabled),
                     });
                     const orderIndex = chapterRes?.orderIndex ?? chapterRes?.OrderIndex ?? 0;
                     const accessType = (chapterRes?.accessType ?? chapterRes?.AccessType ?? 'FREE').toUpperCase();
@@ -106,7 +161,7 @@ export function ChapterReader({ onBack }) {
                     const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && !isUnlocked;
                     const contentRaw = chapterRes?.content ?? chapterRes?.Content ?? '';
                     const content = isPaidLocked ? '' : (contentRaw || 'Chưa có nội dung.');
-                    const wordCount = (content.trim().split(/\s+/).filter(Boolean).length) || 0;
+                    const wordCount = isPaidLocked ? 0 : countChapterWords(contentRaw);
                     setChapter({
                         number: orderIndex + 1,
                         title: chapterRes?.title ?? chapterRes?.Title ?? 'Không có tiêu đề',
@@ -186,6 +241,10 @@ export function ChapterReader({ onBack }) {
 
     const handleSubmitComment = useCallback(async (content, parentId) => {
         if (!urlChapterId) return;
+        if (story?.commentsDisabled) {
+            setCommentError('Truyện này đang trong quá trình xử lý vi phạm nên hiện không thể bình luận.');
+            return;
+        }
         if (chapter?.isPaidLocked) {
             setCommentError('Bạn cần mở khóa chương để bình luận.');
             return;
@@ -198,7 +257,7 @@ export function ChapterReader({ onBack }) {
             const msg = err?.response?.data?.message ?? err?.message ?? 'Không gửi được bình luận.';
             setCommentError(msg);
         }
-    }, [urlChapterId, chapter?.isPaidLocked, loadComments]);
+    }, [urlChapterId, story?.commentsDisabled, chapter?.isPaidLocked, loadComments]);
 
     const handleLikeComment = useCallback(async (commentId) => {
         if (!urlChapterId || !user?.id) return;
@@ -210,6 +269,54 @@ export function ChapterReader({ onBack }) {
             setCommentError('Không cập nhật được reaction.');
         }
     }, [urlChapterId, user?.id, chapter?.isPaidLocked, loadComments]);
+
+    const handleReportComment = useCallback(
+        (commentId) => {
+            if (!user?.id) {
+                showToast('Vui lòng đăng nhập để báo cáo bình luận.', 'warning');
+                return;
+            }
+            if (chapter?.isPaidLocked) {
+                showToast('Bạn cần mở khóa chương để báo cáo bình luận.', 'warning');
+                return;
+            }
+            setReportingCommentId(commentId);
+            setReportError(null);
+            loadCommentReportReasons();
+            setIsReportCommentModalOpen(true);
+        },
+        [user?.id, chapter?.isPaidLocked, loadCommentReportReasons, showToast],
+    );
+
+    const handleSubmitCommentReport = useCallback(
+        async (payload) => {
+            if (!urlChapterId || !reportingCommentId) return false;
+            setReportSubmitting(true);
+            setReportError(null);
+            try {
+                const details = [
+                    payload?.description,
+                    payload?.evidenceLinks?.length ? `Link bằng chứng: ${payload.evidenceLinks.join(', ')}` : '',
+                    payload?.evidenceImages?.length ? `Ảnh bằng chứng: ${payload.evidenceImages.join(', ')}` : '',
+                ].filter(Boolean).join('\n');
+
+                await reportChapterComment(urlChapterId, reportingCommentId, {
+                    reasonCode: payload?.reasonCode,
+                    description: details || undefined,
+                });
+                showToast('Đã gửi báo cáo. Chúng tôi sẽ xem xét trong thời gian sớm nhất.', 'success');
+                return true;
+            } catch (e) {
+                const msg = e?.response?.data?.message ?? e?.message ?? 'Không gửi được báo cáo bình luận.';
+                setReportError(msg);
+                showToast(msg, 'error');
+                return false;
+            } finally {
+                setReportSubmitting(false);
+            }
+        },
+        [urlChapterId, reportingCommentId, showToast],
+    );
 
     const refreshChapterUnlockedState = useCallback(async () => {
         if (!urlChapterId) return;
@@ -228,7 +335,7 @@ export function ChapterReader({ onBack }) {
             const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && !isUnlocked;
             const contentRaw = chapterRes?.content ?? chapterRes?.Content ?? '';
             const content = isPaidLocked ? '' : (contentRaw || 'Chưa có nội dung.');
-            const wordCount = (content.trim().split(/\s+/).filter(Boolean).length) || 0;
+            const wordCount = isPaidLocked ? 0 : countChapterWords(contentRaw);
             setChapter((prev) => ({
                 ...(prev ?? {}),
                 number: orderIndex + 1,
@@ -265,6 +372,8 @@ export function ChapterReader({ onBack }) {
         try {
             await unlockPaidChapter(urlChapterId);
             showToast('Mở khóa chương thành công!', 'success');
+            // Đồng bộ số coin trên Header / Wallet / Profile (cùng listener `wallet:changed`).
+            window.dispatchEvent(new Event('wallet:changed'));
             await refreshChapterUnlockedState();
         } catch (err) {
             const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể mở khóa chương.';
@@ -274,7 +383,7 @@ export function ChapterReader({ onBack }) {
         }
     }, [urlChapterId, user?.id, unlocking, chapter?.isPaidLocked, refreshChapterUnlockedState, showToast]);
 
-    const storyForNav = story || { title: '', author: '' };
+    const storyForNav = story || { title: '', author: '', commentsDisabled: false };
     const chapterForNav = chapter || {
         number: 0,
         title: '',
@@ -550,10 +659,36 @@ export function ChapterReader({ onBack }) {
                 commentsLoading={commentsLoading}
                 commentError={commentError}
                 isLoggedIn={!!user?.id && !chapter?.isPaidLocked}
+                commentsDisabled={!!storyForNav.commentsDisabled}
                 onSubmitComment={handleSubmitComment}
                 onLikeComment={handleLikeComment}
-                onReportComment={(id) => console.log('Report comment:', id)}
+                onReportComment={handleReportComment}
                 formatTimeAgo={formatTimeAgo}
+            />
+
+            <ReportModal
+                isOpen={isReportCommentModalOpen}
+                onClose={() => {
+                    setIsReportCommentModalOpen(false);
+                    setReportingCommentId(null);
+                    setReportError(null);
+                }}
+                onSubmit={handleSubmitCommentReport}
+                title="Báo cáo bình luận"
+                type="comment"
+                storyId={urlStoryId}
+                storyTitle={storyForNav.title}
+                chapterId={urlChapterId}
+                chapterTitle={
+                    chapterForNav.number && chapterForNav.title
+                        ? `Chương ${chapterForNav.number}: ${chapterForNav.title}`
+                        : chapterForNav.title || undefined
+                }
+                targetId={reportingCommentId}
+                reasonOptions={commentReportReasonOptions}
+                submitting={reportSubmitting}
+                errorMessage={reportError}
+                onClearError={() => setReportError(null)}
             />
 
             {/* Footer */}

@@ -6,8 +6,19 @@ import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { formatStoryViews } from '../../utils/storyBrowseMap';
 import { getStories } from '../../api/story/storyApi';
 import { getChaptersByStoryId } from '../../api/chapter/chapterApi';
+import { useAuth } from '../../contexts/AuthContext';
+
+const BECOME_AUTHOR_POLICY = '/policy?type=AUTHOR&from=become-author&next=/author';
 
 export function AIAssistedStoriesWidget() {
+  const { isAuthenticated, role } = useAuth();
+  const roleUpper = (role ?? '').toString().toUpperCase();
+  const isAuthor = roleUpper === 'AUTHOR';
+  const tryNowHref = !isAuthenticated
+    ? `/login?redirect=${encodeURIComponent(BECOME_AUTHOR_POLICY)}`
+    : isAuthor
+      ? '/author'
+      : BECOME_AUTHOR_POLICY;
   const TAKE = 3;
   const CANDIDATE_PAGE_SIZE = 12;
 
@@ -180,10 +191,13 @@ export function AIAssistedStoriesWidget() {
               </p>
             </div>
           </div>
-          <button className="px-5 py-2.5 bg-gradient-to-r from-[#13EC5B] to-[#11D350] text-white rounded-xl hover:shadow-xl transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[14px] flex items-center gap-2">
+          <Link
+            to="/story-list?usesAi=true"
+            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#13EC5B] to-[#11D350] px-5 py-2.5 font-['Plus_Jakarta_Sans',sans-serif] text-[14px] font-bold text-white shadow-none transition-all hover:shadow-xl"
+          >
             Xem tất cả
-            <ChevronRight className="w-4 h-4" />
-          </button>
+            <ChevronRight className="h-4 w-4" />
+          </Link>
         </div>
 
         {error ? (
@@ -312,10 +326,13 @@ export function AIAssistedStoriesWidget() {
                 </p>
               </div>
             </div>
-            <button className="px-6 py-3 bg-gradient-to-r from-[#13EC5B] to-[#11D350] text-white rounded-xl hover:shadow-xl hover:scale-105 transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[14px] flex items-center gap-2">
-              <Sparkles className="w-4 h-4" />
+            <Link
+              to={tryNowHref}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#13EC5B] to-[#11D350] px-6 py-3 font-['Plus_Jakarta_Sans',sans-serif] text-[14px] font-bold text-white shadow-none transition-all hover:scale-105 hover:shadow-xl"
+            >
+              <Sparkles className="h-4 w-4" />
               Thử ngay
-            </button>
+            </Link>
           </div>
         </div>
       </div>

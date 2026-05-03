@@ -291,7 +291,7 @@ namespace AIStory.API.Controllers
         /// Nguồn: author_income_logs.source_type = "CHAPTER_UNLOCK"
         /// </summary>
         [HttpGet("author/unlock-chapter-income-history")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public async Task<IActionResult> GetAuthorChapterUnlockIncomeHistory([FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken cancellationToken = default)
         {
             page = Math.Max(1, page);
@@ -344,7 +344,7 @@ namespace AIStory.API.Controllers
         /// Hỗ trợ filter: search theo tên story, lọc theo tháng và status của author_income_logs.
         /// </summary>
         [HttpGet("author/unlock-chapter-income-history/by-story")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public async Task<IActionResult> GetAuthorChapterUnlockIncomeHistoryByStory(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20,

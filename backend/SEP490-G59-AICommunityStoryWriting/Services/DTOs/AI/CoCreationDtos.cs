@@ -25,25 +25,19 @@ public class CoCreationRequest
     public Guid? ChapterId { get; set; }
 }
 
-/// <summary>Response đồng sáng tác: dàn ý + nội dung cuối + trạng thái kiểm duyệt. Có thể kèm feedback khi ý tưởng tác giả mâu thuẫn với truyện.</summary>
+/// <summary>Response đồng sáng tác: dàn ý + nội dung cuối + trạng thái kiểm duyệt.</summary>
 public class CoCreationResponse
 {
-    /// <summary>Nếu có: ý tưởng tác giả mâu thuẫn với ngữ cảnh (vd. nhân vật đã chết nhưng ý tưởng nhắc nhân vật đó). Khi đó không tạo dàn ý/nội dung.</summary>
-    public string? IdeaContradictionFeedback { get; set; }
-
-    /// <summary>Cảnh báo xung đột ý tưởng (nếu có) nhưng hệ thống vẫn tiếp tục viết theo hướng đã điều chỉnh.</summary>
-    public string? IdeaConflictWarning { get; set; }
-
-    /// <summary>Dàn ý do Agent 1 tạo (rỗng nếu IdeaContradictionFeedback có giá trị).</summary>
+    /// <summary>Dàn ý do Agent 1 tạo.</summary>
     public string Outline { get; set; } = null!;
 
-    /// <summary>Tiêu đề chương gợi ý (Agent 1). Null nếu không sinh được hoặc nhánh mâu thuẫn ý tưởng.</summary>
+    /// <summary>Tiêu đề chương gợi ý (Agent 1). Null nếu không sinh được.</summary>
     public string? SuggestedChapterTitle { get; set; }
 
     /// <summary>Danh sách nhân vật tham gia, được trích từ dàn ý Agent 1.</summary>
     public List<string>? CharactersInvolved { get; set; }
 
-    /// <summary>Nội dung cuối (đã qua kiểm duyệt hoặc bản cuối sau khi hết số lần sửa). Rỗng nếu IdeaContradictionFeedback có giá trị.</summary>
+    /// <summary>Nội dung cuối (đã qua kiểm duyệt hoặc bản cuối sau khi hết số lần sửa).</summary>
     public string FinalContent { get; set; } = null!;
 
     /// <summary>True nếu bản nháp qua từ cấm và chính tả (khi bật tự sửa), hoặc chỉ từ cấm khi tắt tự sửa.</summary>
@@ -81,13 +75,4 @@ public class AgentDuration
     public string Step { get; set; } = null!;
     /// <summary>Thời gian chạy (millisecond).</summary>
     public long DurationMs { get; set; }
-}
-
-/// <summary>Event tiến độ gửi qua SSE khi chạy co-create stream: mỗi bước xong (Outline, Write, Guardrail, …) gửi một event.</summary>
-public class CoCreateProgressEvent
-{
-    public string Step { get; set; } = null!;
-    public long DurationMs { get; set; }
-    /// <summary>Message hiển thị cho user (vd. "Đã xong dàn ý").</summary>
-    public string? Message { get; set; }
 }

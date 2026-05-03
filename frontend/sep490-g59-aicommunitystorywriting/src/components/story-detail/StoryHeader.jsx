@@ -22,6 +22,8 @@ const MSG_LOGIN_REPORT = 'Vui lòng đăng nhập để báo cáo vi phạm.';
 const MSG_LOGIN_RATE = 'Vui lòng đăng nhập để đánh giá.';
 const MSG_READ_BEFORE_REPORT = 'Bạn cần đọc ít nhất 1 chương trước khi gửi báo cáo.';
 const MSG_READ_BEFORE_RATE = 'Bạn cần đọc ít nhất 1 chương trước khi đánh giá.';
+const MSG_OWNER_RATE = 'Không thể tự đánh giá.';
+const MSG_OWNER_FOLLOW = 'Bạn không thể theo dõi truyện của chính mình.';
 
 export default function StoryHeader({
     story,
@@ -34,6 +36,7 @@ export default function StoryHeader({
     onReadStory,
     isLoggedIn = false,
     hasReadAnyChapter = false,
+    isStoryOwner = false,
 }) {
     const author = story?.author;
     const authorId = author?.id || author?.userId;
@@ -46,8 +49,12 @@ export default function StoryHeader({
     /** Chưa đăng nhập hoặc chưa đọc chương → không mở modal đánh giá, chỉ tooltip. */
     const ratingBlocked =
         !hasUserRated &&
-        (!isLoggedIn || !hasReadAnyChapter);
-    const ratingBlockTitle = !isLoggedIn ? MSG_LOGIN_RATE : MSG_READ_BEFORE_RATE;
+        (!isLoggedIn || !hasReadAnyChapter || isStoryOwner);
+    const ratingBlockTitle = isStoryOwner
+        ? MSG_OWNER_RATE
+        : !isLoggedIn
+            ? MSG_LOGIN_RATE
+            : MSG_READ_BEFORE_RATE;
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="p-6">
@@ -111,6 +118,11 @@ export default function StoryHeader({
                                         </span>
                                     )}
                                 </div>
+                                {story.usesAi && (
+                                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-teal-50 dark:bg-teal-950/30 text-teal-700 dark:text-teal-300 border border-teal-200/60 dark:border-teal-900/50">
+                                        Truyện sử dụng AI hỗ trợ
+                                    </span>
+                                )}
                             </div>
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 <span className="text-slate-500 dark:text-slate-400">Trạng thái truyện:</span>
@@ -176,17 +188,36 @@ export default function StoryHeader({
                                 <Play className="w-4 h-4" />
                                 Đọc truyện
                             </button>
-                            <button
-                                onClick={onToggleFollow}
-                                className={`flex items-center gap-2 px-6 py-2.5 text-sm font-bold rounded-full transition-all ${isFollowing
-                                    ? 'bg-primary/10 text-primary border-2 border-primary'
-                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white hover:bg-slate-200 dark:hover:bg-slate-700'
-                                    }`}
-                            >
-                                <Bookmark className="w-4 h-4" />
-                                {isFollowing ? 'Đang theo dõi' : 'Theo dõi'}
-                            </button>
-                            {hasUserRated ? (
+                            {isStoryOwner ? (
+                                <span
+                                    className="inline-flex items-center gap-2 px-6 py-2.5 text-sm font-bold rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-default border border-slate-200 dark:border-slate-700"
+                                    title={MSG_OWNER_FOLLOW}
+                                >
+                                    <Bookmark className="w-4 h-4 shrink-0 opacity-70" />
+                                    Theo dõi
+                                </span>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={onToggleFollow}
+                                    className={`flex items-center gap-2 px-6 py-2.5 text-sm font-bold rounded-full transition-all ${isFollowing
+                                        ? 'bg-primary/10 text-primary border-2 border-primary'
+                                        : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white hover:bg-slate-200 dark:hover:bg-slate-700'
+                                        }`}
+                                >
+                                    <Bookmark className="w-4 h-4" />
+                                    {isFollowing ? 'Đang theo dõi' : 'Theo dõi'}
+                                </button>
+                            )}
+                            {isStoryOwner ? (
+                                <span
+                                    className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-default"
+                                    title={MSG_OWNER_RATE}
+                                >
+                                    <Star className="w-4 h-4 opacity-70" />
+                                    {MSG_OWNER_RATE}
+                                </span>
+                            ) : hasUserRated ? (
                                 <span
                                     className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm font-bold rounded-full cursor-default"
                                     title="Mỗi tài khoản chỉ được đánh giá một lần"

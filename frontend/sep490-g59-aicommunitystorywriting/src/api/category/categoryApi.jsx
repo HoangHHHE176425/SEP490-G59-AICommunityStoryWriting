@@ -56,11 +56,7 @@ export async function createCategory(data) {
         formData.append("IconImage", data.iconImage);
     }
 
-    const response = await axiosInstance.post("/categories", formData, {
-        headers: {
-            "Content-Type": "multipart/form-data",
-        },
-    });
+    const response = await axiosInstance.post("/categories", formData);
     return response.data;
 }
 
@@ -214,11 +210,7 @@ export async function updateCategory(id, data) {
         formData.append("IconImage", data.iconImage);
     }
 
-    const response = await axiosInstance.put(`/categories/${id}`, formData, {
-        headers: {
-            "Content-Type": "multipart/form-data",
-        },
-    });
+    const response = await axiosInstance.put(`/categories/${id}`, formData);
     return response.data;
 }
 

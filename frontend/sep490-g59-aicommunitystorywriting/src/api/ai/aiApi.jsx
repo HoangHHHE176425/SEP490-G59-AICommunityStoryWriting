@@ -24,21 +24,23 @@ export async function indexRag(storyId) {
 }
 
 /**
- * Gợi ý 3 hướng đi cho chương tiếp theo (chỉ tác giả, có rate limit).
+ * Gợi ý 3 hướng đi cho chương tiếp theo (chỉ tác giả, check token từ BE).
  * @param {string} storyId - ID truyện (Guid)
- * @param {string|null} afterChapterId - ID chương sau đó muốn gợi ý; null = sau chương mới nhất
+ * @param {string|null} upToChapterId - ID chương mốc ngữ cảnh; null = sau chương mới nhất
  * @param {string|null} prompt - Prompt tùy chọn do tác giả nhập
  * @param {string|null} chapterId - ID chương đang soạn (FE tạo trước); BE lưu gợi ý vào ai_generated_content
  * @returns {Promise<{ suggestions: Array<{ title, summary, direction }>, contextUsed?: { storyTitle?, chaptersIncluded } }>}
  */
-export async function suggestNextChapter(storyId, afterChapterId = null, prompt = null, chapterId = null) {
+export async function suggestNextChapter(storyId, upToChapterId = null, prompt = null, chapterId = null) {
     if (!storyId) {
         throw new Error("StoryId là bắt buộc.");
     }
     const trimmedPrompt = (prompt ?? "").toString().trim();
     const body = {
         storyId,
-        afterChapterId: afterChapterId || null,
+        upToChapterId: upToChapterId || null,
+        // Backward compatibility for older backend contracts.
+        afterChapterId: upToChapterId || null,
         chapterId: chapterId || null,
         // Hỗ trợ BE theo nhiều naming convention (BE có thể chọn 1 trong các field này)
         prompt: trimmedPrompt || null,
@@ -49,59 +51,12 @@ export async function suggestNextChapter(storyId, afterChapterId = null, prompt 
 }
 
 /**
- * Parse body Server-Sent Events từ POST /ai/co-create (BE trả text/event-stream: progress → result | error).
- */
-function parseCoCreateSseResponse(rawText) {
-    if (rawText == null || typeof rawText !== "string") {
-        throw new Error("Phản hồi AI không hợp lệ (rỗng).");
-    }
-    const blocks = rawText
-        .split(/\n\n+/)
-        .map((b) => b.trim())
-        .filter(Boolean);
-    let lastError = null;
-    let lastResult = null;
-    for (const block of blocks) {
-        let eventType = "message";
-        const dataLines = [];
-        for (const line of block.split("\n")) {
-            if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-            } else if (line.startsWith("data:")) {
-                dataLines.push(line.slice(5).trim());
-            }
-        }
-        const dataStr = dataLines.join("");
-        if (!dataStr) continue;
-        try {
-            const data = JSON.parse(dataStr);
-            if (eventType === "error") lastError = data;
-            if (eventType === "result") lastResult = data;
-        } catch {
-            /* bỏ qua chunk không parse được */
-        }
-    }
-    if (lastError) {
-        const msg = lastError.message ?? lastError.Message ?? "Lỗi khi gọi AI hỗ trợ.";
-        const err = new Error(typeof msg === "string" ? msg : JSON.stringify(lastError));
-        err.response = { status: 400, data: lastError };
-        throw err;
-    }
-    if (!lastResult) {
-        throw new Error(
-            "Không nhận được kết quả từ AI (thiếu sự kiện result). Kiểm tra cấu hình AI hoặc thử lại sau."
-        );
-    }
-    return lastResult;
-}
-
-/**
- * Đồng sáng tác: ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → Guardrail → Agent 3 (kiểm duyệt). Có rate limit.
- * BE trả về SSE (không phải JSON thuần) — axios phải đọc text rồi parse sự kiện `result`.
+ * Đồng sáng tác: ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → Guardrail → Agent 3 (kiểm duyệt). Check token từ BE.
+ * BE trả về JSON thường (không dùng SSE).
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null|undefined} authorIdea - Ý tưởng của tác giả (có thể null khi BE cho phép auto)
  * @param {{ chapterOrderIndex?: number, chapterId?: string }} [options] - order_index/chapterId chương đang soạn
- * @returns {Promise<{ ideaContradictionFeedback?: string, outline: string, suggestedChapterTitle?: string, finalContent: string, approved: boolean, revisionCount: number, reviewFeedback?: string }>}
+ * @returns {Promise<{ outline: string, suggestedChapterTitle?: string, finalContent: string, approved: boolean, revisionCount: number, reviewFeedback?: string, contextWarning?: string }>}
  */
 export async function coCreate(storyId, authorIdea, options = {}) {
     if (!storyId) throw new Error("StoryId là bắt buộc.");
@@ -119,53 +74,8 @@ export async function coCreate(storyId, authorIdea, options = {}) {
     if (rawChapterId != null && String(rawChapterId).trim() !== "") {
         payload.chapterId = String(rawChapterId).trim();
     }
-    const response = await axiosInstance.post(
-        "ai/co-create",
-        payload,
-        {
-            responseType: "text",
-            validateStatus: (status) => status < 600,
-        }
-    );
-
-    const body = response.data;
-    const tryJsonMessage = () => {
-        try {
-            const j = typeof body === "string" ? JSON.parse(body) : body;
-            return j?.message ?? j?.Message ?? null;
-        } catch {
-            return null;
-        }
-    };
-
-    if (response.status === 401) {
-        const msg = tryJsonMessage() || "Không xác định được người dùng. Vui lòng đăng nhập lại.";
-        const err = new Error(msg);
-        err.response = { status: 401, data: { message: msg } };
-        throw err;
-    }
-    if (response.status === 429) {
-        const msg = tryJsonMessage() || "Bạn đã đạt giới hạn sử dụng AI trong ngày.";
-        const err = new Error(msg);
-        err.response = { status: 429, data: { message: msg } };
-        throw err;
-    }
-    if (response.status === 400) {
-        const msg = tryJsonMessage() || "Yêu cầu không hợp lệ.";
-        const err = new Error(msg);
-        err.response = { status: 400, data: { message: msg } };
-        throw err;
-    }
-    if (response.status >= 400) {
-        const msg =
-            tryJsonMessage() ||
-            (typeof body === "string" && body.length < 500 ? body : `Lỗi ${response.status}`);
-        const err = new Error(msg);
-        err.response = { status: response.status, data: { message: msg } };
-        throw err;
-    }
-
-    return parseCoCreateSseResponse(typeof body === "string" ? body : String(body ?? ""));
+    const response = await axiosInstance.post("ai/co-create", payload);
+    return response.data;
 }
 
 /**
@@ -307,22 +217,12 @@ export async function checkBannedWords(payload) {
 }
 
 /**
- * Xem giới hạn sử dụng AI của user hiện tại (số lần/24h).
- * @returns {Promise<{
- *   suggestNextChapter: { limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string|null },
- *   coCreate: { limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string|null },
- *   // legacy root (mirror suggest)
- *   limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string|null
- * }>}
+ * Xem giới hạn sử dụng AI của user hiện tại.
+ * Hỗ trợ cả payload cũ (rate-limit theo ngày) và payload mới (token budget author).
  */
 export async function getAiUsageLimit() {
     const response = await axiosInstance.get("ai/usage-limit");
     const raw = response?.data ?? {};
-    // DEBUG tạm: in payload usage-limit đúng 1 lần để đối chiếu BE runtime.
-    if (typeof window !== "undefined" && !window.__aiUsageLimitLoggedOnce) {
-        window.__aiUsageLimitLoggedOnce = true;
-        console.log("[AI usage-limit raw payload]", raw);
-    }
     const payload = raw?.data ?? raw?.Data ?? raw;
     const suggestRaw =
         payload?.suggestNextChapter ??
@@ -375,6 +275,48 @@ export async function getAiUsageLimit() {
         resetsAtUtc: hasCoCreateObject ? pickVal(coCreateRaw, ["resetsAtUtc", "ResetsAtUtc", "resets_at_utc"], null) : null,
     };
 
+    const tokenBudgetRaw =
+        payload?.authorTokenBudget ??
+        payload?.AuthorTokenBudget ??
+        null;
+    const tokenBudgetBlocked = Boolean(
+        payload?.authorTokenBudgetBlocked ??
+        payload?.AuthorTokenBudgetBlocked ??
+        false
+    );
+
+    const tokenLimit = pickVal(tokenBudgetRaw, ["tokenLimit", "TokenLimit"], null);
+    const grantAmountRaw =
+        pickVal(
+            tokenBudgetRaw,
+            ["grantAmount", "GrantAmount", "monthlyGrantAmount", "MonthlyGrantAmount"],
+            null
+        ) ??
+        pickVal(
+            payload,
+            ["grantAmount", "GrantAmount", "monthlyGrantAmount", "MonthlyGrantAmount"],
+            null
+        );
+    const grantAmount = grantAmountRaw != null && Number.isFinite(Number(grantAmountRaw))
+        ? Number(grantAmountRaw)
+        : null;
+    const tokensUsed = pickNum(tokenBudgetRaw, ["tokensUsed", "TokensUsed"], 0);
+    const tokensRemainingLifetimeRaw = pickVal(
+        tokenBudgetRaw,
+        ["tokensRemainingLifetime", "TokensRemainingLifetime", "tokensRemaining", "TokensRemaining"],
+        null
+    );
+    const unlimitedLifetime = Boolean(
+        pickVal(tokenBudgetRaw, ["unlimitedLifetime", "UnlimitedLifetime"], tokenLimit == null)
+    );
+    const tokensRemainingLifetime = unlimitedLifetime
+        ? null
+        : (tokensRemainingLifetimeRaw != null && Number.isFinite(Number(tokensRemainingLifetimeRaw))
+            ? Number(tokensRemainingLifetimeRaw)
+            : (tokenLimit != null && Number.isFinite(Number(tokenLimit))
+                ? Math.max(0, Number(tokenLimit) - Number(tokensUsed))
+                : null));
+
     return {
         suggestNextChapter: suggest,
         coCreate,
@@ -383,5 +325,15 @@ export async function getAiUsageLimit() {
         usedInWindow: suggest.usedInWindow,
         remaining: suggest.remaining,
         resetsAtUtc: suggest.resetsAtUtc,
+        authorTokenBudget: tokenBudgetRaw
+            ? {
+                tokenLimit: tokenLimit != null && Number.isFinite(Number(tokenLimit)) ? Number(tokenLimit) : null,
+                grantAmount,
+                tokensUsed,
+                tokensRemainingLifetime,
+                unlimitedLifetime,
+            }
+            : null,
+        authorTokenBudgetBlocked: tokenBudgetBlocked,
     };
 }

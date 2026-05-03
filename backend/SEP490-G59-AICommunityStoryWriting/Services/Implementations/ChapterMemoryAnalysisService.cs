@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using OpenAI.Chat;
 using Repositories;
 using Repositories.Interfaces;
+using Services;
 using Services.Helpers;
 using Services.Interfaces;
 
@@ -56,8 +57,13 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
             return;
 
         var story = _storyRepository.GetById(storyId);
-        var storyTitle = story?.title ?? "";
+        if (story == null)
+            return;
 
+        // Feature hỗ trợ hệ thống: không check/trừ token.
+
+        var storyTitle = story.title ?? "";
+        //láy dữ liệu memory cũ để làm bối cảnh cho việc phân tích chương mới, giúp AI hiểu được sự phát triển của nhân vật và cốt truyện qua từng chương, từ đó đưa ra trích xuất chính xác hơn.
         var existingCharacters = _characterMemoryRepository.GetByStoryId(storyId);
         var existingState = _storyStateRepository.GetByStoryId(storyId);
 
@@ -111,6 +117,8 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
                 chapter_id = chapterId,
                 action_type = ActionType,
                 model_name = model,
+                generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+                cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
                 status = "EMPTY_RESPONSE",
                 created_at = DateTime.UtcNow
             });
@@ -119,7 +127,7 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
 
         var promptTokens = completion.Usage?.InputTokenCount ?? 0;
         var completionTokens = completion.Usage?.OutputTokenCount ?? 0;
-
+        //chuẩn hóa text đầu ra (loại bỏ markdown, giải thích nếu có) rồi parse JSON, ghi DB; log lỗi nếu có lỗi parse JSON để dễ debug prompt/system.
         try
         {
             ApplyExtractionJson(storyId, chapterId, UnwrapJsonFromMarkdown(text.Trim()));
@@ -133,6 +141,8 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
                 chapter_id = chapterId,
                 action_type = ActionType,
                 model_name = model,
+                generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+                cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
                 prompt_tokens = promptTokens,
                 completion_tokens = completionTokens,
                 total_tokens = promptTokens + completionTokens,
@@ -149,14 +159,17 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
             chapter_id = chapterId,
             action_type = ActionType,
             model_name = model,
+            generation_id = AiChatCompletionUsageHelper.GetGenerationId(completion),
+            cost_usd = AiChatCompletionUsageHelper.TryGetOpenRouterCostUsd(completion),
             prompt_tokens = promptTokens,
             completion_tokens = completionTokens,
             total_tokens = promptTokens + completionTokens,
             status = "SUCCESS",
             created_at = DateTime.UtcNow
         });
-    }
 
+    }
+    //Xây dựng bối cảnh bộ nhớ hiện tại(nhân vật + story state) dưới dạng text cho promt
     private static string BuildExistingMemoryPromptBlock(
         IReadOnlyList<story_character_memory> characters,
         story_story_state? state)

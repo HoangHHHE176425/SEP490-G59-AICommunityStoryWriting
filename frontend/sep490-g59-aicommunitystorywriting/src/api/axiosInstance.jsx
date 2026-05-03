@@ -1,13 +1,10 @@
 import axios from "axios";
 import { translateBackendMessage } from "../utils/translateBackendMessage";
 
-const apiUrl = import.meta.env.VITE_API_URL || "https://localhost:7117/api";
+const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const axiosInstance = axios.create({
     baseURL: apiUrl,
-    headers: {
-        "Content-Type": "application/json",
-    },
     withCredentials: true,
 });
 
@@ -21,6 +18,10 @@ function setAccessToken(token) {
 
 function clearAccessToken() {
     localStorage.removeItem("accessToken");
+}
+
+function extractAccessToken(payload) {
+    return payload?.accessToken ?? payload?.AccessToken ?? "";
 }
 
 function notifySessionEnded(message) {
@@ -41,6 +42,31 @@ const refreshClient = axios.create({
 
 axiosInstance.interceptors.request.use(
     (config) => {
+        const h = config.headers;
+
+        if (config.data instanceof FormData) {
+            // Không gửi Content-Type — trình duyệt thêm multipart/form-data; boundary=...
+            if (h && typeof h.setContentType === "function") {
+                h.setContentType(false);
+            } else if (h && typeof h.delete === "function") {
+                h.delete("Content-Type");
+            }
+        } else if (
+            config.data != null &&
+            typeof config.data === "object" &&
+            !(config.data instanceof URLSearchParams) &&
+            !(config.data instanceof Blob)
+        ) {
+            const hasCt =
+                (typeof h?.get === "function" && h.get("Content-Type")) ||
+                (h && (h["Content-Type"] || h["content-type"]));
+            if (!hasCt && h && typeof h.setContentType === "function") {
+                h.setContentType("application/json");
+            } else if (!hasCt && h) {
+                h["Content-Type"] = "application/json";
+            }
+        }
+
         const token = getAccessToken();
         if (token) {
             config.headers = config.headers ?? {};
@@ -116,7 +142,7 @@ axiosInstance.interceptors.response.use(
 
         try {
             const refreshRes = await refreshClient.post("/Auth/refresh");
-            const newToken = refreshRes?.data?.accessToken;
+            const newToken = extractAccessToken(refreshRes?.data);
             if (!newToken) {
                 clearAccessToken();
                 const translatedError = translateAxiosErrorMessage(error);

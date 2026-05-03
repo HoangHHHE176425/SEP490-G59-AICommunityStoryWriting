@@ -1,3 +1,5 @@
+using AIStory.API.BackgroundServices;
+using AIStory.API.Authorization;
 using AIStory.API.Configurations;
 using AIStory.API.Hubs;
 using AIStory.API.Services;
@@ -6,6 +8,9 @@ using AIStory.Services.Implementations;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -13,12 +18,12 @@ using Microsoft.OpenApi.Models;
 using Repositories;
 using Repositories.Implementations;
 using Repositories.Interfaces;
-using AIStory.API.BackgroundServices;
 using Services.Implementations;
 using Services.Implementations.Lookups;
 using Services.Integrations.PayOS;
 using Services.Interfaces;
-using System.IdentityModel.Tokens.Jwt;
+using Polly;
+using Polly.Extensions.Http;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -53,18 +58,28 @@ namespace AIStory.API
                 });
             // Đăng ký DbContext, để OnConfiguring trong StoryPlatformDbContext tự cấu hình connection string.
             builder.Services.AddDbContext<StoryPlatformDbContext>();
+
+            var corsExtraOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                ?? Array.Empty<string>();
+            var corsExtraSet = new HashSet<string>(corsExtraOrigins, StringComparer.OrdinalIgnoreCase);
+            var corsAllowLocalhost = builder.Configuration.GetValue("Cors:AllowLocalhost", builder.Environment.IsDevelopment());
+
             // CORS Configuration
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowClient", policy =>
                 {
-
                     policy.SetIsOriginAllowed(origin =>
                     {
                         if (string.IsNullOrWhiteSpace(origin)) return false;
+                        if (corsExtraSet.Contains(origin)) return true;
                         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
-                        return uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-                               || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase);
+
+                        var isLocalhost = corsAllowLocalhost &&
+                                          (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                                           || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase));
+
+                        return isLocalhost;
                     })
                         .AllowAnyMethod()
                         .AllowAnyHeader()
@@ -103,10 +118,13 @@ namespace AIStory.API
             builder.Services.AddScoped<IPolicyService, PolicyService>();
             builder.Services.AddScoped<IAdminPolicyService, AdminPolicyService>();
             builder.Services.AddScoped<IAdminUserService, AdminUserService>();
+            builder.Services.AddScoped<IAuthorAiTokenBudgetService, AuthorAiTokenBudgetService>();
+            builder.Services.AddScoped<IAuthorAiTokenAutoGrantService, AuthorAiTokenAutoGrantService>();
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
             builder.Services.AddScoped<IReviewDeadlineForfeitureService, ReviewDeadlineForfeitureService>();
             builder.Services.AddScoped<IModerationService, ModerationService>();
             builder.Services.AddHostedService<ReviewDeadlineForfeitureBackgroundService>();
+            builder.Services.AddHostedService<AuthorAiTokenAutoGrantBackgroundService>();
             builder.Services.AddScoped<IReviewEscalationService, ReviewEscalationService>();
             builder.Services.AddScoped<IAdminUnifiedEscalationService, AdminUnifiedEscalationService>();
             builder.Services.AddScoped<IStoryReportService, StoryReportService>();
@@ -115,6 +133,7 @@ namespace AIStory.API
             builder.Services.AddSingleton<IUserIdProvider, SignalRUserIdProvider>();
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
+            builder.Services.AddScoped<IAuthorizationHandler, AuthorMustResignPolicyHandler>();
 
             // AI: Story Memory Engine (RAG khi đã index) + các agent gợi ý/đồng sáng tác
             builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
@@ -134,12 +153,30 @@ namespace AIStory.API
             builder.Services.AddScoped<IAiSensitiveWordsRepository, AiSensitiveWordsRepository>();
             builder.Services.AddScoped<IAiConfigsRepository, AiConfigsRepository>();
             builder.Services.AddScoped<IAIUsageLimitConfigService, AIUsageLimitConfigService>();
+            builder.Services.AddScoped<IAdminAiUsageStatsService, AdminAiUsageStatsService>();
             builder.Services.AddScoped<IChapterCompareService, ChapterCompareService>();
             builder.Services.AddScoped<IChapterVersionAiCompareService, ChapterVersionAiCompareService>();
             builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();
 
-            // Coin / PayOS
-            builder.Services.AddHttpClient<PayOSClient>();
+            // Coin / PayOS — bounded HTTP timeout + transient retry (5xx/408) at the HttpClient layer.
+            var payosHttpTimeoutSeconds = builder.Configuration.GetValue<int?>("PayOS:HttpTimeoutSeconds") ?? 25;
+            payosHttpTimeoutSeconds = Math.Clamp(payosHttpTimeoutSeconds, 5, 120);
+            var payosDepositHttpRetryCount = builder.Configuration.GetValue<int?>("PayOS:DepositHttpRetryCount") ?? 3;
+            payosDepositHttpRetryCount = Math.Clamp(payosDepositHttpRetryCount, 0, 8);
+
+            var payosHttpBuilder = builder.Services.AddHttpClient<PayOSClient>()
+                .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(payosHttpTimeoutSeconds));
+
+            if (payosDepositHttpRetryCount > 0)
+            {
+                payosHttpBuilder.AddPolicyHandler(
+                    HttpPolicyExtensions
+                        .HandleTransientHttpError()
+                        .WaitAndRetryAsync(
+                            payosDepositHttpRetryCount,
+                            attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt))));
+            }
+
             builder.Services.AddScoped<IPayOSClient, PayOSClientAdapter>();
             builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
             builder.Services.AddHostedService<PayOSPendingOrderSyncService>();
@@ -147,6 +184,9 @@ namespace AIStory.API
             var jwtKey = builder.Configuration["Jwt:Key"];
             var jwtIssuer = builder.Configuration["Jwt:Issuer"];
             var jwtAudience = builder.Configuration["Jwt:Audience"];
+            // Keep validation defaults aligned with JwtHelper.GenerateToken().
+            if (string.IsNullOrWhiteSpace(jwtIssuer)) jwtIssuer = "AIStory.API";
+            if (string.IsNullOrWhiteSpace(jwtAudience)) jwtAudience = "AIStory.Client";
             if (!string.IsNullOrEmpty(jwtKey))
             {
                 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -180,40 +220,6 @@ namespace AIStory.API
                                     context.Token = accessToken;
                                 }
                                 return Task.CompletedTask;
-                            },
-                            OnTokenValidated = async context =>
-                            {
-                                var sub = context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
-                                          ?? context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                                if (!Guid.TryParse(sub, out var userId))
-                                {
-                                    context.Fail("Invalid token subject.");
-                                    return;
-                                }
-
-                                var db = context.HttpContext.RequestServices.GetRequiredService<StoryPlatformDbContext>();
-                                var status = await db.users
-                                    .AsNoTracking()
-                                    .Where(u => u.id == userId)
-                                    .Select(u => u.status)
-                                    .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
-
-                                if (string.IsNullOrWhiteSpace(status))
-                                {
-                                    context.Fail("User no longer exists.");
-                                    return;
-                                }
-
-                                if (string.Equals(status, "BANNED", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    context.Fail("The account has been banned.");
-                                    return;
-                                }
-
-                                if (!string.Equals(status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    context.Fail("The account is no longer active.");
-                                }
                             }
                         };
                     });
@@ -226,7 +232,13 @@ namespace AIStory.API
 
                 options.AddPolicy("AuthorOnly", policy =>
                     policy.RequireAuthenticatedUser()
-                          .RequireRole("AUTHOR", "ADMIN"));
+                          .RequireRole("AUTHOR", "ADMIN")
+                          .AddRequirements(new AuthorMustResignPolicyRequirement()));
+
+                options.AddPolicy("AuthorStrict", policy =>
+                    policy.RequireAuthenticatedUser()
+                          .RequireRole("AUTHOR")
+                          .AddRequirements(new AuthorMustResignPolicyRequirement()));
 
                 options.AddPolicy("AdminOnly", policy =>
                     policy.RequireAuthenticatedUser()
@@ -278,9 +290,33 @@ namespace AIStory.API
             // HTTP pipeline
             // =======================
 
+            // Nginx (or another reverse proxy) terminates TLS and forwards http://127.0.0.1:5000
+            var forwardedHeadersOptions = new ForwardedHeadersOptions
+            {
+                ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+            };
+            forwardedHeadersOptions.KnownNetworks.Clear();
+            forwardedHeadersOptions.KnownProxies.Clear();
+            forwardedHeadersOptions.KnownProxies.Add(System.Net.IPAddress.Loopback);
+            forwardedHeadersOptions.KnownProxies.Add(System.Net.IPAddress.IPv6Loopback);
+            app.UseForwardedHeaders(forwardedHeadersOptions);
+
             if (app.Environment.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
+            }
+
+            // Biến môi trường đọc trực tiếp (ưu tiên hơn appsettings*.Local.json đè systemd).
+            static bool EnvIsTrue(string name) =>
+                string.Equals(Environment.GetEnvironmentVariable(name), "true", StringComparison.OrdinalIgnoreCase);
+
+            var swaggerFromEnv = EnvIsTrue("Swagger__Enabled") || EnvIsTrue("Swagger__EnableInProduction");
+            var swaggerEnabled = app.Environment.IsDevelopment()
+                || swaggerFromEnv
+                || app.Configuration.GetValue("Swagger:Enabled", false)
+                || app.Configuration.GetValue("Swagger:EnableInProduction", false);
+            if (swaggerEnabled)
+            {
                 app.UseSwagger();
                 app.UseSwaggerUI(c =>
                 {
@@ -290,12 +326,30 @@ namespace AIStory.API
 
             // In Development we often run on http://localhost:5000 (no HTTPS).
             // Enabling HTTPS redirection there breaks CORS preflight (OPTIONS) due to redirects.
+            // Behind nginx with TLS, forwarded X-Forwarded-Proto keeps scheme correct so redirects behave.
             if (!app.Environment.IsDevelopment())
             {
                 app.UseHttpsRedirection();
             }
 
             app.UseStaticFiles();
+
+            // Trang FE trên Internet (vd. http://103.x) gọi API trên localhost/LAN — Chrome yêu cầu
+            // Private Network Access: preflight OPTIONS phải có Access-Control-Allow-Private-Network.
+            app.Use(async (context, next) =>
+            {
+                if (HttpMethods.IsOptions(context.Request.Method) &&
+                    context.Request.Headers.TryGetValue("Access-Control-Request-Private-Network", out var pna) &&
+                    string.Equals(pna.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.OnStarting(() =>
+                    {
+                        context.Response.Headers.Append("Access-Control-Allow-Private-Network", "true");
+                        return Task.CompletedTask;
+                    });
+                }
+                await next();
+            });
 
             // Enable CORS
             app.UseCors("AllowClient");
@@ -305,6 +359,77 @@ namespace AIStory.API
             app.MapControllers();
             app.MapHub<ModeratorHub>("/hubs/moderator");
             app.MapHub<NotificationHub>("/hubs/notifications");
+            using (var scope = app.Services.CreateScope())
+            {
+                var context = scope.ServiceProvider.GetRequiredService<StoryPlatformDbContext>();
+
+                string hashedPassword = BCrypt.Net.BCrypt.HashPassword("123456");
+
+                users CreateUser(string email, string role, int ageDays)
+                {
+                    var createdAt = DateTime.Now.AddDays(-ageDays);
+
+                    var user = new users
+                    {
+                        id = Guid.NewGuid(),
+                        email = email,
+                        password_hash = hashedPassword,
+                        role = role,
+                        status = "ACTIVE",
+                        created_at = createdAt,
+                        updated_at = createdAt
+                    };
+
+                    return user;
+                }
+
+                void AddUserWithProfile(string email, string role, string nickname, string bio, int ageDays)
+                {
+                    if (!context.users.Any(u => u.email == email))
+                    {
+                        var user = CreateUser(email, role, ageDays);
+
+                        context.users.Add(user);
+
+                        context.user_profiles.Add(new user_profiles
+                        {
+                            user_id = user.id, // FK chuẩn theo DB
+                            nickname = nickname,
+                            bio = bio,
+                            updated_at = DateTime.Now
+                        });
+                    }
+                }
+
+                // ================= ADMIN (1 account duy nhất) =================
+                AddUserWithProfile(
+                    "admin@aistory.com",
+                    "ADMIN",
+                    "Nguyễn Minh Quân",
+                    "System Administrator",
+                    500
+                );
+
+                // ================= AUTHOR =================
+                AddUserWithProfile("hoang.nguyen@aistory.com", "AUTHOR", "Hoàng Nguyễn", "Tác giả fantasy", 300);
+                AddUserWithProfile("linh.tran@aistory.com", "AUTHOR", "Linh Trần", "Tác giả ngôn tình", 280);
+                AddUserWithProfile("tuan.pham@aistory.com", "AUTHOR", "Tuấn Phạm", "Tác giả hành động", 260);
+
+                // ================= MODERATOR =================
+                AddUserWithProfile("hieu.le@aistory.com", "MODERATOR", "Hiếu Lê", "Moderator", 250);
+                AddUserWithProfile("anh.do@aistory.com", "MODERATOR", "Anh Đỗ", "Moderator", 240);
+
+                // ================= COMPLIANCE =================
+                AddUserWithProfile("thao.vo@aistory.com", "COMPLIANCE", "Thảo Võ", "Compliance", 220);
+                AddUserWithProfile("khanh.bui@aistory.com", "COMPLIANCE", "Khánh Bùi", "Compliance", 210);
+
+                // ================= USER =================
+                AddUserWithProfile("nam.nguyen@aistory.com", "USER", "Nam Nguyễn", "Độc giả mới", 10);
+                AddUserWithProfile("hoa.pham@aistory.com", "USER", "Hoa Phạm", "Đọc truyện mỗi ngày", 60);
+                AddUserWithProfile("long.tran@aistory.com", "USER", "Long Trần", "Fan truyện lâu năm", 200);
+
+                context.SaveChanges();
+            }
             app.Run();
         }
     }

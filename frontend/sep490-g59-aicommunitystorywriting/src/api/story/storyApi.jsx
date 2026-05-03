@@ -116,9 +116,7 @@ export async function createStory(data) {
     }
 
     try {
-        const response = await axiosInstance.post("/stories", formData, {
-            headers: { "Content-Type": "multipart/form-data" },
-        });
+        const response = await axiosInstance.post("/stories", formData);
         return response.data;
     } catch (err) {
         const msg = extractApiErrorMessage(err, err?.message ?? "Không thể tạo truyện. Vui lòng thử lại.");
@@ -339,9 +337,7 @@ export async function updateStory(id, data) {
         formData.append("CoverImage", coverFile);
     }
 
-    const response = await axiosInstance.put(`/stories/${id}`, formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-    });
+    const response = await axiosInstance.put(`/stories/${id}`, formData);
     return response.data;
 }
 

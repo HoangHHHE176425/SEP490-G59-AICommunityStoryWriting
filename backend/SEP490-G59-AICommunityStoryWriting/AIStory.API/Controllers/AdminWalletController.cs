@@ -84,7 +84,9 @@ namespace AIStory.API.Controllers
             // Vì chưa có cơ chế quy đổi coin -> VND ở luồng rút, endpoint sẽ trả rõ cả 2 field.
             var totalWithdrawCoins = await _db.withdraw_requests
                 .AsNoTracking()
-                .Where(w => (w.status ?? "PENDING") == "SUCCESS")
+                .Where(w =>
+                    (w.status ?? "PENDING") == "SUCCESS" ||
+                    (w.status ?? "PENDING") == "COMPLETED")
                 .SumAsync(w => (decimal?)w.amount_requested, cancellationToken) ?? 0m;
 
             var platformFeeCoins = (decimal)(platform?.balance_coin ?? 0);
@@ -534,8 +536,8 @@ namespace AIStory.API.Controllers
 
         /// <summary>
         /// Ledger hoạt động tiền (admin):
-        /// - CHAPTER_UNLOCK: platform nhận 30%, buyer trả tiền, author nhận net vào income_balance
-        /// - DONATE: ủng hộ tác giả — cùng cách chia 30% phí nền tảng / 70% thu nhập tác giả (CoinPaymentService.DonateAsync)
+        /// - CHAPTER_UNLOCK: platform nhận 70%, buyer trả tiền, author nhận net vào income_balance
+        /// - DONATE: ủng hộ tác giả — cùng cách chia 70% phí nền tảng / 30% thu nhập tác giả (CoinPaymentService.DonateAsync)
         /// - PLATFORM_WALLET_ADJ: điều chỉnh ví hệ thống
         /// - withdraw_requests: create/approve/reject (income_balance & frozen_balance)
         /// type=UNLOCK_AND_DONATE: chỉ mở khóa chương + donate (dùng cho tab lịch sử ví hệ thống).
@@ -584,10 +586,10 @@ namespace AIStory.API.Controllers
                         EventType = "UNLOCK",
                         EventTime = p.released_at ?? p.created_at ?? DateTime.MinValue,
                         // Must match ChaptersController.UnlockPaidChapter:
-                        // platformFee = (int)Math.Floor(coinPrice * 0.30m) => platform gets whole coins.
-                        PlatformDeltaCoins = (decimal)Math.Floor(p.price_paid * 0.30m),
+                        // platformFee = (int)Math.Floor(coinPrice * 0.70m) => platform gets whole coins.
+                        PlatformDeltaCoins = (decimal)Math.Floor(p.price_paid * 0.70m),
                         BuyerDeltaCoins = -(decimal)p.price_paid,
-                        AuthorIncomeDeltaCoins = (decimal)(p.price_paid - Math.Floor(p.price_paid * 0.30m)),
+                        AuthorIncomeDeltaCoins = (decimal)(p.price_paid - Math.Floor(p.price_paid * 0.70m)),
                         AuthorFrozenDeltaCoins = 0m,
                         StoryId = s.id,
                         ChapterId = c.id,

@@ -11,7 +11,15 @@ export function StoryInfoForm({
     disabledProgressOptions = [],
     /** Truyện mới: khóa dropdown trạng thái tiến độ ở «Đang ra». */
     lockStoryProgressStatus = false,
+    /** Khi readOnlyFields (vd. truyện đã public): vẫn cho sửa Trạng thái tiến độ. */
+    allowProgressStatusWhenReadOnly = false,
 }) {
+    const lockedFieldStyle = {
+        backgroundColor: '#eef2f7',
+        border: '1px solid #cbd5e1',
+        color: '#475569',
+        cursor: 'not-allowed'
+    };
 
     const statusOptions = Array.isArray(allowProgressOptions) && allowProgressOptions.length > 0
         ? allowProgressOptions
@@ -47,6 +55,8 @@ export function StoryInfoForm({
         load();
         return () => { cancelled = true; };
     }, []);
+
+    const progressStatusSelectLocked = readOnlyFields && !allowProgressStatusWhenReadOnly;
 
     const getCategoryId = (c) => (typeof c === 'object' && c?.id ? c.id : c);
     const handleCategoryToggle = (category) => {
@@ -160,10 +170,12 @@ export function StoryInfoForm({
                             style={{
                                 width: '100%',
                                 padding: '0.75rem',
-                                backgroundColor: '#f9fafb',
-                                border: '1px solid #e5e7eb',
+                                backgroundColor: readOnlyFields ? lockedFieldStyle.backgroundColor : '#f9fafb',
+                                border: readOnlyFields ? lockedFieldStyle.border : '1px solid #e5e7eb',
                                 borderRadius: '4px',
                                 fontSize: '0.875rem',
+                                color: readOnlyFields ? lockedFieldStyle.color : '#111827',
+                                cursor: readOnlyFields ? lockedFieldStyle.cursor : 'text',
                                 outline: 'none'
                             }}
                         />
@@ -177,16 +189,12 @@ export function StoryInfoForm({
                         <div style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '0.5rem',
                             padding: '0.75rem',
-                            backgroundColor: '#f9fafb',
-                            border: '1px solid #e5e7eb',
+                            backgroundColor: '#eef2f7',
+                            border: '1px solid #cbd5e1',
                             borderRadius: '4px'
                         }}>
-                            <span style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.author}</span>
-                            <button style={{ marginLeft: 'auto', padding: '0.25rem', border: 'none', background: 'none', cursor: 'pointer' }}>
-                                ✏️
-                            </button>
+                            <span style={{ fontSize: '0.875rem', color: '#475569' }}>{formData.author}</span>
                         </div>
                     </div>
 
@@ -202,11 +210,11 @@ export function StoryInfoForm({
                                     style={{
                                         width: '100%',
                                         padding: '0.75rem',
-                                        backgroundColor: '#f3f4f6',
-                                        border: '1px solid #e5e7eb',
+                                        backgroundColor: '#eef2f7',
+                                        border: '1px solid #cbd5e1',
                                         borderRadius: '4px',
                                         fontSize: '0.875rem',
-                                        color: '#111827',
+                                        color: '#475569',
                                         cursor: 'default',
                                         userSelect: 'none',
                                     }}
@@ -222,17 +230,17 @@ export function StoryInfoForm({
                                 <select
                                     value={formData.status}
                                     onChange={(e) => onChange('status', e.target.value)}
-                                    disabled={readOnlyFields}
+                                    disabled={progressStatusSelectLocked}
                                     style={{
                                         width: '100%',
                                         padding: '0.75rem',
-                                        backgroundColor: readOnlyFields ? '#f3f4f6' : '#f9fafb',
+                                        backgroundColor: progressStatusSelectLocked ? '#f3f4f6' : '#f9fafb',
                                         border: '1px solid #e5e7eb',
                                         borderRadius: '4px',
                                         fontSize: '0.875rem',
                                         outline: 'none',
                                         appearance: 'none',
-                                        cursor: readOnlyFields ? 'not-allowed' : 'pointer',
+                                        cursor: progressStatusSelectLocked ? 'not-allowed' : 'pointer',
                                     }}
                                 >
                                     {statusOptions.map((opt) => (
@@ -268,13 +276,14 @@ export function StoryInfoForm({
                                 style={{
                                     width: '100%',
                                     padding: '0.75rem',
-                                    backgroundColor: '#f9fafb',
-                                    border: '1px solid #e5e7eb',
+                                    backgroundColor: readOnlyFields ? lockedFieldStyle.backgroundColor : '#f9fafb',
+                                    border: readOnlyFields ? lockedFieldStyle.border : '1px solid #e5e7eb',
                                     borderRadius: '4px',
                                     fontSize: '0.875rem',
+                                    color: readOnlyFields ? lockedFieldStyle.color : '#111827',
                                     outline: 'none',
                                     appearance: 'none',
-                                    cursor: readOnlyFields ? 'not-allowed' : 'pointer'
+                                    cursor: readOnlyFields ? lockedFieldStyle.cursor : 'pointer'
                                 }}
                             >
                                 {ageRatings.map(opt => (
@@ -359,12 +368,14 @@ export function StoryInfoForm({
                             style={{
                                 width: '100%',
                                 padding: '0.75rem',
-                                backgroundColor: '#f9fafb',
-                                border: '1px solid #e5e7eb',
+                                backgroundColor: readOnlyFields ? lockedFieldStyle.backgroundColor : '#f9fafb',
+                                border: readOnlyFields ? lockedFieldStyle.border : '1px solid #e5e7eb',
                                 borderRadius: '4px',
                                 fontSize: '0.875rem',
+                                color: readOnlyFields ? lockedFieldStyle.color : '#111827',
                                 outline: 'none',
                                 resize: 'vertical',
+                                cursor: readOnlyFields ? lockedFieldStyle.cursor : 'text',
                                 fontFamily: 'inherit'
                             }}
                         />

@@ -25,7 +25,7 @@ import {
     followStory,
     unfollowStory,
 } from '../../api/story/storyApi';
-import { getChapters } from '../../api/chapter/chapterApi';
+import { getChapters, getChapterById, getChaptersByStoryId } from '../../api/chapter/chapterApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
 import { getAuthorFollowersCount } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
@@ -50,6 +50,41 @@ function formatTimeAgo(dateStr) {
     if (diffHours < 24) return `${diffHours} giờ trước`;
     if (diffDays < 7) return `${diffDays} ngày trước`;
     return date.toLocaleDateString('vi-VN');
+}
+
+function parseAiPercent(raw) {
+    if (raw == null) return 0;
+    if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
+    if (typeof raw === 'string') {
+        const normalized = raw.replace(',', '.').trim();
+        const direct = Number(normalized.replace('%', '').trim());
+        if (Number.isFinite(direct)) return direct;
+        const match = normalized.match(/-?\d+(?:\.\d+)?/);
+        const n = match ? Number(match[0]) : NaN;
+        return Number.isFinite(n) ? n : 0;
+    }
+    return 0;
+}
+
+function extractChapterAiPercent(chapter) {
+    const candidates = [
+        chapter?.aiContributionRatio,
+        chapter?.AiContributionRatio,
+        chapter?.aiSimilarityPercent,
+        chapter?.AiSimilarityPercent,
+        chapter?.aiContribution,
+        chapter?.AiContribution,
+        chapter?.aiSimilarity,
+        chapter?.AiSimilarity,
+        chapter?.aiContributionLabel,
+        chapter?.AiContributionLabel,
+        chapter?.ai_contribution_ratio,
+        chapter?.ai_similarity_percent,
+    ];
+    return candidates
+        .map((x) => parseAiPercent(x))
+        .filter((x) => Number.isFinite(x) && x > 0)
+        .reduce((max, x) => (x > max ? x : max), 0);
 }
 
 export function StoryDetail() {
@@ -178,9 +213,107 @@ export function StoryDetail() {
                     getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
                 ]);
             (inCooldown ? loadData() : recordStoryView(storyId).then(() => { setStoryViewCache(storyId, viewerKey); return loadData(); }))
-                .then(([storyRes, chaptersRes]) => {
+                .then(async ([storyRes, chaptersRes]) => {
                     if (cancelled) return;
                     const rawItems = Array.isArray(chaptersRes) ? chaptersRes : (chaptersRes?.items ?? chaptersRes?.Items ?? []);
+                    let chapterItemsWithAi = await Promise.all(
+                        rawItems.map(async (ch) => {
+                            const chapterId = ch?.id ?? ch?.Id;
+                            const accessType = (ch.accessType ?? ch.AccessType ?? 'FREE').toUpperCase();
+                            const coinPrice = Number(ch.coinPrice ?? ch.CoinPrice ?? 0) || 0;
+                            const isPaid = accessType === 'PAID' && coinPrice > 0;
+
+                            const hasAiField =
+                                ch?.aiContributionRatio != null ||
+                                ch?.AiContributionRatio != null ||
+                                ch?.aiSimilarityPercent != null ||
+                                ch?.AiSimilarityPercent != null;
+
+                            if (!chapterId) return ch;
+
+                            if (!hasAiField) {
+                                try {
+                                    const details = await getChapterById(chapterId);
+                                    return { ...ch, ...details };
+                                } catch {
+                                    return ch;
+                                }
+                            }
+
+                            if (isPaid && user?.id) {
+                                try {
+                                    const details = await getChapterById(chapterId);
+                                    const rawUn =
+                                        details?.isUnlocked ??
+                                        details?.IsUnlocked ??
+                                        details?.unlocked ??
+                                        details?.Unlocked;
+                                    return {
+                                        ...ch,
+                                        isUnlocked: Boolean(rawUn),
+                                        IsUnlocked: Boolean(rawUn),
+                                    };
+                                } catch {
+                                    return ch;
+                                }
+                            }
+
+                            return ch;
+                        })
+                    );
+                    const hasAnyAiField = chapterItemsWithAi.some((ch) => extractChapterAiPercent(ch) > 0);
+                    if (!hasAnyAiField && storyId) {
+                        try {
+                            const fullChapterList = await getChaptersByStoryId(storyId);
+                            const fullItems = Array.isArray(fullChapterList) ? fullChapterList : [];
+                            const aiByChapterId = new Map(
+                                fullItems.map((ch) => [String(ch?.id ?? ch?.Id ?? ''), extractChapterAiPercent(ch)])
+                            );
+                            chapterItemsWithAi = chapterItemsWithAi.map((ch) => {
+                                const chapterId = String(ch?.id ?? ch?.Id ?? '');
+                                const aiPercent = aiByChapterId.get(chapterId) ?? 0;
+                                if (aiPercent <= 0) return ch;
+                                return { ...ch, aiContributionRatio: aiPercent };
+                            });
+                        } catch {
+                            // keep original chapter list if fallback endpoint fails
+                        }
+                    }
+                    const hasAnyAiAfterByStoryId = chapterItemsWithAi.some((ch) => extractChapterAiPercent(ch) > 0);
+                    if (!hasAnyAiAfterByStoryId && storyId) {
+                        try {
+                            // Fallback cuối: một số môi trường không trả AI% khi lọc status=PUBLISHED.
+                            // Lấy thêm danh sách chapter không lọc status rồi map AI% theo id/order.
+                            const allChaptersRes = await getChapters({ storyId, pageSize: 500 });
+                            const allItems = Array.isArray(allChaptersRes)
+                                ? allChaptersRes
+                                : (allChaptersRes?.items ?? allChaptersRes?.Items ?? []);
+
+                            const aiById = new Map();
+                            const aiByOrder = new Map();
+                            allItems.forEach((ch) => {
+                                const aiPercent = extractChapterAiPercent(ch);
+                                if (!(aiPercent > 0)) return;
+                                const id = String(ch?.id ?? ch?.Id ?? '');
+                                const order = Number(ch?.orderIndex ?? ch?.OrderIndex ?? -1);
+                                if (id) aiById.set(id, aiPercent);
+                                if (Number.isFinite(order) && order >= 0) aiByOrder.set(order, aiPercent);
+                            });
+
+                            chapterItemsWithAi = chapterItemsWithAi.map((ch) => {
+                                const id = String(ch?.id ?? ch?.Id ?? '');
+                                const order = Number(ch?.orderIndex ?? ch?.OrderIndex ?? -1);
+                                const aiPercent = (id && aiById.get(id)) ?? (Number.isFinite(order) ? aiByOrder.get(order) : 0) ?? 0;
+                                if (!(aiPercent > 0)) return ch;
+                                return {
+                                    ...ch,
+                                    aiContributionRatio: aiPercent,
+                                };
+                            });
+                        } catch {
+                            // keep original chapter list if this fallback fails
+                        }
+                    }
                     const categoryNamesStr = storyRes?.categoryNames ?? storyRes?.CategoryNames ?? '';
                     const genreArr = categoryNamesStr
                         ? String(categoryNamesStr).split(',').map((s) => s.trim()).filter(Boolean)
@@ -188,7 +321,13 @@ export function StoryDetail() {
                     const coverPath = storyRes?.coverImage ?? storyRes?.CoverImage;
                     const totalViews = Number(storyRes?.totalViews ?? storyRes?.TotalViews ?? 0);
                     const totalComments = Number(storyRes?.totalComments ?? storyRes?.TotalComments ?? 0);
-                    const totalChapters = rawItems.length;
+                    const totalChapters = chapterItemsWithAi.length;
+                    const storyUsesAiRaw = storyRes?.usesAi ?? storyRes?.UsesAi;
+                    const chapterAiRatios = chapterItemsWithAi
+                        .map((ch) => extractChapterAiPercent(ch))
+                        .filter((x) => Number.isFinite(x) && x > 0);
+                    const hasAiAssistedChapter = chapterAiRatios.length > 0;
+                    const storyUsesAi = storyUsesAiRaw === true || hasAiAssistedChapter;
                     const authorId = storyRes?.authorId ?? storyRes?.AuthorId;
                     const categoryIdsRaw =
                         storyRes?.categoryIds ??
@@ -234,9 +373,11 @@ export function StoryDetail() {
                         lastReadChapterTitle: storyRes?.lastReadChapterTitle ?? storyRes?.LastReadChapterTitle ?? null,
                         lastReadAt: (storyRes?.lastReadAt ?? storyRes?.LastReadAt) ? formatTimeAgo(storyRes?.lastReadAt ?? storyRes?.LastReadAt) : null,
                         categoryIds,
+                        commentsDisabled: !!(storyRes?.commentsDisabled ?? storyRes?.CommentsDisabled),
+                        usesAi: storyUsesAi,
                     };
                     const newCount = 3; // số chương mới nhất được gắn nhãn MỚI
-                    setChapters(rawItems.map((ch, idx) => {
+                    setChapters(chapterItemsWithAi.map((ch, idx) => {
                         const orderIndex = ch.orderIndex ?? ch.OrderIndex ?? idx;
                         const num = orderIndex + 1;
                         const updatedAt = ch.updatedAt ?? ch.UpdatedAt ?? ch.publishedAt ?? ch.PublishedAt;
@@ -255,6 +396,7 @@ export function StoryDetail() {
                             false
                         );
                         const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && (unlockKnown ? !isUnlocked : true);
+                        const aiContributionRatio = extractChapterAiPercent(ch);
                         return {
                             id: num,
                             chapterId: ch.id ?? ch.Id,
@@ -262,11 +404,14 @@ export function StoryDetail() {
                             time: updatedAt ? formatTimeAgo(updatedAt) : '',
                             views: Number(ch.viewCount ?? ch.ViewCount ?? ch.views ?? 0) || 0,
                             commentCount: Number(ch.commentCount ?? ch.CommentCount ?? 0) || 0,
-                            isNew: idx >= rawItems.length - newCount,
+                            isNew: idx >= chapterItemsWithAi.length - newCount,
                             isLocked: isPaidLocked,
+                            isUnlocked,
                             unlockKnown,
                             accessType,
                             coinPrice,
+                            aiContributionRatio,
+                            isAiAssisted: aiContributionRatio > 0,
                         };
                     }));
                     if (!authorId) {
@@ -320,7 +465,7 @@ export function StoryDetail() {
             cancelled = true;
             clearTimeout(id);
         };
-    }, [storyId, viewerKey]);
+    }, [storyId, viewerKey, user?.id]);
 
     useEffect(() => {
         let cancelled = false;
@@ -443,6 +588,13 @@ export function StoryDetail() {
         };
     }, [user?.id, reviews]);
 
+    const isStoryOwner = useMemo(() => {
+        if (!user?.id || !story?.author) return false;
+        const uid = String(user.id).toLowerCase();
+        const aid = String(story.author?.id ?? story.author?.userId ?? '').toLowerCase();
+        return !!aid && uid === aid;
+    }, [user?.id, story?.author]);
+
     /** Đồng bộ với BE (READ_CHAPTER): có tiến độ đọc chương từ getStoryById. */
     const hasReadAnyChapter = Boolean(story?.lastReadChapterId);
 
@@ -457,6 +609,10 @@ export function StoryDetail() {
 
     const handleAddComment = async (content, parentId) => {
         if (!storyId) return;
+        if (story?.commentsDisabled) {
+            setCommentError('Truyện này đang trong quá trình xử lý vi phạm nên hiện không thể bình luận.');
+            return;
+        }
         setCommentError(null);
         try {
             await addStoryComment(storyId, { content: content.trim(), parentId: parentId || undefined });
@@ -494,6 +650,10 @@ export function StoryDetail() {
 
     const handleSubmitRating = async (starValue, reviewText) => {
         if (!storyId) return;
+        if (isStoryOwner) {
+            setRatingError('Không thể tự đánh giá.');
+            return;
+        }
         if (!user?.id) {
             setRatingError('Vui lòng đăng nhập để đánh giá.');
             return;
@@ -526,6 +686,10 @@ export function StoryDetail() {
 
     const handleOpenRating = () => {
         if (hasUserRated) return; // Mỗi user chỉ được đánh giá 1 lần
+        if (isStoryOwner) {
+            showToast('Không thể tự đánh giá.', 'warning');
+            return;
+        }
         if (!user?.id) {
             showToast('Vui lòng đăng nhập để đánh giá.', 'warning');
             return;
@@ -555,6 +719,10 @@ export function StoryDetail() {
 
     const handleToggleFollow = async () => {
         if (!storyId) return;
+        if (isStoryOwner) {
+            showToast('Bạn không thể theo dõi truyện của chính mình.', 'warning');
+            return;
+        }
         if (!user?.id) {
             showToast('Vui lòng đăng nhập để theo dõi truyện.', 'warning');
             return;
@@ -684,6 +852,7 @@ export function StoryDetail() {
                             userRatingStars={userRatingStars}
                             isLoggedIn={!!user?.id}
                             hasReadAnyChapter={hasReadAnyChapter}
+                            isStoryOwner={isStoryOwner}
                             onOpenReport={handleOpenStoryReport}
                             onReadStory={() => {
                                 const first = chapters[0];
@@ -737,6 +906,7 @@ export function StoryDetail() {
                                         storyId={storyId}
                                         comments={comments}
                                         isLoggedIn={!!user?.id}
+                                        commentsDisabled={!!story?.commentsDisabled}
                                         commentError={commentError}
                                         commentsLoading={commentsLoading}
                                         onSubmitComment={handleAddComment}

@@ -126,7 +126,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Tạo chapter mới - Chỉ AUTHOR.</summary>
         [HttpPost]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Create([FromBody] CreateChapterRequestDto request)
         {
             try
@@ -250,7 +250,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Unlock chapter trả phí: trừ coin người mua + chia 30% platform / 70% author.</summary>
+        /// <summary>Unlock chapter trả phí: trừ coin người mua + chia 70% platform / 30% author.</summary>
         [HttpPost("{id:guid}/unlock")]
         [Authorize]
         public async Task<IActionResult> UnlockPaidChapter(Guid id, CancellationToken cancellationToken)
@@ -282,8 +282,8 @@ namespace AIStory.API.Controllers
             if (isAuthor)
                 return Ok(new { unlocked = true, message = "Tác giả có quyền đọc miễn phí." });
 
-            // Platform fee: 30% system, 70% author.
-            var platformFee = (int)Math.Floor(coinPrice * 0.30m);
+            // Platform fee: 70% system, 30% author.
+            var platformFee = (int)Math.Floor(coinPrice * 0.70m);
             platformFee = Math.Clamp(platformFee, 0, coinPrice);
             var authorNet = coinPrice - platformFee;
 
@@ -388,7 +388,7 @@ namespace AIStory.API.Controllers
                         escrow_status = "RELEASED",
                         released_at = DateTime.UtcNow,
                         // DB type is decimal(5,2); store platform fee as percent with 2 decimals.
-                        platform_fee_ratio = 30.00m,
+                        platform_fee_ratio = 70.00m,
                         created_at = DateTime.UtcNow
                     };
                     db.purchases.Add(purchase);
@@ -511,6 +511,11 @@ namespace AIStory.API.Controllers
                 var story = StoryDAO.GetById(storyId);
                 if (story == null || !string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
                     return BadRequest(new { message = "Chỉ có thể comment chapter của truyện đã PUBLISHED." });
+                if (story.comments_disabled)
+                    return BadRequest(new
+                    {
+                        message = "Truyện này đang trong quá trình xử lý vi phạm nên hiện không thể bình luận."
+                    });
                 if (!UserActivityLogDAO.HasReadAnyChapterOfStory(userId.Value, storyId))
                     return BadRequest(new { message = "Bạn cần đọc ít nhất một chapter của truyện trước khi comment." });
 
@@ -654,6 +659,7 @@ namespace AIStory.API.Controllers
                 ParentId = c.parent_id,
                 UserId = c.user_id ?? Guid.Empty,
                 UserDisplayName = display,
+                UserAvatarUrl = c.userNavigation?.user_profiles?.avatar_url,
                 UserRole = ResolveCommentDisplayUserRole(c.userNavigation?.role, c.user_id, storyAuthorId),
                 UserCreatedAt = c.userNavigation?.created_at,
                 Content = content,
@@ -667,7 +673,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Cập nhật chapter - Chỉ AUTHOR (chỉ được sửa chapter của chính mình)</summary>
         [HttpPut("{id:guid}")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Update(Guid id, [FromBody] UpdateChapterRequestDto request)
         {
             try
@@ -691,7 +697,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Xóa chapter (chỉ DRAFT). Nếu có phiên bản (chapter_versions), lần đầu trả 409 với code CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED; gọi lại với deleteIncludingVersions=true sau khi user xác nhận. Nội dung ai_generated_content của chương cũng bị xóa khi xóa thành công.</summary>
         [HttpDelete("{id:guid}")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Delete(Guid id, [FromQuery] bool deleteIncludingVersions = false)
         {
             try
@@ -722,7 +728,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Publish chapter - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/publish")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Publish(Guid id)
         {
             try
@@ -742,7 +748,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Unpublish chapter - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/unpublish")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Unpublish(Guid id)
         {
             try
@@ -762,7 +768,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Sắp xếp lại thứ tự chapter - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/reorder")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Reorder(Guid id, [FromBody] int newOrderIndex)
         {
             try
@@ -782,7 +788,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Xem lý do từ chối chapter - Chỉ AUTHOR (chỉ chapter thuộc truyện của mình).</summary>
         [HttpGet("{id:guid}/rejection-reason")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult GetRejectionReason(Guid id)
         {
             try
@@ -812,7 +818,7 @@ namespace AIStory.API.Controllers
         // ---------- Chapter Versions (AUTHOR) ----------
         /// <summary>Lấy danh sách version của chapter. Chỉ AUTHOR. Bao gồm cả version đã xuất bản (PUBLISHED) — vẫn hiển thị trong danh sách, không ẩn/xóa.</summary>
         [HttpGet("{chapterId:guid}/versions")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult GetChapterVersions(Guid chapterId)
         {
             var list = _chapterVersionService.GetByChapterId(chapterId).ToList();
@@ -821,7 +827,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Lấy chi tiết một version. Chỉ AUTHOR.</summary>
         [HttpGet("{chapterId:guid}/versions/{versionId:guid}")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult GetChapterVersion(Guid chapterId, Guid versionId)
         {
             var v = _chapterVersionService.GetById(versionId);
@@ -832,7 +838,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Tạo version mới cho chapter. Chỉ AUTHOR.</summary>
         [HttpPost("{chapterId:guid}/versions")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult CreateChapterVersion(Guid chapterId, [FromBody] CreateChapterVersionRequestDto request)
         {
             var authorId = GetCurrentUserId();
@@ -851,7 +857,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Cập nhật version (chỉ DRAFT). Chỉ AUTHOR.</summary>
         [HttpPut("{chapterId:guid}/versions/{versionId:guid}")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult UpdateChapterVersion(Guid chapterId, Guid versionId, [FromBody] UpdateChapterVersionRequestDto request)
         {
             var authorId = GetCurrentUserId();
@@ -870,7 +876,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Xóa version (chỉ DRAFT). Chỉ AUTHOR.</summary>
         [HttpDelete("{chapterId:guid}/versions/{versionId:guid}")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult DeleteChapterVersion(Guid chapterId, Guid versionId)
         {
             var authorId = GetCurrentUserId();
@@ -887,7 +893,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Gửi duyệt version: áp dụng nội dung version lên chapter và chuyển chapter sang PENDING_REVIEW. Chỉ AUTHOR.</summary>
         [HttpPost("{chapterId:guid}/versions/{versionId:guid}/submit")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult SubmitChapterVersion(Guid chapterId, Guid versionId)
         {
             var authorId = GetCurrentUserId();
@@ -904,7 +910,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Hủy gửi duyệt version: đưa version và chapter về DRAFT. Chỉ AUTHOR, chỉ version PENDING_REVIEW.</summary>
         [HttpPost("{chapterId:guid}/versions/{versionId:guid}/unsubmit")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult UnsubmitChapterVersion(Guid chapterId, Guid versionId)
         {
             var authorId = GetCurrentUserId();

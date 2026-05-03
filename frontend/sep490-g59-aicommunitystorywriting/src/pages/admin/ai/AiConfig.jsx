@@ -2,30 +2,251 @@ import { useEffect, useMemo, useState } from 'react';
 import { Brain } from 'lucide-react';
 import {
     addAdminBannedWord,
+    createAdminAuthorAiTokenAutoGrantRule,
+    getAdminAuthorAiTokenAutoGrantRules,
     deleteAdminBannedWord,
-    getAdminAiUsageLimit,
+    getAdminAiGenerationsDaily,
+    getAdminAiOpenRouterGeneration,
+    getAdminAiRequestLogs,
     getAdminBannedWords,
-    setAdminAiUsageLimit,
+    runNowAdminAuthorAiTokenAutoGrantRule,
+    updateAdminAuthorAiTokenAutoGrantRule,
 } from '../../../api/admin/aiConfigApi';
 
+const toUtcInputString = (d) => {
+    if (!(d instanceof Date)) return '';
+    if (Number.isNaN(d.getTime())) return '';
+    const dt = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return dt.toISOString().slice(0, 16);
+};
+
+const defaultToUtc = toUtcInputString(new Date());
+const defaultFromUtc = toUtcInputString(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+const defaultAutoGrantAmount = 100000;
+
+
+const formatDateTimeVi = (value) => {
+    if (!value) return '—';
+    let d;
+    if (typeof value === 'string') {
+        const raw = value.trim();
+        const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(raw);
+        // Backend có thể trả "CreatedAtUtc" nhưng thiếu hậu tố timezone.
+        // Khi thiếu, ép parse như UTC để tránh bị hiểu nhầm là local time.
+        d = new Date(hasTimezone ? raw : `${raw}Z`);
+    } else {
+        d = new Date(value);
+    }
+    if (Number.isNaN(d.getTime())) return String(value);
+    return d.toLocaleString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        hour12: false,
+    });
+};
+
+const formatUsdNullable = (value) => {
+    if (value == null || value === '') return '—';
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    return n.toLocaleString('en-US', { maximumFractionDigits: 6 });
+};
+
+const normalizeGenerationDetailPayload = (payload) => {
+    if (payload == null) return null;
+    if (typeof payload === 'string') {
+        try {
+            return JSON.parse(payload);
+        } catch {
+            return { raw: payload };
+        }
+    }
+    return payload;
+};
+
+const fmtIntOrDash = (v) => {
+    if (v == null || v === '') return '—';
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '—';
+    return Math.trunc(n).toLocaleString('vi-VN');
+};
+
+const pickArrayLike = (...candidates) => {
+    for (const c of candidates) {
+        if (Array.isArray(c)) return c;
+    }
+    return [];
+};
+
+const autoGrantLimitFieldFromPeriodKind = (periodKind) => {
+    const s = String(periodKind || '').trim().toLowerCase();
+    if (s === 'daily_utc') return 'per_day';
+    if (s === 'weekly_utc') return 'per_week';
+    return 'per_month';
+};
+
+const autoGrantPeriodKindLabelVi = (periodKind) => {
+    const s = String(periodKind || '').trim().toLowerCase();
+    if (s === 'daily_utc') return 'Ngày (UTC)';
+    if (s === 'weekly_utc') return 'Tuần (UTC)';
+    if (s === 'monthly_utc') return 'Tháng (UTC)';
+    return s || '—';
+};
+
+const autoGrantLimitFieldLabelVi = (field) => {
+    const s = String(field || '').trim().toLowerCase();
+    if (s === 'per_day') return 'Theo ngày';
+    if (s === 'per_week') return 'Theo tuần';
+    if (s === 'per_month') return 'Theo tháng';
+    if (s === 'lifetime') return 'Tích lũy';
+    return s || '—';
+};
+
+const normalizeAutoGrantRule = (x) => {
+    const sel = x?.selectedUserIds ?? x?.SelectedUserIds ?? [];
+    return {
+        id: x?.id ?? x?.Id ?? '',
+        isEnabled: !!(x?.isEnabled ?? x?.IsEnabled),
+        displayName: x?.displayName ?? x?.DisplayName ?? '',
+        periodKind: String(x?.periodKind ?? x?.PeriodKind ?? 'monthly_utc').toLowerCase(),
+        grantLimitField: String(x?.grantLimitField ?? x?.GrantLimitField ?? ''),
+        grantAmount: Number(x?.grantAmount ?? x?.GrantAmount ?? 0) || 0,
+        applyToAllAuthors: !!(x?.applyToAllAuthors ?? x?.ApplyToAllAuthors),
+        selectedUserIds: Array.isArray(sel) ? sel : [],
+        createdAtUtc: x?.createdAtUtc ?? x?.CreatedAtUtc ?? x?.createdAt ?? x?.CreatedAt ?? null,
+        lastRunAtUtc: x?.lastRunAtUtc ?? x?.LastRunAtUtc ?? null,
+    };
+};
+
 export function AiConfig() {
-    // Limits & banned words
-    const [dailyLimit, setDailyLimit] = useState(3);
     const [bannedWordInput, setBannedWordInput] = useState('');
     const [bannedWords, setBannedWords] = useState([]);
+    const [autoGrantRules, setAutoGrantRules] = useState([]);
+    const [autoGrantLoading, setAutoGrantLoading] = useState(false);
+    const [savingAutoGrant, setSavingAutoGrant] = useState(false);
+    const [runningAutoGrantNow, setRunningAutoGrantNow] = useState(false);
+    const [applyNowConfirmOpen, setApplyNowConfirmOpen] = useState(false);
+    const [updateAmountConfirmOpen, setUpdateAmountConfirmOpen] = useState(false);
+    const [toggleConfirmOpen, setToggleConfirmOpen] = useState(false);
+    const [toggleConfirmNextEnabled, setToggleConfirmNextEnabled] = useState(true);
+    const [autoGrantForm, setAutoGrantForm] = useState({
+        grantAmount: '100000',
+        nextRunAtLocal: '',
+    });
+
+    const [genFilter, setGenFilter] = useState({
+        fromUtc: defaultFromUtc,
+        toUtc: defaultToUtc,
+        modelName: '',
+        status: '',
+        actionType: '',
+        page: 1,
+        pageSize: 25,
+    });
+    const [generationRows, setGenerationRows] = useState([]);
+    const [generationTotal, setGenerationTotal] = useState(0);
+    const [dailyRows, setDailyRows] = useState([]);
+    const [genLoading, setGenLoading] = useState(false);
+    const [generationUserSearch, setGenerationUserSearch] = useState('');
+    const [generationDetail, setGenerationDetail] = useState(null);
+    const [generationDetailId, setGenerationDetailId] = useState('');
+    const [detailLoadingId, setDetailLoadingId] = useState(null);
+    const [selectedLogUserEmail, setSelectedLogUserEmail] = useState('');
+    const [selectedUserLogPage, setSelectedUserLogPage] = useState(1);
 
     const [loadingConfig, setLoadingConfig] = useState(true);
-    const [savingLimit, setSavingLimit] = useState(false);
     const [savingWord, setSavingWord] = useState(false);
     const [deletingWordId, setDeletingWordId] = useState(null);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
-    const limitValue = useMemo(() => {
-        const n = Number(dailyLimit);
-        if (!Number.isFinite(n)) return 0;
-        return Math.max(1, Math.min(100, Math.trunc(n)));
-    }, [dailyLimit]);
+    const dailyChartRows = useMemo(() => {
+        const normalized = (dailyRows || []).map((d) => {
+            const day = String(d?.dayUtc ?? d?.date ?? d?.Date ?? d?.day ?? '').slice(0, 10);
+            const count = Number(d?.count ?? d?.Count ?? 0) || 0;
+            return { day, count };
+        }).filter((x) => x.day);
+        const max = normalized.reduce((m, x) => Math.max(m, x.count), 0);
+        return normalized.map((x) => ({
+            ...x,
+            pct: max > 0 ? Math.max(4, Math.round((x.count / max) * 100)) : 0,
+        }));
+    }, [dailyRows]);
+    const generationUserRows = useMemo(() => {
+        const map = new Map();
+        (generationRows || []).forEach((r) => {
+            const email = String(r?.userEmail ?? r?.UserEmail ?? '—').trim() || '—';
+            const prompt = Number(r?.promptTokens ?? r?.PromptTokens ?? r?.inputTokens ?? r?.InputTokens ?? 0) || 0;
+            const completion = Number(r?.completionTokens ?? r?.CompletionTokens ?? r?.outputTokens ?? r?.OutputTokens ?? 0) || 0;
+            const costRaw = r?.costUsd ?? r?.CostUsd;
+            const cost = Number(costRaw);
+            const prev = map.get(email) ?? { userEmail: email, totalPromptTokens: 0, totalCompletionTokens: 0, totalCostUsd: 0, hasAnyCost: false, requestCount: 0 };
+            prev.totalPromptTokens += prompt;
+            prev.totalCompletionTokens += completion;
+            if (Number.isFinite(cost)) {
+                prev.totalCostUsd += cost;
+                prev.hasAnyCost = true;
+            }
+            prev.requestCount += 1;
+            map.set(email, prev);
+        });
+        return Array.from(map.values()).sort((a, b) => b.requestCount - a.requestCount);
+    }, [generationRows]);
+    const filteredGenerationUserRows = useMemo(() => {
+        const q = String(generationUserSearch || '').trim().toLowerCase();
+        if (!q) return generationUserRows;
+        return generationUserRows.filter((r) => String(r.userEmail || '').toLowerCase().includes(q));
+    }, [generationUserRows, generationUserSearch]);
+    const generationUserTotalPages = Math.max(1, Math.ceil((filteredGenerationUserRows.length || 0) / (Number(genFilter.pageSize) || 25)));
+    const generationUserPagedRows = useMemo(() => {
+        const pageSize = Number(genFilter.pageSize) || 25;
+        const safePage = Math.min(Math.max(1, Number(genFilter.page) || 1), generationUserTotalPages);
+        const start = (safePage - 1) * pageSize;
+        return filteredGenerationUserRows.slice(start, start + pageSize);
+    }, [filteredGenerationUserRows, genFilter.page, genFilter.pageSize, generationUserTotalPages]);
+    const selectedUserLogs = useMemo(() => {
+        if (!selectedLogUserEmail) return [];
+        return (generationRows || [])
+            .filter((r) => String(r?.userEmail ?? r?.UserEmail ?? '—').trim() === selectedLogUserEmail)
+            .sort((a, b) => {
+                const da = new Date(a?.createdAtUtc ?? a?.CreatedAtUtc ?? a?.occurredAtUtc ?? a?.OccurredAtUtc ?? a?.createdAt ?? a?.CreatedAt ?? 0).getTime();
+                const db = new Date(b?.createdAtUtc ?? b?.CreatedAtUtc ?? b?.occurredAtUtc ?? b?.OccurredAtUtc ?? b?.createdAt ?? b?.CreatedAt ?? 0).getTime();
+                return db - da;
+            });
+    }, [generationRows, selectedLogUserEmail]);
+    const selectedUserLogPageSize = 20;
+    const selectedUserLogTotalPages = Math.max(1, Math.ceil(selectedUserLogs.length / selectedUserLogPageSize));
+    const selectedUserLogPagedRows = useMemo(() => {
+        const safePage = Math.min(Math.max(1, Number(selectedUserLogPage) || 1), selectedUserLogTotalPages);
+        const start = (safePage - 1) * selectedUserLogPageSize;
+        return selectedUserLogs.slice(start, start + selectedUserLogPageSize);
+    }, [selectedUserLogs, selectedUserLogPage, selectedUserLogTotalPages]);
+
+    useEffect(() => {
+        setSelectedUserLogPage(1);
+    }, [selectedLogUserEmail]);
+    const autoGrantFormError = useMemo(() => {
+        const raw = String(autoGrantForm.grantAmount ?? '').trim();
+        // Cho phép để trống: sẽ fallback ở bước submit/update.
+        if (!raw) return '';
+        const amount = Number(raw);
+        if (!Number.isInteger(amount) || amount <= 0) {
+            return 'Số token cấp phải là số nguyên > 0.';
+        }
+        return '';
+    }, [autoGrantForm]);
+    const managedAutoGrantRule = useMemo(() => {
+        const list = Array.isArray(autoGrantRules) ? autoGrantRules : [];
+        return list[0] || null;
+    }, [autoGrantRules]);
+    const hasManagedAutoGrantRule = !!managedAutoGrantRule?.id;
+    const applyNowFormError = useMemo(() => {
+        if (hasManagedAutoGrantRule) return '';
+        const amountRaw = String(autoGrantForm.grantAmount ?? '').trim();
+        if (!amountRaw) return 'Vui lòng nhập số token cấp trước khi áp dụng ngay.';
+        const amount = Number(amountRaw);
+        if (!Number.isInteger(amount) || amount <= 0) return 'Số token cấp phải là số nguyên > 0.';
+        return '';
+    }, [hasManagedAutoGrantRule, autoGrantForm.grantAmount, autoGrantForm.nextRunAtLocal]);
 
     useEffect(() => {
         let mounted = true;
@@ -35,15 +256,18 @@ export function AiConfig() {
                 setSuccess('');
                 setLoadingConfig(true);
 
-                const [limitRes, wordsRes] = await Promise.all([
-                    getAdminAiUsageLimit(),
+                const [wordsResult] = await Promise.allSettled([
                     getAdminBannedWords('BannedWord'),
                 ]);
 
                 if (!mounted) return;
-                const max = Number(limitRes?.maxRequestsPerDay);
-                if (Number.isFinite(max) && max > 0) setDailyLimit(max);
-                setBannedWords(Array.isArray(wordsRes) ? wordsRes : []);
+
+                if (wordsResult.status === 'fulfilled') {
+                    setBannedWords(Array.isArray(wordsResult.value) ? wordsResult.value : []);
+                } else {
+                    setBannedWords([]);
+                }
+
             } catch (e) {
                 if (!mounted) return;
                 const msg =
@@ -61,6 +285,270 @@ export function AiConfig() {
         };
     }, []);
 
+    const resetAutoGrantForm = () => {
+        setAutoGrantForm({
+            grantAmount: String(defaultAutoGrantAmount),
+            nextRunAtLocal: '',
+        });
+    };
+
+    const resolveGrantAmount = () => {
+        const raw = String(autoGrantForm.grantAmount ?? '').trim();
+        if (raw) return Number(raw);
+        const fallback = Number(managedAutoGrantRule?.grantAmount ?? defaultAutoGrantAmount);
+        return Number.isFinite(fallback) && fallback > 0 ? Math.trunc(fallback) : defaultAutoGrantAmount;
+    };
+
+    const loadAutoGrantRules = async () => {
+        try {
+            setAutoGrantLoading(true);
+            const data = await getAdminAuthorAiTokenAutoGrantRules();
+            const rows = pickArrayLike(data, data?.items, data?.Items, data?.data?.items, data?.Data?.Items);
+            const normalized = (rows || []).map(normalizeAutoGrantRule).filter((x) => x.id);
+            setAutoGrantRules(normalized);
+            const rule = normalized[0];
+            if (rule) {
+                setAutoGrantForm({
+                    grantAmount: String(rule.grantAmount ?? 0),
+                    nextRunAtLocal: toUtcInputString(new Date(rule.createdAtUtc ?? rule.lastRunAtUtc ?? '')),
+                });
+            } else {
+                resetAutoGrantForm();
+            }
+        } catch (e) {
+            setAutoGrantRules([]);
+            setError(e?.response?.data?.message || e?.message || 'Không tải được danh sách quy tắc tự gia hạn token.');
+        } finally {
+            setAutoGrantLoading(false);
+        }
+    };
+
+    const onSubmitAutoGrantRule = async (forceEnabled = null) => {
+        if (autoGrantFormError) {
+            setError(autoGrantFormError);
+            setSuccess('');
+            return;
+        }
+        try {
+            setSavingAutoGrant(true);
+            setError('');
+            setSuccess('');
+            const nextEnabled = forceEnabled != null ? !!forceEnabled : !!(managedAutoGrantRule?.isEnabled ?? true);
+            const resolvedGrantAmount = resolveGrantAmount();
+            const nextGrantAmount = forceEnabled != null
+                ? Number(managedAutoGrantRule?.grantAmount ?? resolvedGrantAmount)
+                : resolvedGrantAmount;
+            const payload = {
+                isEnabled: nextEnabled,
+                displayName: managedAutoGrantRule?.displayName || 'DEFAULT_ON_BECOME_AUTHOR',
+                periodKind: 'monthly_utc',
+                grantLimitField: 'per_month',
+                grantAmount: nextGrantAmount,
+                applyToAllAuthors: true,
+                selectedUserIds: [],
+            };
+            if (autoGrantForm.nextRunAtLocal) {
+                const dt = new Date(autoGrantForm.nextRunAtLocal);
+                if (!Number.isNaN(dt.getTime())) payload.lastRunAtUtc = dt.toISOString();
+            }
+            if (managedAutoGrantRule?.id) {
+                await updateAdminAuthorAiTokenAutoGrantRule(managedAutoGrantRule.id, payload);
+                setSuccess('Đã cập nhật quy tắc gia hạn token.');
+            } else {
+                await createAdminAuthorAiTokenAutoGrantRule(payload);
+                setSuccess('Đã tạo quy tắc gia hạn token.');
+            }
+            await loadAutoGrantRules();
+        } catch (e) {
+            setError(e?.response?.data?.message || e?.message || 'Không lưu được quy tắc gia hạn token.');
+        } finally {
+            setSavingAutoGrant(false);
+        }
+    };
+
+    const onUpdateAutoGrantAmount = async () => {
+        if (!managedAutoGrantRule?.id) {
+            setError('Chưa có quy tắc để cập nhật. Hãy dùng "Áp dụng ngay" lần đầu.');
+            setSuccess('');
+            return;
+        }
+        if (autoGrantFormError) {
+            setError(autoGrantFormError);
+            setSuccess('');
+            return;
+        }
+        try {
+            setSavingAutoGrant(true);
+            setError('');
+            setSuccess('');
+            const payload = {
+                isEnabled: !!managedAutoGrantRule.isEnabled,
+                displayName: managedAutoGrantRule.displayName || 'DEFAULT_ON_BECOME_AUTHOR',
+                periodKind: 'monthly_utc',
+                grantLimitField: 'per_month',
+                grantAmount: resolveGrantAmount(),
+                applyToAllAuthors: true,
+                selectedUserIds: [],
+            };
+            await updateAdminAuthorAiTokenAutoGrantRule(managedAutoGrantRule.id, payload);
+            setSuccess('Đã cập nhật số token cấp cho các kỳ chạy tiếp theo.');
+            await loadAutoGrantRules();
+        } catch (e) {
+            setError(e?.response?.data?.message || e?.message || 'Không cập nhật được số token cấp.');
+        } finally {
+            setSavingAutoGrant(false);
+        }
+    };
+
+    const onApplyAutoGrantNow = async () => {
+        if (applyNowFormError) {
+            setError(applyNowFormError);
+            setSuccess('');
+            return;
+        }
+        if (managedAutoGrantRule?.id) {
+            setError('Quy tắc đã tồn tại. "Áp dụng ngay" chỉ dùng cho lần tạo đầu tiên.');
+            setSuccess('');
+            return;
+        }
+        try {
+            setRunningAutoGrantNow(true);
+            setError('');
+            setSuccess('');
+            const payload = {
+                isEnabled: true,
+                displayName: managedAutoGrantRule?.displayName || 'DEFAULT_ON_BECOME_AUTHOR',
+                periodKind: 'monthly_utc',
+                grantLimitField: 'per_month',
+                grantAmount: resolveGrantAmount(),
+                applyToAllAuthors: true,
+                selectedUserIds: [],
+            };
+            if (autoGrantForm.nextRunAtLocal) {
+                const dt = new Date(autoGrantForm.nextRunAtLocal);
+                if (!Number.isNaN(dt.getTime())) payload.lastRunAtUtc = dt.toISOString();
+            } else {
+                // Không còn nhập tay thời gian; khi tạo mới lần đầu dùng mốc hiện tại.
+                payload.lastRunAtUtc = new Date().toISOString();
+            }
+
+            let ruleId = managedAutoGrantRule?.id || '';
+            if (ruleId) {
+                await updateAdminAuthorAiTokenAutoGrantRule(ruleId, payload);
+            } else {
+                const created = await createAdminAuthorAiTokenAutoGrantRule(payload);
+                ruleId = created?.id ?? created?.Id ?? '';
+            }
+            if (!ruleId) {
+                const latest = await getAdminAuthorAiTokenAutoGrantRules();
+                const rows = pickArrayLike(latest, latest?.items, latest?.Items, latest?.data?.items, latest?.Data?.Items);
+                const first = (rows || [])[0];
+                ruleId = first?.id ?? first?.Id ?? '';
+            }
+            if (!ruleId) throw new Error('Không xác định được quy tắc để áp dụng ngay.');
+
+            const res = await runNowAdminAuthorAiTokenAutoGrantRule(ruleId);
+            const usersUpdated = res?.usersUpdated ?? res?.UsersUpdated ?? 0;
+            setSuccess(`Đã bật và áp dụng ngay. Số tài khoản đã cập nhật: ${usersUpdated}.`);
+            await loadAutoGrantRules();
+        } catch (e) {
+            setError(e?.response?.data?.message || e?.message || 'Không áp dụng ngay được.');
+        } finally {
+            setRunningAutoGrantNow(false);
+        }
+    };
+
+    const onRequestToggleAutoGrant = (nextEnabled) => {
+        setToggleConfirmNextEnabled(!!nextEnabled);
+        setToggleConfirmOpen(true);
+    };
+
+    const onConfirmToggleAutoGrant = async () => {
+        setToggleConfirmOpen(false);
+        await onSubmitAutoGrantRule(!!toggleConfirmNextEnabled);
+    };
+
+    const loadGenerationLogs = async (nextFilter = genFilter) => {
+        try {
+            setGenLoading(true);
+            const baseQuery = {
+                fromUtc: nextFilter.fromUtc ? new Date(nextFilter.fromUtc).toISOString() : undefined,
+                toUtc: nextFilter.toUtc ? new Date(nextFilter.toUtc).toISOString() : undefined,
+                actionType: nextFilter.actionType || undefined,
+                modelName: nextFilter.modelName || undefined,
+                status: nextFilter.status || undefined,
+            };
+            const [reqResult, dailyResult] = await Promise.allSettled([
+                (async () => {
+                    // Gộp theo tài khoản phải dựa trên toàn bộ request trong bộ lọc, không phải từng trang.
+                    const collect = [];
+                    const apiPageSize = 200;
+                    let page = 1;
+                    let totalCount = 0;
+                    while (true) {
+                        const reqRes = await getAdminAiRequestLogs({ ...baseQuery, page, pageSize: apiPageSize });
+                        const rows = pickArrayLike(
+                            reqRes?.items,
+                            reqRes?.Items,
+                            reqRes?.data?.items,
+                            reqRes?.Data?.Items
+                        );
+                        const rowsArray = Array.isArray(rows) ? rows : [];
+                        totalCount =
+                            reqRes?.totalCount ??
+                            reqRes?.TotalCount ??
+                            reqRes?.data?.totalCount ??
+                            reqRes?.Data?.TotalCount ??
+                            rowsArray.length;
+                        collect.push(...rowsArray);
+                        if (rowsArray.length === 0 || collect.length >= Number(totalCount || 0)) break;
+                        page += 1;
+                        if (page > 200) break;
+                    }
+                    return { rows: collect, totalCount: Number(totalCount || collect.length) };
+                })(),
+                getAdminAiGenerationsDaily(baseQuery),
+            ]);
+
+            if (reqResult.status === 'fulfilled') {
+                const reqRows = Array.isArray(reqResult.value?.rows) ? reqResult.value.rows : [];
+                setGenerationRows(reqRows);
+                setGenerationTotal(Number(reqResult.value?.totalCount) || reqRows.length);
+            } else {
+                setGenerationRows([]);
+                setGenerationTotal(0);
+                setError(reqResult.reason?.response?.data?.message || reqResult.reason?.message || 'Không tải được danh sách requests.');
+            }
+
+            if (dailyResult.status === 'fulfilled') {
+                const dailyRes = dailyResult.value;
+                const daily = pickArrayLike(
+                    dailyRes,
+                    dailyRes?.days,
+                    dailyRes?.Days,
+                    dailyRes?.items,
+                    dailyRes?.Items,
+                    dailyRes?.data?.days,
+                    dailyRes?.Data?.Days
+                );
+                setDailyRows(Array.isArray(daily) ? daily : []);
+            } else {
+                // Không chặn bảng log nếu endpoint chart lỗi.
+                setDailyRows([]);
+            }
+        } catch (e) {
+            setError(e?.response?.data?.message || e?.message || 'Không tải được log Generations.');
+        } finally {
+            setGenLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        loadGenerationLogs(genFilter);
+        loadAutoGrantRules();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     return (
         <div className="p-6 space-y-6">
             <div className="flex items-center justify-between gap-3">
@@ -70,255 +558,617 @@ export function AiConfig() {
                     </div>
                     <div>
                         <h1 className="text-lg md:text-xl font-bold text-slate-900">
-                            Cấu hình AI cho nền tảng
+                            Cấu hình hệ thống
                         </h1>
-                        <p className="text-xs md:text-sm text-slate-500">
-                            Nền tảng đang dùng Ollama. Thiết lập trí nhớ truyện, tìm kiếm theo ngữ cảnh, viết chung với AI và giới hạn sử dụng. Giao diện mẫu, chưa kết nối hệ thống.
-                        </p>
                     </div>
                 </div>
             </div>
 
             <div className="space-y-5">
-                    {/* Giới hạn sử dụng AI & Danh sách từ cấm */}
-                    <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
-                        <div className="flex items-start justify-between gap-4">
-                            <div>
-                                <h2 className="text-sm font-semibold text-slate-900">
-                                    Giới hạn sử dụng AI &amp; Từ cấm
-                                </h2>
-                                <p className="mt-1 text-[11px] text-slate-500">
-                                    Thiết lập kiểm soát sử dụng AI và quy tắc nội dung để giảm spam và hạn chế từ nhạy cảm.
-                                </p>
-                            </div>
+                {/* Giới hạn sử dụng AI & Danh sách từ cấm */}
+                <section className="bg-white rounded-xl border border-[#c9f0d8] shadow-sm p-5 space-y-4">
+                    <div className="flex items-start justify-between gap-4">
+                        <div>
+                            <h2 className="text-sm font-semibold text-slate-900">
+                                Log AI Admin &amp; Từ cấm
+                            </h2>
                         </div>
+                    </div>
 
-                        <div className="space-y-4">
-                            {/* Daily limit */}
-                            <div className="rounded-xl border border-slate-200 bg-white p-4">
-                                <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-4">
+                        {/* Auto grant rules */}
+                        <div className="rounded-xl border border-[#c9f0d8] bg-white p-4 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="space-y-1">
+                                    <p className="text-[12px] font-semibold text-slate-900">Gia hạn token AI tự động (tác giả)</p>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={loadAutoGrantRules}
+                                    disabled={autoGrantLoading}
+                                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                                >
+                                    {autoGrantLoading ? 'Đang tải…' : 'Làm mới'}
+                                </button>
+                            </div>
+
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2.5">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                     <div className="space-y-1">
-                                        <p className="text-[12px] font-semibold text-slate-900">
-                                            Giới hạn theo ngày
-                                        </p>
-                                        <p className="text-[11px] text-slate-500">
-                                            Mỗi tác giả có tối đa một số lượt dùng AI trong 24h. Hết lượt sẽ tự mở lại vào ngày hôm sau.
-                                        </p>
+                                        <label className="block text-[11px] font-semibold text-slate-600">
+                                            Số token cấp
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            step={1}
+                                            value={autoGrantForm.grantAmount}
+                                            onChange={(e) => setAutoGrantForm((p) => ({ ...p, grantAmount: e.target.value }))}
+                                            placeholder="Số token cấp"
+                                            className={`w-full rounded-lg border bg-white px-3 py-2 text-xs text-slate-900 ${autoGrantFormError ? 'border-red-400' : 'border-slate-300'}`}
+                                        />
                                     </div>
-                                    <div className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                                        {limitValue} lượt/ngày
+                                    <div className="space-y-1">
+                                        <label className="block text-[11px] font-semibold text-slate-600">
+                                            Thời gian tạo
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={managedAutoGrantRule?.createdAtUtc ? formatDateTimeVi(managedAutoGrantRule.createdAtUtc) : '—'}
+                                            readOnly
+                                            className="w-full rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700"
+                                        />
                                     </div>
                                 </div>
 
-                                <div className="mt-3 flex flex-wrap items-center gap-2">
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        max={100}
-                                        value={dailyLimit}
-                                        onChange={(e) => setDailyLimit(Number(e.target.value) || 0)}
-                                        className="w-28 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
-                                    />
-                                    <span className="text-[11px] text-slate-500">lượt / ngày</span>
+                                {autoGrantFormError && (
+                                    <p className="text-[11px] text-red-600">{autoGrantFormError}</p>
+                                )}
+                                {hasManagedAutoGrantRule && (
+                                    <p className="text-[11px] text-slate-500">
+                                        Quy tắc đã được tạo. Hệ thống sẽ tự cấp token ở ngày chạy kế tiếp; không áp dụng ngay lại.
+                                    </p>
+                                )}
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {!hasManagedAutoGrantRule ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (applyNowFormError) {
+                                                    setError(applyNowFormError);
+                                                    setSuccess('');
+                                                    return;
+                                                }
+                                                setApplyNowConfirmOpen(true);
+                                            }}
+                                            disabled={runningAutoGrantNow || !!applyNowFormError}
+                                            className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
+                                        >
+                                            {runningAutoGrantNow ? 'Đang áp dụng…' : 'Áp dụng ngay'}
+                                        </button>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => setUpdateAmountConfirmOpen(true)}
+                                            disabled={savingAutoGrant || !!autoGrantFormError}
+                                            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+                                        >
+                                            {savingAutoGrant ? 'Đang cập nhật…' : 'Cập nhật số token cấp'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="overflow-x-auto rounded-lg border border-slate-200">
+                                <table className="min-w-full text-xs">
+                                    <thead className="bg-slate-50 text-slate-600">
+                                        <tr>
+                                            <th className="px-2 py-2 text-left">Tên</th>
+                                            <th className="px-2 py-2 text-left">Trạng thái</th>
+                                            <th className="px-2 py-2 text-left">Chu kỳ</th>
+                                            <th className="px-2 py-2 text-right">+ Token</th>
+                                            <th className="px-2 py-2 text-left">Phạm vi</th>
+                                            <th className="px-2 py-2 text-left">Ngày chạy kế tiếp</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {autoGrantLoading ? (
+                                            <tr><td colSpan={6} className="px-2 py-4 text-center text-slate-500">Đang tải...</td></tr>
+                                        ) : autoGrantRules.length === 0 ? (
+                                            <tr><td colSpan={6} className="px-2 py-4 text-center text-slate-500">Chưa có quy tắc nào.</td></tr>
+                                        ) : autoGrantRules.slice(0, 1).map((r) => (
+                                            <tr key={r.id} className="border-t border-slate-100">
+                                                <td className="px-2 py-2 text-slate-900">
+                                                    {r.displayName || '—'}
+                                                    <div className="text-[10px] text-slate-400 break-all">{r.id}</div>
+                                                </td>
+                                                <td className="px-2 py-2">
+                                                    <span
+                                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${r.isEnabled
+                                                            ? 'bg-emerald-100 text-emerald-700'
+                                                            : 'bg-slate-100 text-slate-600'
+                                                            }`}
+                                                    >
+                                                        {r.isEnabled ? 'Đang bật' : 'Đang tắt'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-2 py-2"><code>{autoGrantPeriodKindLabelVi(r.periodKind)}</code></td>
+                                                <td className="px-2 py-2 text-right font-semibold">{fmtIntOrDash(r.grantAmount)}</td>
+                                                <td className="px-2 py-2">Tất cả tác giả</td>
+                                                <td className="px-2 py-2">{r.lastRunAtUtc ? formatDateTimeVi(r.lastRunAtUtc) : '—'}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {applyNowConfirmOpen ? (
+                                <div className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center p-4">
+                                    <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white shadow-2xl">
+                                        <div className="px-4 py-3 border-b border-slate-200">
+                                            <p className="text-sm font-semibold text-slate-900">Xác nhận áp dụng ngay</p>
+                                        </div>
+                                        <div className="px-4 py-3 space-y-3">
+                                            <p className="text-xs text-slate-700">
+                                                Hành động này chỉ nên dùng 1 lần khi tạo quy tắc lần đầu (vừa tạo rule vừa cấp token ngay). Bạn có chắc muốn tiếp tục?
+                                            </p>
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                                                    onClick={() => setApplyNowConfirmOpen(false)}
+                                                >
+                                                    Hủy
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-800 hover:bg-amber-100"
+                                                    onClick={async () => {
+                                                        setApplyNowConfirmOpen(false);
+                                                        await onApplyAutoGrantNow();
+                                                    }}
+                                                >
+                                                    Xác nhận
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
+                            {updateAmountConfirmOpen ? (
+                                <div className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center p-4">
+                                    <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white shadow-2xl">
+                                        <div className="px-4 py-3 border-b border-slate-200">
+                                            <p className="text-sm font-semibold text-slate-900">Xác nhận cập nhật token cộng</p>
+                                        </div>
+                                        <div className="px-4 py-3 space-y-3">
+                                            <p className="text-xs text-slate-700">
+                                                Bạn có chắc muốn cập nhật số token cấp? Thay đổi này sẽ được áp dụng cho các kỳ chạy tự động tiếp theo.
+                                            </p>
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                                                    onClick={() => setUpdateAmountConfirmOpen(false)}
+                                                >
+                                                    Hủy
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100"
+                                                    onClick={async () => {
+                                                        setUpdateAmountConfirmOpen(false);
+                                                        await onUpdateAutoGrantAmount();
+                                                    }}
+                                                >
+                                                    Xác nhận
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
+                            {toggleConfirmOpen ? (
+                                <div className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center p-4">
+                                    <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white shadow-2xl">
+                                        <div className="px-4 py-3 border-b border-slate-200">
+                                            <p className="text-sm font-semibold text-slate-900">Xác nhận thay đổi trạng thái</p>
+                                        </div>
+                                        <div className="px-4 py-3 space-y-3">
+                                            <p className="text-xs text-slate-700">
+                                                Bạn có chắc muốn {toggleConfirmNextEnabled ? 'bật' : 'tắt'} tự động gia hạn token?
+                                            </p>
+                                            <div className="flex justify-end gap-2">
+                                                <button
+                                                    type="button"
+                                                    className="rounded border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                                                    onClick={() => setToggleConfirmOpen(false)}
+                                                >
+                                                    Hủy
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="rounded bg-primary px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-primary/90"
+                                                    onClick={onConfirmToggleAutoGrant}
+                                                >
+                                                    Xác nhận
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
+
+                        {/* Generations logs from DB */}
+                        <div className="rounded-xl border border-[#c9f0d8] bg-white p-4 space-y-3">
+                            <p className="text-[12px] font-semibold text-slate-900">Lượt gọi AI (nhật ký chi tiết từng lượt)</p>
+                            <div className="grid grid-cols-1 gap-2">
+                                <input
+                                    type="text"
+                                    value={generationUserSearch}
+                                    onChange={(e) => {
+                                        setGenerationUserSearch(e.target.value);
+                                        setGenFilter((p) => ({ ...p, page: 1 }));
+                                    }}
+                                    placeholder="Tìm theo tài khoản (email)"
+                                    className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs"
+                                />
+                            </div>
+
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                <p className="text-[11px] font-semibold text-slate-700 mb-1">Số request theo ngày (UTC)</p>
+                                {dailyChartRows.length === 0 ? (
+                                    <span className="text-[11px] text-slate-500">Không có dữ liệu</span>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {dailyChartRows.map((row) => (
+                                            <div key={row.day} className="grid grid-cols-[90px_1fr_60px] items-center gap-2">
+                                                <span className="text-[10px] text-slate-600">{row.day}</span>
+                                                <div className="h-4 rounded bg-indigo-100 overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-indigo-500"
+                                                        style={{ width: `${row.pct}%` }}
+                                                        title={`${row.day}: ${row.count.toLocaleString('vi-VN')} requests`}
+                                                    />
+                                                </div>
+                                                <span className="text-[10px] font-semibold text-slate-700 text-right">
+                                                    {row.count.toLocaleString('vi-VN')}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="overflow-auto rounded-lg border border-[#c9f0d8]">
+                                <table className="w-full text-[11px]">
+                                    <thead className="bg-[#f0faf5] text-[#047857] uppercase">
+                                        <tr>
+                                            <th className="px-2 py-2 text-left">Tài khoản</th>
+                                            <th className="px-2 py-2 text-right">Tokens (in→out)</th>
+                                            <th className="px-2 py-2 text-right">Chi phí</th>
+                                            <th className="px-2 py-2 text-center">Số lượt</th>
+                                            <th className="px-2 py-2 text-center">Chi tiết</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {generationUserPagedRows.length === 0 ? (
+                                            <tr><td className="px-2 py-3 text-center text-slate-500" colSpan={5}>{genLoading ? 'Đang tải...' : 'Không có dữ liệu'}</td></tr>
+                                        ) : generationUserPagedRows.map((r, idx) => {
+                                            return (
+                                                <tr key={`${r.userEmail}-${idx}`} className="border-t border-[#c9f0d8]">
+                                                    <td className="px-2 py-2">{r.userEmail}</td>
+                                                    <td className="px-2 py-2 text-right">{`${Number(r.totalPromptTokens || 0).toLocaleString('vi-VN')} → ${Number(r.totalCompletionTokens || 0).toLocaleString('vi-VN')}`}</td>
+                                                    <td className="px-2 py-2 text-right">{r.hasAnyCost ? formatUsdNullable(r.totalCostUsd) : '—'}</td>
+                                                    <td className="px-2 py-2 text-center">{Number(r.requestCount || 0).toLocaleString('vi-VN')}</td>
+                                                    <td className="px-2 py-2 text-center">
+                                                        <button
+                                                            type="button"
+                                                            className="rounded border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold hover:bg-slate-50"
+                                                            onClick={() => setSelectedLogUserEmail(r.userEmail)}
+                                                        >
+                                                            Xem
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <p className="text-[11px] text-slate-500">Tổng: {Number(generationTotal).toLocaleString('vi-VN')} request</p>
+                                <div className="flex items-center gap-2">
                                     <button
                                         type="button"
-                                        disabled={savingLimit || loadingConfig}
-                                        onClick={async () => {
+                                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] disabled:opacity-50"
+                                        disabled={genFilter.page <= 1}
+                                        onClick={() => {
+                                            const next = { ...genFilter, page: Math.max(1, genFilter.page - 1) };
+                                            setGenFilter(next);
+                                        }}
+                                    >
+                                        Trước
+                                    </button>
+                                    <span className="text-[11px] text-slate-600">Trang {Math.min(genFilter.page, generationUserTotalPages)}/{generationUserTotalPages}</span>
+                                    <button
+                                        type="button"
+                                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] disabled:opacity-50"
+                                        disabled={genFilter.page >= generationUserTotalPages}
+                                        onClick={() => {
+                                            const next = { ...genFilter, page: Math.min(generationUserTotalPages, genFilter.page + 1) };
+                                            setGenFilter(next);
+                                        }}
+                                    >
+                                        Sau
+                                    </button>
+                                </div>
+                            </div>
+                            {generationDetail ? (
+                                <div className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center p-4">
+                                    <div className="w-full max-w-3xl max-h-[85vh] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl flex flex-col">
+                                        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+                                            <p className="text-sm font-semibold text-slate-900">Chi tiết lượt gọi (OpenRouter): {generationDetailId || '—'}</p>
+                                            <button
+                                                type="button"
+                                                className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold hover:bg-slate-50"
+                                                onClick={() => {
+                                                    setGenerationDetail(null);
+                                                    setGenerationDetailId('');
+                                                }}
+                                            >
+                                                Đóng
+                                            </button>
+                                        </div>
+                                        <div className="p-4 overflow-auto">
+                                            <pre className="text-[10px] whitespace-pre-wrap break-all text-slate-700">
+                                                {JSON.stringify(generationDetail, null, 2)}
+                                            </pre>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
+                            {selectedLogUserEmail ? (
+                                <div className="fixed inset-0 z-[1000] bg-black/40 flex items-center justify-center p-4">
+                                    <div className="w-full max-w-6xl max-h-[85vh] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl flex flex-col">
+                                        <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+                                            <p className="text-sm font-semibold text-slate-900">Chi tiết tài khoản: {selectedLogUserEmail}</p>
+                                            <button
+                                                type="button"
+                                                className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold hover:bg-slate-50"
+                                                onClick={() => setSelectedLogUserEmail('')}
+                                            >
+                                                Đóng
+                                            </button>
+                                        </div>
+                                        <div className="p-4 overflow-auto">
+                                            <table className="w-full text-[11px]">
+                                                <thead className="bg-[#f0faf5] text-[#047857] uppercase">
+                                                    <tr>
+                                                        <th className="px-2 py-2 text-left">Thời gian</th>
+                                                        <th className="px-2 py-2 text-left">Model</th>
+                                                        <th className="px-2 py-2 text-left">Loại hành động</th>
+                                                        <th className="px-2 py-2 text-right">Tokens (in→out)</th>
+                                                        <th className="px-2 py-2 text-right">Chi phí</th>
+                                                        <th className="px-2 py-2 text-left">Trạng thái</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {selectedUserLogPagedRows.length === 0 ? (
+                                                        <tr><td className="px-2 py-3 text-center text-slate-500" colSpan={6}>Không có dữ liệu</td></tr>
+                                                    ) : selectedUserLogPagedRows.map((r, idx) => {
+                                                        return (
+                                                            <tr key={idx} className="border-t border-[#c9f0d8]">
+                                                                <td className="px-2 py-2">{formatDateTimeVi(r?.createdAtUtc ?? r?.CreatedAtUtc ?? r?.occurredAtUtc ?? r?.OccurredAtUtc ?? r?.createdAt ?? r?.CreatedAt)}</td>
+                                                                <td className="px-2 py-2">{r?.modelName ?? r?.ModelName ?? '—'}</td>
+                                                                <td className="px-2 py-2">{r?.actionType ?? r?.ActionType ?? '—'}</td>
+                                                                <td className="px-2 py-2 text-right">{`${Number(r?.promptTokens ?? r?.PromptTokens ?? r?.inputTokens ?? r?.InputTokens ?? 0).toLocaleString('vi-VN')} → ${Number(r?.completionTokens ?? r?.CompletionTokens ?? r?.outputTokens ?? r?.OutputTokens ?? 0).toLocaleString('vi-VN')}`}</td>
+                                                                <td className="px-2 py-2 text-right">{formatUsdNullable(r?.costUsd ?? r?.CostUsd)}</td>
+                                                                <td className="px-2 py-2">{r?.status ?? r?.Status ?? '—'}</td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                            <div className="mt-3 flex items-center justify-between">
+                                                <p className="text-[11px] text-slate-500">Tổng: {selectedUserLogs.length.toLocaleString('vi-VN')} bản ghi</p>
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] disabled:opacity-50"
+                                                        disabled={selectedUserLogPage <= 1}
+                                                        onClick={() => setSelectedUserLogPage((p) => Math.max(1, p - 1))}
+                                                    >
+                                                        Trước
+                                                    </button>
+                                                    <span className="text-[11px] text-slate-600">
+                                                        Trang {Math.min(selectedUserLogPage, selectedUserLogTotalPages)}/{selectedUserLogTotalPages}
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] disabled:opacity-50"
+                                                        disabled={selectedUserLogPage >= selectedUserLogTotalPages}
+                                                        onClick={() => setSelectedUserLogPage((p) => Math.min(selectedUserLogTotalPages, p + 1))}
+                                                    >
+                                                        Sau
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
+
+                        {/* Banned words */}
+                        <div className="rounded-xl border border-[#c9f0d8] bg-white p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="space-y-1">
+                                    <p className="text-[12px] font-semibold text-slate-900">
+                                        Danh sách từ cấm
+                                    </p>
+                                </div>
+                                <div className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">
+                                    {bannedWords.length} mục
+                                </div>
+                            </div>
+
+                            {(error || success) && (
+                                <div
+                                    className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${error
+                                        ? 'border-red-200 bg-red-50 text-red-700'
+                                        : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                        }`}
+                                >
+                                    {error || success}
+                                </div>
+                            )}
+
+                            <div className="mt-3 flex gap-2">
+                                <input
+                                    type="text"
+                                    value={bannedWordInput}
+                                    onChange={(e) => setBannedWordInput(e.target.value)}
+                                    placeholder="Nhập từ/cụm từ cần chặn…"
+                                    className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                                />
+                                <button
+                                    type="button"
+                                    disabled={savingWord || loadingConfig}
+                                    onClick={() => {
+                                        (async () => {
+                                            const word = bannedWordInput.trim();
+                                            if (!word) return;
                                             try {
                                                 setError('');
                                                 setSuccess('');
-                                                setSavingLimit(true);
-                                                const res = await setAdminAiUsageLimit(limitValue);
-                                                const max = Number(res?.maxRequestsPerDay);
-                                                if (Number.isFinite(max) && max > 0) setDailyLimit(max);
-                                                setSuccess('Đã lưu giới hạn sử dụng AI.');
+                                                setSavingWord(true);
+                                                const created = await addAdminBannedWord(word, 'BannedWord');
+                                                setBannedWords((list) => [created, ...list]);
+                                                setBannedWordInput('');
+                                                setSuccess('Đã thêm từ cấm.');
                                             } catch (e) {
                                                 const msg =
                                                     e?.response?.data?.message ||
                                                     e?.message ||
-                                                    'Không lưu được giới hạn. Vui lòng thử lại.';
+                                                    'Không thêm được từ cấm. Vui lòng thử lại.';
                                                 setError(msg);
                                             } finally {
-                                                setSavingLimit(false);
+                                                setSavingWord(false);
                                             }
-                                        }}
-                                        className="ml-auto rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                                    >
-                                        {savingLimit ? 'Đang lưu…' : 'Lưu'}
-                                    </button>
-                                </div>
+                                        })();
+                                    }}
+                                    className="px-4 py-2 rounded-lg bg-primary text-white text-[11px] font-semibold hover:bg-primary/90"
+                                >
+                                    {savingWord ? 'Đang thêm…' : 'Thêm'}
+                                </button>
                             </div>
 
-                            {/* Banned words */}
-                            <div className="rounded-xl border border-slate-200 bg-white p-4">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="space-y-1">
-                                        <p className="text-[12px] font-semibold text-slate-900">
-                                            Danh sách từ cấm
+                            <div className="mt-3 overflow-hidden rounded-lg border border-[#c9f0d8]">
+                                {bannedWords.length === 0 ? (
+                                    <div className="bg-[#f8fdfb] px-4 py-6">
+                                        <p className="text-[12px] font-semibold text-slate-800">
+                                            Chưa có từ cấm nào
                                         </p>
-                                        <p className="text-[11px] text-slate-500">
-                                            Khi tác giả lưu chương, hệ thống sẽ cảnh báo nếu phát hiện các từ/cụm từ trong danh sách này.
+                                        <p className="mt-1 text-[11px] text-slate-500">
+                                            Thêm từ/cụm từ để hệ thống cảnh báo khi phát hiện trong nội dung.
                                         </p>
                                     </div>
-                                    <div className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">
-                                        {bannedWords.length} mục
-                                    </div>
-                                </div>
-
-                                {(error || success) && (
-                                    <div
-                                        className={`mt-3 rounded-lg border px-3 py-2 text-[11px] ${
-                                            error
-                                                ? 'border-red-200 bg-red-50 text-red-700'
-                                                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                        }`}
-                                    >
-                                        {error || success}
-                                    </div>
-                                )}
-
-                                <div className="mt-3 flex gap-2">
-                                    <input
-                                        type="text"
-                                        value={bannedWordInput}
-                                        onChange={(e) => setBannedWordInput(e.target.value)}
-                                        placeholder="Nhập từ/cụm từ cần chặn…"
-                                        className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
-                                    />
-                                    <button
-                                        type="button"
-                                        disabled={savingWord || loadingConfig}
-                                        onClick={() => {
-                                            (async () => {
-                                                const word = bannedWordInput.trim();
-                                                if (!word) return;
-                                                try {
-                                                    setError('');
-                                                    setSuccess('');
-                                                    setSavingWord(true);
-                                                    const created = await addAdminBannedWord(word, 'BannedWord');
-                                                    setBannedWords((list) => [created, ...list]);
-                                                    setBannedWordInput('');
-                                                    setSuccess('Đã thêm từ cấm.');
-                                                } catch (e) {
-                                                    const msg =
-                                                        e?.response?.data?.message ||
-                                                        e?.message ||
-                                                        'Không thêm được từ cấm. Vui lòng thử lại.';
-                                                    setError(msg);
-                                                } finally {
-                                                    setSavingWord(false);
-                                                }
-                                            })();
-                                        }}
-                                        className="px-4 py-2 rounded-lg bg-primary text-white text-[11px] font-semibold hover:bg-primary/90"
-                                    >
-                                        {savingWord ? 'Đang thêm…' : 'Thêm'}
-                                    </button>
-                                </div>
-
-                                <div className="mt-3 overflow-hidden rounded-lg border border-slate-200">
-                                    {bannedWords.length === 0 ? (
-                                        <div className="px-4 py-6">
-                                            <p className="text-[12px] font-semibold text-slate-800">
-                                                Chưa có từ cấm nào
-                                            </p>
-                                            <p className="mt-1 text-[11px] text-slate-500">
-                                                Thêm từ/cụm từ để hệ thống cảnh báo khi phát hiện trong nội dung.
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            <table className="w-full table-fixed text-[11px]">
+                                ) : (
+                                    <>
+                                        <table className="w-full table-fixed border-collapse text-[11px] text-slate-800">
+                                            <colgroup>
+                                                <col className="w-1/2" />
+                                                <col className="w-1/3" />
+                                                <col className="w-1/6" />
+                                            </colgroup>
+                                            <thead>
+                                                <tr className="border-b border-[#c9f0d8] bg-[#f0faf5]">
+                                                    <th className="px-3 py-2 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                                        Từ/cụm từ
+                                                    </th>
+                                                    <th className="px-3 py-2 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                                        Nhóm
+                                                    </th>
+                                                    <th className="px-3 py-2 text-right text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                                        Xóa
+                                                    </th>
+                                                </tr>
+                                            </thead>
+                                        </table>
+                                        <div className="max-h-60 overflow-y-auto border-t border-[#c9f0d8]">
+                                            <table className="w-full table-fixed border-collapse text-[11px]">
                                                 <colgroup>
                                                     <col className="w-1/2" />
                                                     <col className="w-1/3" />
                                                     <col className="w-1/6" />
                                                 </colgroup>
-                                                <thead className="bg-slate-50">
-                                                    <tr className="text-left text-slate-500">
-                                                        <th className="px-3 py-2 font-medium">Từ/cụm từ</th>
-                                                        <th className="px-3 py-2 font-medium">Nhóm</th>
-                                                        <th className="px-3 py-2 font-medium text-right">Xóa</th>
-                                                    </tr>
-                                                </thead>
-                                            </table>
-                                            <div className="max-h-60 overflow-y-auto border-t border-slate-200">
-                                                <table className="w-full table-fixed text-[11px]">
-                                                    <colgroup>
-                                                        <col className="w-1/2" />
-                                                        <col className="w-1/3" />
-                                                        <col className="w-1/6" />
-                                                    </colgroup>
-                                                    <tbody className="bg-white">
-                                                        {bannedWords.map((bw, idx) => {
-                                                            const isSensitive = String(bw.category || '')
-                                                                .toLowerCase()
-                                                                .includes('sensitive');
-                                                            return (
-                                                                <tr
-                                                                    key={bw.id}
-                                                                    className={`border-t border-slate-100 ${
-                                                                        idx % 2 === 1 ? 'bg-slate-50/40' : ''
-                                                                    }`}
-                                                                >
-                                                                    <td className="px-3 py-2 font-medium text-slate-800">
-                                                                        {bw.word}
-                                                                    </td>
-                                                                    <td className="px-3 py-2">
-                                                                        <span
-                                                                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${
-                                                                                isSensitive
-                                                                                    ? 'bg-amber-50 text-amber-700 ring-amber-200'
-                                                                                    : 'bg-sky-50 text-sky-700 ring-sky-200'
+                                                <tbody>
+                                                    {bannedWords.map((bw, idx) => {
+                                                        const isSensitive = String(bw.category || '')
+                                                            .toLowerCase()
+                                                            .includes('sensitive');
+                                                        return (
+                                                            <tr
+                                                                key={bw.id}
+                                                                className="border-t border-[#c9f0d8] bg-white transition-colors first:border-t-0 hover:bg-[#f7fcf9]"
+                                                            >
+                                                                <td className="px-3 py-2 font-medium text-slate-800">
+                                                                    {bw.word}
+                                                                </td>
+                                                                <td className="px-3 py-2">
+                                                                    <span
+                                                                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${isSensitive
+                                                                            ? 'bg-amber-50 text-amber-700 ring-amber-200'
+                                                                            : 'bg-sky-50 text-sky-700 ring-sky-200'
                                                                             }`}
-                                                                        >
-                                                                            {bw.category}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="px-3 py-2 text-right">
-                                                                        <button
-                                                                            type="button"
-                                                                            disabled={deletingWordId === bw.id}
-                                                                            onClick={() =>
-                                                                                (async () => {
-                                                                                    try {
-                                                                                        setError('');
-                                                                                        setSuccess('');
-                                                                                        setDeletingWordId(bw.id);
-                                                                                        await deleteAdminBannedWord(bw.id);
-                                                                                        setBannedWords((list) =>
-                                                                                            list.filter((x) => x.id !== bw.id)
-                                                                                        );
-                                                                                        setSuccess('Đã xóa từ cấm.');
-                                                                                    } catch (e) {
-                                                                                        const msg =
-                                                                                            e?.response?.data?.message ||
-                                                                                            e?.message ||
-                                                                                            'Không xóa được từ cấm. Vui lòng thử lại.';
-                                                                                        setError(msg);
-                                                                                    } finally {
-                                                                                        setDeletingWordId(null);
-                                                                                    }
-                                                                                })()
-                                                                            }
-                                                                            className="inline-flex items-center justify-center rounded-lg px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50"
-                                                                        >
-                                                                            {deletingWordId === bw.id ? 'Đang xóa…' : 'Xóa'}
-                                                                        </button>
-                                                                    </td>
-                                                                </tr>
-                                                            );
-                                                        })}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
+                                                                    >
+                                                                        {bw.category}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-3 py-2 text-right">
+                                                                    <button
+                                                                        type="button"
+                                                                        disabled={deletingWordId === bw.id}
+                                                                        onClick={() =>
+                                                                            (async () => {
+                                                                                try {
+                                                                                    setError('');
+                                                                                    setSuccess('');
+                                                                                    setDeletingWordId(bw.id);
+                                                                                    await deleteAdminBannedWord(bw.id);
+                                                                                    setBannedWords((list) =>
+                                                                                        list.filter((x) => x.id !== bw.id)
+                                                                                    );
+                                                                                    setSuccess('Đã xóa từ cấm.');
+                                                                                } catch (e) {
+                                                                                    const msg =
+                                                                                        e?.response?.data?.message ||
+                                                                                        e?.message ||
+                                                                                        'Không xóa được từ cấm. Vui lòng thử lại.';
+                                                                                    setError(msg);
+                                                                                } finally {
+                                                                                    setDeletingWordId(null);
+                                                                                }
+                                                                            })()
+                                                                        }
+                                                                        className="inline-flex items-center justify-center rounded-lg px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50"
+                                                                    >
+                                                                        {deletingWordId === bw.id ? 'Đang xóa…' : 'Xóa'}
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
-                    </section>
+                    </div>
+                </section>
             </div>
         </div>
     );

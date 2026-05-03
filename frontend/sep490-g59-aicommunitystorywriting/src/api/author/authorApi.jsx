@@ -39,6 +39,23 @@ export async function getAuthorFollowersCount(authorId) {
 }
 
 /**
+ * Số follower mới từ đầu tuần (Thứ Hai 00:00, giờ máy chủ).
+ * GET api/authors/{authorId}/followers-this-week
+ * @param {string} authorId - Guid
+ * @returns {Promise<number>}
+ */
+export async function getAuthorNewFollowersThisWeek(authorId) {
+    if (!isAuthorGuid(authorId)) {
+        return 0;
+    }
+    const response = await axiosInstance.get(`/authors/${authorId}/followers-this-week`);
+    const d = response.data ?? {};
+    const n = d.newFollowersThisWeek ?? d.NewFollowersThisWeek;
+    const num = Number(n);
+    return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : 0;
+}
+
+/**
  * Theo dõi tác giả.
  * POST api/authors/{authorId}/follow
  * @param {string} authorId - Guid

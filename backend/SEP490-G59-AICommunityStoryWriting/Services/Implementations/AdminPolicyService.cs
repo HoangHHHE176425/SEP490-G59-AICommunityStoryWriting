@@ -12,11 +12,16 @@ namespace Services.Implementations
     {
         private readonly IPolicyRepository _policyRepo;
         private readonly IAuthorPolicyAcceptanceRepository _acceptRepo;
+        private readonly IUserRepository _userRepo;
 
-        public AdminPolicyService(IPolicyRepository policyRepo, IAuthorPolicyAcceptanceRepository acceptRepo)
+        public AdminPolicyService(
+            IPolicyRepository policyRepo,
+            IAuthorPolicyAcceptanceRepository acceptRepo,
+            IUserRepository userRepo)
         {
             _policyRepo = policyRepo;
             _acceptRepo = acceptRepo;
+            _userRepo = userRepo;
         }
 
         public async Task<PagedResultDto<AdminPolicyListItemDto>> GetPoliciesAsync(AdminPolicyQueryDto query)
@@ -86,6 +91,8 @@ namespace Services.Implementations
                 await _policyRepo.DeactivateOtherPoliciesOfTypeAsync(type, policy.id);
             }
 
+            await SyncAuthorResignFlagsAsync();
+
             return MapDetail(policy);
         }
 
@@ -94,21 +101,44 @@ namespace Services.Implementations
             var policy = await _policyRepo.GetPolicyByIdAsync(id);
             if (policy == null) return false;
 
+            var prevType = policy.type ?? string.Empty;
+            var prevVersion = policy.version ?? string.Empty;
+            var prevContent = policy.content ?? string.Empty;
+            var prevRequireResign = policy.require_resign ?? false;
             var type = request.Type.Trim().ToUpperInvariant();
             policy.type = type;
             policy.version = request.Version.Trim();
             policy.content = request.Content;
             policy.require_resign = request.RequireResign;
+            var policyContentChanged =
+                !string.Equals(prevType, policy.type, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(prevVersion, policy.version, StringComparison.Ordinal) ||
+                !string.Equals(prevContent, policy.content, StringComparison.Ordinal) ||
+                prevRequireResign != (policy.require_resign ?? false);
 
             var wasActive = policy.is_active == true;
             policy.is_active = request.IsActive;
             if (!wasActive && policy.is_active == true)
             {
-                policy.activated_at = DateTime.UtcNow;
+                // Reactivate cùng policy: giữ mốc active cũ để không ép re-sign lại nếu không có revision mới.
+                // Policy mới (chưa từng active) hoặc có revision thay đổi thì tạo mốc active mới.
+                if (!policy.activated_at.HasValue || policyContentChanged)
+                {
+                    policy.activated_at = DateTime.UtcNow;
+                }
             }
             if (wasActive && policy.is_active != true)
             {
                 // keep activated_at as historical value
+            }
+            var policyContentChangedWhileActive =
+                wasActive &&
+                policy.is_active == true &&
+                policyContentChanged;
+            if (policyContentChangedWhileActive)
+            {
+                // Bump effective time so old acceptance records are treated as stale.
+                policy.activated_at = DateTime.UtcNow;
             }
 
             await _policyRepo.UpdatePolicyAsync(policy);
@@ -117,6 +147,8 @@ namespace Services.Implementations
             {
                 await _policyRepo.DeactivateOtherPoliciesOfTypeAsync(type, policy.id);
             }
+
+            await SyncAuthorResignFlagsAsync();
 
             return true;
         }
@@ -142,13 +174,17 @@ namespace Services.Implementations
             if (policy == null) return false;
 
             policy.is_active = true;
-            policy.activated_at = DateTime.UtcNow;
+            // Không reset activated_at khi bật lại cùng policy đã từng active,
+            // tránh ép tác giả ký lại nếu policy không đổi revision.
+            policy.activated_at ??= DateTime.UtcNow;
             await _policyRepo.UpdatePolicyAsync(policy);
 
             if (!string.IsNullOrWhiteSpace(policy.type))
             {
                 await _policyRepo.DeactivateOtherPoliciesOfTypeAsync(policy.type, policy.id);
             }
+
+            await SyncAuthorResignFlagsAsync();
 
             return true;
         }
@@ -160,7 +196,27 @@ namespace Services.Implementations
 
             policy.is_active = false;
             await _policyRepo.UpdatePolicyAsync(policy);
+
+            await SyncAuthorResignFlagsAsync();
             return true;
+        }
+
+        private async Task SyncAuthorResignFlagsAsync()
+        {
+            var activeAuthorPolicy = await _policyRepo.GetActivePolicyByTypeAsync("AUTHOR");
+            if (activeAuthorPolicy == null)
+            {
+                await _userRepo.ClearAuthorMustResignPolicyFlagAsync();
+                return;
+            }
+
+            if (activeAuthorPolicy.require_resign == true)
+            {
+                await _userRepo.MarkAuthorsMustResignPolicyAsync(activeAuthorPolicy.id);
+                return;
+            }
+
+            await _userRepo.ClearAuthorMustResignPolicyFlagAsync();
         }
 
         private static AdminPolicyListItemDto MapListItem(system_policies p)
