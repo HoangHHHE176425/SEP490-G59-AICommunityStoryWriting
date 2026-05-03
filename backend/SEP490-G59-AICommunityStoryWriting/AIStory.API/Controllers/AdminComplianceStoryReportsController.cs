@@ -170,8 +170,9 @@ public class AdminComplianceStoryReportsController : ControllerBase
         var decision = (body.Decision ?? "").Trim().ToUpperInvariant();
         if (body.AdminNote != null && body.AdminNote.Length > 2000)
             return BadRequest(new { message = "Ký tự quá dài: mô tả tối đa 2000 ký tự." });
-        // Resolve đơn compliance admin-action (chặn tài khoản / đình chỉ viết) không dùng StoryReportReasonCatalog;
-        // lý do chi tiết nằm ở nội dung đơn + ghi chú admin.
+        if (string.IsNullOrWhiteSpace(body.ReasonCode))
+            body.ReasonCode = "OTHER";
+        // Service kiểm tra ReasonCode qua StoryReportReasonCatalog (OTHER mặc định khi client không gửi).
         if (requestId == Guid.Empty)
         {
             _logger.LogWarning("Không tìm thấy comment.");

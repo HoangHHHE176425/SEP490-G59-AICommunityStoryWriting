@@ -123,12 +123,12 @@ namespace Services.Implementations
                 _logger.LogWarning("CreateChapter failed: author writing is suspended. StoryId={StoryId}, AuthorId={AuthorId}", request.StoryId, aid);
                 throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
             }
-            EnsureStoryProgressAllowsChapterWrite(story, "tạo chương");
-            if (request.OrderIndex <= 0)
-            {
-                _logger.LogWarning("CreateChapter failed: invalid order index. StoryId={StoryId}, OrderIndex={OrderIndex}", request.StoryId, request.OrderIndex);
-                throw new ArgumentException("OrderIndex phải lớn hơn 0.");
-            }
+            //EnsureStoryProgressAllowsChapterWrite(story, "tạo chương");
+            //if (request.OrderIndex <= 0)
+            //{
+            //    _logger.LogWarning("CreateChapter failed: invalid order index. StoryId={StoryId}, OrderIndex={OrderIndex}", request.StoryId, request.OrderIndex);
+            //    throw new ArgumentException("OrderIndex phải lớn hơn 0.");
+            //}
 
             var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(request.StoryId, request.OrderIndex);
             if (existingChapter != null)

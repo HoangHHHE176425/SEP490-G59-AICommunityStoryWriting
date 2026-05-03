@@ -25,6 +25,9 @@ namespace Services.Implementations
         private const string MsgBlockedAfterDeadlineForfeit =
             "Bạn đã để quá hạn duyệt với truyện này; hệ thống đã trả đơn về hàng đợi. Bạn không thể nhận duyệt lại truyện này.";
 
+        private const string MsgStoryClaimedByAnotherModeratorCannotApproveChapter =
+            "Truyện đã được moderator khác nhận duyệt — không thể nhận duyệt chương này.";
+
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
@@ -938,6 +941,16 @@ namespace Services.Implementations
             }
             try
             {
+                if (chapter.story_id.HasValue
+                    && ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, chapter.story_id.Value)
+                    && !ReviewAssignmentDAO.IsAssignedTo(
+                        ReviewAssignmentDAO.TargetTypeStory,
+                        chapter.story_id.Value,
+                        moderatorId))
+                {
+                    throw new InvalidOperationException(MsgStoryClaimedByAnotherModeratorCannotApproveChapter);
+                }
+
                 _approveEnsureClaimed(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
                 _approveEnsureNoPendingEscalation(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
             }
