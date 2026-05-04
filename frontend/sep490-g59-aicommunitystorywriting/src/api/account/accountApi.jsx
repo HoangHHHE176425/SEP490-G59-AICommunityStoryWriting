@@ -147,6 +147,11 @@ function normalizeAuthorOnboardingStatus(data) {
         activeAuthorPolicyVersion: data.activeAuthorPolicyVersion ?? data.ActiveAuthorPolicyVersion ?? null,
         hasAcceptedActivePolicy: data.hasAcceptedActivePolicy ?? data.HasAcceptedActivePolicy ?? false,
         acceptedAt: data.acceptedAt ?? data.AcceptedAt ?? null,
+        hasActiveAiPolicy: data.hasActiveAiPolicy ?? data.HasActiveAiPolicy ?? false,
+        activeAiPolicyId: data.activeAiPolicyId ?? data.ActiveAiPolicyId ?? null,
+        activeAiPolicyVersion: data.activeAiPolicyVersion ?? data.ActiveAiPolicyVersion ?? null,
+        hasAcceptedActiveAiPolicy: data.hasAcceptedActiveAiPolicy ?? data.HasAcceptedActiveAiPolicy ?? false,
+        acceptedAiAt: data.acceptedAiAt ?? data.AcceptedAiAt ?? null,
         canBecomeAuthor: data.canBecomeAuthor ?? data.CanBecomeAuthor ?? false,
         missingRequirements: data.missingRequirements ?? data.MissingRequirements ?? [],
     };

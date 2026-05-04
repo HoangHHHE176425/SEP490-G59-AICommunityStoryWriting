@@ -12,6 +12,11 @@ namespace Services.DTOs.Account
         public string? ActiveAuthorPolicyVersion { get; set; }
         public bool HasAcceptedActivePolicy { get; set; }
         public DateTime? AcceptedAt { get; set; }
+        public bool HasActiveAiPolicy { get; set; }
+        public Guid? ActiveAiPolicyId { get; set; }
+        public string? ActiveAiPolicyVersion { get; set; }
+        public bool HasAcceptedActiveAiPolicy { get; set; }
+        public DateTime? AcceptedAiAt { get; set; }
         public bool CanBecomeAuthor { get; set; }
         public List<string> MissingRequirements { get; set; } = new();
     }

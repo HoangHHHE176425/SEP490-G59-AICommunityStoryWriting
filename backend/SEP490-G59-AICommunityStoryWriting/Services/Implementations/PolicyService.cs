@@ -53,21 +53,25 @@ namespace Services.Implementations
             var policy = await _policyRepo.GetPolicyByIdAsync(policyId);
             if (policy == null) throw new Exception("Policy not found.");
             if (policy.is_active != true) throw new Exception("Policy is not active.");
-            if (!string.Equals(policy.type, "AUTHOR", StringComparison.OrdinalIgnoreCase))
-                throw new Exception("Chỉ có thể chấp nhận policy loại AUTHOR trong luồng này.");
+            var policyType = (policy.type ?? "").Trim().ToUpperInvariant();
+            if (policyType != "AUTHOR" && policyType != "AI")
+                throw new Exception("Chỉ có thể chấp nhận policy loại AUTHOR hoặc AI trong luồng đăng ký tác giả.");
 
             var existing = await _acceptRepo.GetAcceptanceAsync(userId, policyId);
             var hasAcceptedCurrent = IsAcceptanceValidForPolicy(existing, policy);
             if (hasAcceptedCurrent)
             {
-                var acceptedUser = await _userRepo.GetUserById(userId);
-                if (acceptedUser != null && acceptedUser.must_resign_policy == true)
+                if (policyType == "AUTHOR")
                 {
-                    acceptedUser.must_resign_policy = false;
-                    acceptedUser.updated_at = DateTime.UtcNow;
-                    await _userRepo.UpdateUser(acceptedUser);
+                    var acceptedUser = await _userRepo.GetUserById(userId);
+                    if (acceptedUser != null && acceptedUser.must_resign_policy == true)
+                    {
+                        acceptedUser.must_resign_policy = false;
+                        acceptedUser.updated_at = DateTime.UtcNow;
+                        await _userRepo.UpdateUser(acceptedUser);
+                    }
                 }
-                return false; // already accepted
+                return false;
             }
 
             var acceptedAt = DateTime.UtcNow;
@@ -76,7 +80,7 @@ namespace Services.Implementations
                 existing.accepted_at = acceptedAt;
                 existing.ip_address = ipAddress;
                 existing.user_agent = userAgent;
-                existing.accepted_for = "AUTHOR";
+                existing.accepted_for = policyType;
                 await _acceptRepo.UpdateAcceptanceAsync(existing);
             }
             else
@@ -89,16 +93,19 @@ namespace Services.Implementations
                     accepted_at = acceptedAt,
                     ip_address = ipAddress,
                     user_agent = userAgent,
-                    accepted_for = "AUTHOR"
+                    accepted_for = policyType
                 };
                 await _acceptRepo.AddAcceptanceAsync(row);
             }
-            var user = await _userRepo.GetUserById(userId);
-            if (user != null && user.must_resign_policy == true)
+            if (policyType == "AUTHOR")
             {
-                user.must_resign_policy = false;
-                user.updated_at = DateTime.UtcNow;
-                await _userRepo.UpdateUser(user);
+                var user = await _userRepo.GetUserById(userId);
+                if (user != null && user.must_resign_policy == true)
+                {
+                    user.must_resign_policy = false;
+                    user.updated_at = DateTime.UtcNow;
+                    await _userRepo.UpdateUser(user);
+                }
             }
             return true;
         }

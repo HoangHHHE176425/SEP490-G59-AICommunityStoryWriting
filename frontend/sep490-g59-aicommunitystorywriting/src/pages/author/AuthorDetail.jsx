@@ -496,7 +496,7 @@ export function AuthorDetail() {
                             {/* Thẻ gợi ý / làm đầy trang */}
                             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                                 <div className="flex flex-col sm:flex-row">
-                                    <div className="w-full sm:w-52 shrink-0 overflow-hidden bg-slate-100 flex items-center justify-center p-4">
+                                    <div className="w-full sm:w-52 shrink-0 overflow-hidden bg-white flex items-center justify-center p-4">
                                         <img
                                             src={exploreCtaLogoUrl}
                                             alt=""
