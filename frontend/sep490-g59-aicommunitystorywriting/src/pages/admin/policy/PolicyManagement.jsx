@@ -21,7 +21,6 @@ const FILTER_TYPE = [
     { value: 'USER', label: 'Người dùng' },
     { value: 'AUTHOR', label: 'Tác giả' },
     { value: 'AI', label: 'AI' },
-    { value: 'DEFAULT', label: 'Mặc định' },
 ];
 
 function getApiErrorMessage(err, fallback) {

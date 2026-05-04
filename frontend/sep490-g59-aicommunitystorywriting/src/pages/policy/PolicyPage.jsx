@@ -19,14 +19,24 @@ export default function PolicyPage() {
 
     const type = useMemo(() => {
         const t = (searchParams.get('type') ?? 'USER').trim().toUpperCase();
+        if (t === 'DEFAULT') return 'USER';
         return t || 'USER';
     }, [searchParams]);
+
+    useEffect(() => {
+        const raw = (searchParams.get('type') ?? '').trim().toUpperCase();
+        if (raw !== 'DEFAULT') return;
+        const next = new URLSearchParams(searchParams);
+        next.set('type', 'USER');
+        setSearchParams(next, { replace: true });
+    }, [searchParams, setSearchParams]);
 
     const [policy, setPolicy] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [onboarding, setOnboarding] = useState(null);
     const [authorPolicyStatus, setAuthorPolicyStatus] = useState(null);
+    const [aiPolicyStatus, setAiPolicyStatus] = useState(null);
     const [authorFlowLoading, setAuthorFlowLoading] = useState(false);
     const [submitError, setSubmitError] = useState('');
     const [submitSuccess, setSubmitSuccess] = useState('');
@@ -68,6 +78,7 @@ export default function PolicyPage() {
         if ((!fromBecomeAuthor && !fromResign) || !isAuthenticated) {
             setOnboarding(null);
             setAuthorPolicyStatus(null);
+            setAiPolicyStatus(null);
             return;
         }
 
@@ -80,14 +91,24 @@ export default function PolicyPage() {
             ? Promise.all([
                 getAuthorOnboardingStatus(),
                 getMyAuthorPolicyStatus('AUTHOR'),
-            ]).then(([onboardingData, authorStatus]) => ({ onboardingData, authorStatus }))
-            : getMyAuthorPolicyStatus('AUTHOR').then((authorStatus) => ({ onboardingData: null, authorStatus }));
+                getMyAuthorPolicyStatus('AI'),
+            ]).then(([onboardingData, authorStatus, aiStatus]) => ({
+                onboardingData,
+                authorStatus,
+                aiStatus,
+            }))
+            : getMyAuthorPolicyStatus('AUTHOR').then((authorStatus) => ({
+                onboardingData: null,
+                authorStatus,
+                aiStatus: null,
+            }));
 
         loadStatus
-            .then(({ onboardingData, authorStatus }) => {
+            .then(({ onboardingData, authorStatus, aiStatus }) => {
                 if (!alive) return;
                 setOnboarding(onboardingData);
                 setAuthorPolicyStatus(authorStatus);
+                setAiPolicyStatus(aiStatus);
             })
             .catch((err) => {
                 if (!alive) return;
@@ -121,6 +142,73 @@ export default function PolicyPage() {
         setSearchParams(nextParams);
     };
 
+    const refreshAuthorFlowStatus = async () => {
+        const [onboardingData, authorStatus, aiStatus] = await Promise.all([
+            getAuthorOnboardingStatus(),
+            getMyAuthorPolicyStatus('AUTHOR'),
+            getMyAuthorPolicyStatus('AI'),
+        ]);
+        setOnboarding(onboardingData);
+        setAuthorPolicyStatus(authorStatus);
+        setAiPolicyStatus(aiStatus);
+    };
+
+    const handleAcceptAuthorPolicyClick = async () => {
+        if (!isAuthenticated) {
+            navigate('/login');
+            return;
+        }
+        const policyId = onboarding?.activeAuthorPolicyId ?? authorPolicyStatus?.policy?.id;
+        if (!policyId) {
+            setSubmitError('Không tìm thấy policy tác giả đang hiệu lực để chấp nhận.');
+            return;
+        }
+        setSubmitting(true);
+        setSubmitError('');
+        setSubmitSuccess('');
+        const acceptRes = await acceptAuthorPolicy(policyId);
+        if (!acceptRes?.success) {
+            setSubmitError(acceptRes?.message || 'Không thể chấp nhận policy tác giả.');
+            setSubmitting(false);
+            return;
+        }
+        try {
+            await refreshAuthorFlowStatus();
+            setSubmitSuccess('Đã ghi nhận chấp nhận policy tác giả.');
+        } catch {
+            setSubmitError('Đã chấp nhận nhưng không tải lại trạng thái; vui lòng tải lại trang.');
+        }
+        setSubmitting(false);
+    };
+
+    const handleAcceptAiPolicyClick = async () => {
+        if (!isAuthenticated) {
+            navigate('/login');
+            return;
+        }
+        const policyId = onboarding?.activeAiPolicyId ?? aiPolicyStatus?.policy?.id;
+        if (!policyId) {
+            setSubmitError('Không tìm thấy policy AI đang hiệu lực để chấp nhận.');
+            return;
+        }
+        setSubmitting(true);
+        setSubmitError('');
+        setSubmitSuccess('');
+        const acceptRes = await acceptAuthorPolicy(policyId);
+        if (!acceptRes?.success) {
+            setSubmitError(acceptRes?.message || 'Không thể chấp nhận policy AI.');
+            setSubmitting(false);
+            return;
+        }
+        try {
+            await refreshAuthorFlowStatus();
+            setSubmitSuccess('Đã ghi nhận chấp nhận policy AI.');
+        } catch {
+            setSubmitError('Đã chấp nhận nhưng không tải lại trạng thái; vui lòng tải lại trang.');
+        }
+        setSubmitting(false);
+    };
+
     const handleBecomeAuthor = async () => {
         if (!isAuthenticated) {
             navigate('/login');
@@ -136,7 +224,7 @@ export default function PolicyPage() {
         setSubmitError('');
         setSubmitSuccess('');
 
-        const result = await becomeAuthor(policy?.id);
+        const result = await becomeAuthor();
         if (!result?.success) {
             setSubmitError(result?.message || 'Không thể đăng ký làm tác giả.');
             setSubmitting(false);
@@ -146,12 +234,7 @@ export default function PolicyPage() {
         setSubmitSuccess('Đăng ký tác giả thành công. Hệ thống đã cập nhật quyền và token mới cho bạn.');
 
         try {
-            const [onboardingData, authorStatus] = await Promise.all([
-                getAuthorOnboardingStatus(),
-                getMyAuthorPolicyStatus('AUTHOR'),
-            ]);
-            setOnboarding(onboardingData);
-            setAuthorPolicyStatus(authorStatus);
+            await refreshAuthorFlowStatus();
         } catch {
             // Ignore refresh errors here because the role upgrade already succeeded.
         }
@@ -255,7 +338,6 @@ export default function PolicyPage() {
                                 { value: 'USER', label: 'Người dùng' },
                                 { value: 'AUTHOR', label: 'Tác giả' },
                                 { value: 'AI', label: 'AI' },
-                                { value: 'DEFAULT', label: 'Mặc định' },
                             ].map((opt) => (
                                 <button
                                     key={opt.value}
@@ -316,7 +398,7 @@ export default function PolicyPage() {
                                             Trạng thái đăng ký tác giả
                                         </h3>
                                         <p className="text-sm text-slate-600 dark:text-slate-300">
-                                            Hoàn tất các điều kiện dưới đây rồi nhấn đồng ý để nâng tài khoản từ người dùng lên tác giả.
+                                            Bạn phải đọc và chấp nhận cả policy Tác giả và policy AI đang hiệu lực, sau đó nhấn đăng ký tác giả.
                                         </p>
                                     </div>
                                 </div>
@@ -350,13 +432,50 @@ export default function PolicyPage() {
                                                 </p>
                                             </div>
 
-                                            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4">
-                                                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
-                                                    Đã chấp nhận policy
+                                            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 md:col-span-2">
+                                                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                                                    Chấp nhận policy (bắt buộc)
                                                 </p>
-                                                <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                                    {authorPolicyStatus?.hasAccepted || onboarding?.hasAcceptedActivePolicy ? 'Đã chấp nhận' : 'Chưa chấp nhận'}
-                                                </p>
+                                                <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 text-sm">
+                                                    <div className="flex-1 min-w-[10rem] rounded-lg border border-slate-100 dark:border-slate-700 p-3">
+                                                        <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold mb-1">Tác giả</p>
+                                                        <p className="font-semibold text-slate-900 dark:text-white">
+                                                            {onboarding?.hasAcceptedActivePolicy ? 'Đã chấp nhận' : 'Chưa chấp nhận'}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex-1 min-w-[10rem] rounded-lg border border-slate-100 dark:border-slate-700 p-3">
+                                                        <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold mb-1">AI</p>
+                                                        <p className="font-semibold text-slate-900 dark:text-white">
+                                                            {onboarding?.hasAcceptedActiveAiPolicy ? 'Đã chấp nhận' : 'Chưa chấp nhận'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleAcceptAuthorPolicyClick}
+                                                        disabled={
+                                                            submitting ||
+                                                            onboarding?.hasAcceptedActivePolicy ||
+                                                            !onboarding?.activeAuthorPolicyId
+                                                        }
+                                                        className="flex-1 px-4 py-2 rounded-lg border-2 border-emerald-500 text-emerald-700 dark:text-emerald-300 font-semibold text-sm hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        Chấp nhận policy tác giả
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleAcceptAiPolicyClick}
+                                                        disabled={
+                                                            submitting ||
+                                                            onboarding?.hasAcceptedActiveAiPolicy ||
+                                                            !onboarding?.activeAiPolicyId
+                                                        }
+                                                        className="flex-1 px-4 py-2 rounded-lg border-2 border-emerald-500 text-emerald-700 dark:text-emerald-300 font-semibold text-sm hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        Chấp nhận policy AI
+                                                    </button>
+                                                </div>
                                             </div>
 
                                             <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4">
