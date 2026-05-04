@@ -78,13 +78,10 @@ namespace AIStory.Tests
         }
 
         private static string VietnameseDescription50Words() =>
-            // 50 từ, tổng 199 ký tự để vừa điều kiện min 50 words và max 200 chars.
             string.Join(" ", Enumerable.Repeat("bao", 50));
 
-        private static string VietnameseDescriptionTooLong() =>
-            string.Join(" ", Enumerable.Repeat(
-                "Nội dung báo cáo rất dài nhằm mô phỏng trường hợp người dùng nhập quá nhiều ký tự vượt giới hạn cho phép của hệ thống.",
-                3));
+        private static string VietnameseDescription50WordsPlusManyChars() =>
+            VietnameseDescription50Words() + new string('x', 500);
 
         [Fact]
         public async Task UTCID01_CreateStoryReportAsync_Success_WhenAllInputsValid()
@@ -215,25 +212,37 @@ namespace AIStory.Tests
         }
 
         [Fact]
-        public async Task UTCID06_CreateStoryReportAsync_Fail_WhenDescriptionTooLong()
+        public async Task UTCID06_CreateStoryReportAsync_Success_WhenDescriptionVeryLong()
         {
-            // Arrange
-            var sut = CreateSut(out var userLookupMock, out var userActivityMock, out var gatewayMock);
+            var storyId = Guid.NewGuid();
+            var reporterId = Guid.NewGuid();
+            var reportId = Guid.NewGuid();
             var req = new CreateStoryReportRequestDto
             {
-                ReasonCode = "OTHER",
-                Description = VietnameseDescriptionTooLong()
+                ReasonCode = "SPAM_AD",
+                Description = VietnameseDescription50WordsPlusManyChars()
             };
+            var story = new stories
+            {
+                id = storyId,
+                status = "PUBLISHED",
+                author_id = Guid.NewGuid(),
+                title = "Bóng Trăng Trên Thành Cổ"
+            };
+            var sut = CreateSut(out var userLookupMock, out var userActivityMock, out var gatewayMock);
 
-            // Act
-            var ex = await Record.ExceptionAsync(() => sut.CreateStoryReportAsync(Guid.NewGuid(), Guid.NewGuid(), req));
-            LogTestCase("UTCID06", "Description vượt giới hạn ký tự.", req, null, ex);
+            userLookupMock.Setup(x => x.Exists(reporterId)).Returns(true);
+            userActivityMock.Setup(x => x.HasReadAnyChapterOfStory(reporterId, storyId)).Returns(true);
+            gatewayMock.Setup(x => x.GetStoryById(storyId)).Returns(story);
+            gatewayMock
+                .Setup(x => x.AppendStoryReportAggregated(storyId, reporterId, "SPAM_AD", req.Description!.Trim()))
+                .Returns(reportId);
 
-            // Assert
-            Assert.NotNull(ex);
-            gatewayMock.Verify(x => x.AppendStoryReportAggregated(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-            userLookupMock.Verify(x => x.Exists(It.IsAny<Guid>()), Times.Never);
-            userActivityMock.Verify(x => x.HasReadAnyChapterOfStory(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+            var result = await sut.CreateStoryReportAsync(storyId, reporterId, req);
+            LogTestCase("UTCID06", "Mô tả dài (≥50 từ, nhiều ký tự) vẫn tạo báo cáo.", new { storyId, reporterId, req }, result);
+
+            Assert.Equal(reportId, result.ReportId);
+            gatewayMock.Verify(x => x.AppendStoryReportAggregated(storyId, reporterId, "SPAM_AD", req.Description.Trim()), Times.Once);
         }
 
         [Fact]

@@ -311,36 +311,45 @@ namespace AIStory.Tests
             Assert.Empty(resolveStore);
         }
 
-        /// <summary>UTCID07 – Description vượt 200 ký tự (sau trim).</summary>
+        /// <summary>UTCID07 – Description dài (&gt;200 ký tự) vẫn REJECT thành công.</summary>
         [Fact]
-        public async Task UTCID07_AdminResolveComplianceAdminActionRequest_Fail_WhenDescriptionTooLong()
+        public async Task UTCID07_AdminResolveComplianceAdminActionRequest_Success_WhenDescriptionVeryLong()
         {
-            var resolveStore = new List<(Guid RequestId, Guid AdminId, string FinalStatus, string? Note, string Action)>();
-            var sut = CreateSut(resolveStore, out var gatewayMock);
             var requestId = Guid.NewGuid();
             var adminId = Guid.NewGuid();
+            var storyId = Guid.NewGuid();
+            var resolveStore = new List<(Guid RequestId, Guid AdminId, string FinalStatus, string? Note, string Action)>();
+            var sut = CreateSut(resolveStore, out var gatewayMock);
             var dto = new AdminResolveComplianceAdminActionRequestDto
             {
                 Decision = "REJECT",
                 ReasonCode = "OTHER",
                 AdminNote = "note",
-                Description = new string('x', 201)
+                Description = new string('x', 500)
             };
+            gatewayMock.Setup(x => x.GetTrackedById(requestId)).Returns(new compliance_admin_action_requests
+            {
+                id = requestId,
+                story_id = storyId,
+                target_user_id = Guid.NewGuid(),
+                requester_id = Guid.NewGuid(),
+                request_kind = ComplianceAdminActionRequestDAO.KindBanUser,
+                status = ComplianceAdminActionRequestDAO.StatusPending
+            });
+            gatewayMock.Setup(x => x.GetStoryById(storyId)).Returns(new stories { id = storyId, status = "PUBLISHED", title = "T", summary = "S" });
 
-            var ex = await Record.ExceptionAsync(() => sut.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, dto));
+            await sut.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, dto);
+
             LogTestCase(
                 utcId: "UTCID07",
-                spec: "Description > 200 ký tự → ArgumentException Mô tả tối đa 200 ký tự.; không CanUserResolve / không MarkResolved.",
+                spec: "Description rất dài → không lỗi độ dài; REJECT → MarkResolved REJECTED.",
                 input: new { requestId, adminId, dto.Decision, dto.ReasonCode, descriptionLength = dto.Description?.Length },
-                output: null,
-                ex);
+                output: new { resolved = resolveStore[0] },
+                ex: null);
 
-            Assert.NotNull(ex);
-            var ax = Assert.IsType<ArgumentException>(ex);
-            Assert.Equal("Mô tả tối đa 200 ký tự.", ax.Message);
-            gatewayMock.Verify(x => x.CanUserResolveComplianceAdminAction(It.IsAny<Guid>()), Times.Never);
-            gatewayMock.Verify(x => x.MarkResolved(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string>()), Times.Never);
-            Assert.Empty(resolveStore);
+            Assert.Single(resolveStore);
+            gatewayMock.Verify(x => x.CanUserResolveComplianceAdminAction(adminId), Times.Once);
+            gatewayMock.Verify(x => x.MarkResolved(requestId, adminId, ComplianceAdminActionRequestDAO.StatusRejected, dto.AdminNote, "REJECT"), Times.Once);
         }
 
         /// <summary>UTCID08 – Description = null (tùy chọn; không gây lỗi validation).</summary>

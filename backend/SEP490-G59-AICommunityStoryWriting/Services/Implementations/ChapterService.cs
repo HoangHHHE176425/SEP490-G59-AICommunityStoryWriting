@@ -247,7 +247,18 @@ namespace Services.Implementations
             if (request.AiSimilarityPercent.HasValue)
                 chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
 
+            if (string.Equals(status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+            {
+                if (story.author_id is Guid pendingAuthorId && _userLookup.IsAuthorWritingSuspended(pendingAuthorId))
+                    throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
+                EnsureCanSubmitForReview(chapter);
+                chapter.submitted_for_review_at = DateTime.UtcNow;
+            }
+
             _chapterRepository.Add(chapter);
+
+            if (string.Equals(status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
 
             // Nếu trước đó FE đã dùng draft_chapter_id để lưu AI gợi ý,
             // map toàn bộ record draft sang chapter thật ngay khi tạo xong.

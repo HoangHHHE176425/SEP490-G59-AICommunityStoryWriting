@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { UserPlus, UserMinus, Gift, BookOpen, Quote, Eye, Star, Compass, CheckCircle } from 'lucide-react';
+import { UserPlus, UserMinus, Gift, BookOpen, Quote, Eye, Star, CheckCircle } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getProfileByUserId } from '../../api/account/accountApi';
@@ -8,6 +8,8 @@ import { getStoriesByAuthor } from '../../api/story/storyApi';
 import { getAuthorFollowing, getAuthorFollowersCount, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+
+const exploreCtaLogoUrl = `${import.meta.env.BASE_URL}logo.png`;
 
 function formatJoinDate(dateStr) {
     if (!dateStr) return '';
@@ -479,17 +481,10 @@ export function AuthorDetail() {
                                                             </span>
                                                         )}
                                                     </div>
-                                                    <div className="flex items-center justify-between pt-2 text-[11px] md:text-xs text-slate-500">
+                                                    <div className="pt-2 text-[11px] md:text-xs text-slate-500">
                                                         <span>
                                                             #{index + 1} trong {mainCategory}
                                                         </span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(e) => e.preventDefault()}
-                                                            className="px-3 py-1 rounded-full border border-slate-300 text-[11px] font-medium text-slate-600 bg-white hover:bg-slate-50"
-                                                        >
-                                                            Xem xếp hạng
-                                                        </button>
                                                     </div>
                                                 </div>
                                             </Link>
@@ -501,8 +496,12 @@ export function AuthorDetail() {
                             {/* Thẻ gợi ý / làm đầy trang */}
                             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                                 <div className="flex flex-col sm:flex-row">
-                                    <div className="w-full sm:w-48 h-32 sm:h-auto bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center shrink-0">
-                                        <Compass className="w-12 h-12 text-slate-400" />
+                                    <div className="w-full sm:w-52 shrink-0 overflow-hidden bg-slate-100 flex items-center justify-center p-4">
+                                        <img
+                                            src={exploreCtaLogoUrl}
+                                            alt=""
+                                            className="w-full max-h-32 sm:max-h-none sm:h-full sm:min-h-[9rem] object-contain"
+                                        />
                                     </div>
                                     <div className="p-5 flex-1">
                                         <h3 className="font-semibold text-slate-800 mb-1">Khám phá thêm truyện</h3>
