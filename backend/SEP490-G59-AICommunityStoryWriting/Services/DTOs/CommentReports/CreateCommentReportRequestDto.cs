@@ -10,7 +10,6 @@ public class CreateCommentReportRequestDto
     public string ReasonCode { get; set; } = null!;
 
     /// <summary>Bắt buộc có nội dung; tối thiểu 50 từ — kiểm tra chi tiết ở <see cref="UserReportDescriptionRules"/>.</summary>
-    [MaxLength(UserReportDescriptionRules.MaxLength)]
     public string? Description { get; set; }
 }
 

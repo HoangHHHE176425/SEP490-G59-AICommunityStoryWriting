@@ -67,7 +67,7 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// 50 từ (tiếng Việt + từ viết tắt hay gặp trong báo cáo thật), vừa đủ <see cref="UserReportDescriptionRules.MinWords"/> từ và tối đa <see cref="UserReportDescriptionRules.MaxLength"/> ký tự.
+        /// 50 từ (tiếng Việt + từ viết tắt hay gặp trong báo cáo thật), đủ <see cref="UserReportDescriptionRules.MinWords"/> từ.
         /// </summary>
         private static readonly string[] CommentReportDescriptionTokens50 =
         {
@@ -82,27 +82,16 @@ namespace AIStory.Tests
         private static readonly string TooShortCommentReportDescription =
             string.Join(" ", CommentReportDescriptionTokens50.Take(49));
 
-        /// <summary>Vượt <see cref="UserReportDescriptionRules.MaxLength"/> nhưng vẫn đủ <see cref="UserReportDescriptionRules.MinWords"/> từ (thêm ký tự vào cuối không tách thêm từ).</summary>
-        private static readonly string TooLongCommentReportDescription =
-            ValidCommentReportDescription + "x";
-
         static UT_CreateCommentReport()
         {
             var t = ValidCommentReportDescription.Trim();
-            if (UserReportDescriptionRules.CountWords(t) < UserReportDescriptionRules.MinWords
-                || t.Length > UserReportDescriptionRules.MaxLength)
+            if (UserReportDescriptionRules.CountWords(t) < UserReportDescriptionRules.MinWords)
                 throw new InvalidOperationException(
                     $"Fixture mô tả hợp lệ sai quy tắc: độ dài={t.Length}, số từ={UserReportDescriptionRules.CountWords(t)}.");
 
             var shortText = TooShortCommentReportDescription.Trim();
             if (UserReportDescriptionRules.CountWords(shortText) >= UserReportDescriptionRules.MinWords)
                 throw new InvalidOperationException("Fixture mô tả quá ngắn phải dưới 50 từ.");
-
-            var longText = TooLongCommentReportDescription.Trim();
-            if (longText.Length <= UserReportDescriptionRules.MaxLength
-                || UserReportDescriptionRules.CountWords(longText) < UserReportDescriptionRules.MinWords)
-                throw new InvalidOperationException(
-                    $"Fixture mô tả quá dài sai quy tắc: độ dài={longText.Length}, số từ={UserReportDescriptionRules.CountWords(longText)}.");
         }
 
         private CommentReportService CreateSut(
@@ -137,7 +126,7 @@ namespace AIStory.Tests
         /// <summary>
         /// UTCID01 – luồng thành công: gọi trực tiếp <see cref="CommentReportService.CreateCommentReportAsync"/>.
         /// Điều kiện: bình luận và truyện tồn tại; truyện đã xuất bản (PUBLISHED); người báo cáo đăng nhập hợp lệ;
-        /// chưa từng báo cáo bình luận này; người báo cáo không phải chủ bình luận; mã lý do và mô tả hợp lệ (≥ 50 từ, ≤ 200 ký tự sau trim).
+        /// chưa từng báo cáo bình luận này; người báo cáo không phải chủ bình luận; mã lý do và mô tả hợp lệ (≥ 50 từ).
         /// Kết quả: <see cref="Guid"/> báo cáo khác Empty; nhật ký service ghi Tạo báo cáo thành công kèm ReportId và ngữ cảnh (xem Standard Output khi chạy test).
         /// </summary>
         [Fact]
@@ -152,7 +141,6 @@ namespace AIStory.Tests
 
             var description = ValidCommentReportDescription;
             var trimmedDescription = description.Trim();
-            Assert.True(trimmedDescription.Length <= UserReportDescriptionRules.MaxLength);
 
             var request = new CreateCommentReportRequestDto
             {
@@ -340,38 +328,52 @@ namespace AIStory.Tests
             gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
         }
 
-        /// <summary>UTCID07 – Mô tả sau trim vượt <see cref="UserReportDescriptionRules.MaxLength"/> ký tự (đã đủ số từ tối thiểu).</summary>
+        /// <summary>UTCID07 – Mô tả rất dài (đủ từ tối thiểu, nhiều ký tự) vẫn tạo báo cáo.</summary>
         [Fact]
-        public void UTCID07_CreateCommentReportAsync_Fail_WhenDescriptionTooLong()
+        public void UTCID07_CreateCommentReportAsync_Success_WhenDescriptionVeryLong()
         {
+            var commentId = Guid.NewGuid();
+            var storyId = Guid.NewGuid();
+            var commentOwnerId = Guid.NewGuid();
+            var reporterId = Guid.NewGuid();
+            Assert.NotEqual(commentOwnerId, reporterId);
+
+            var desc = ValidCommentReportDescription + new string('z', 400);
             var reportStore = new List<reports>();
             var evidenceStore = new List<report_evidences>();
-            var sut = CreateSut(reportStore, evidenceStore, out _, out var gatewayMock);
-            var commentId = Guid.NewGuid();
-            var reporterId = Guid.NewGuid();
-            var desc = TooLongCommentReportDescription;
-            var trimmed = desc.Trim();
-            var request = new CreateCommentReportRequestDto { ReasonCode = "OTHER", Description = desc };
+            var sut = CreateSut(reportStore, evidenceStore, out var userLookupMock, out var gatewayMock);
 
-            var ex = Record.Exception(() => sut.CreateCommentReportAsync(commentId, reporterId, request).GetAwaiter().GetResult());
+            var request = new CreateCommentReportRequestDto { ReasonCode = "SPAM_AD", Description = desc };
+
+            gatewayMock.Setup(x => x.GetCommentById(commentId)).Returns(new comments
+            {
+                id = commentId,
+                story_id = storyId,
+                user_id = commentOwnerId
+            });
+            gatewayMock.Setup(x => x.GetUserRoleAsync(commentOwnerId)).ReturnsAsync("USER");
+            gatewayMock.Setup(x => x.GetStoryById(storyId)).Returns(new stories { id = storyId, status = "PUBLISHED" });
+            gatewayMock.Setup(x => x.FindOpenGroupedReportAsync(commentId, "SPAM_AD")).ReturnsAsync((reports?)null);
+
+            var reportId = sut.CreateCommentReportAsync(commentId, reporterId, request, expectedStoryId: storyId).GetAwaiter().GetResult();
             LogTestCase(
                 utcId: "UTCID07",
-                spec: $"Mô tả quá dài (sau trim > {UserReportDescriptionRules.MaxLength} ký tự; đủ {UserReportDescriptionRules.MinWords} từ) → ArgumentException, không tạo báo cáo.",
+                spec: "Mô tả dài (≥50 từ, nhiều ký tự) → tạo báo cáo thành công.",
                 input: new
                 {
                     commentId,
                     reporterId,
                     request.ReasonCode,
-                    request.Description,
-                    descriptionCharCount = trimmed.Length,
-                    descriptionWordCount = UserReportDescriptionRules.CountWords(trimmed)
+                    descriptionCharCount = desc.Trim().Length,
+                    descriptionWordCount = UserReportDescriptionRules.CountWords(desc.Trim())
                 },
-                output: null,
-                ex);
+                output: new { ReportId = reportId },
+                ex: null);
 
-            Assert.NotNull(ex);
-            var ae = Assert.IsType<ArgumentException>(ex);
-            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Never);
+            Assert.NotEqual(Guid.Empty, reportId);
+            Assert.Single(reportStore);
+            gatewayMock.Verify(x => x.AddReport(It.IsAny<reports>()), Times.Once);
+            userLookupMock.Verify(x => x.Exists(reporterId), Times.Once);
         }
 
         /// <summary>UTCID08 – Tạo báo cáo với <c>Description</c> null (thiếu mô tả).</summary>

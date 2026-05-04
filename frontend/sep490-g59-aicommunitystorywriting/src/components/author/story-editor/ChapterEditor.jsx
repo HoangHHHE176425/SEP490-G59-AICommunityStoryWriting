@@ -581,6 +581,7 @@ export function ChapterEditor({
                                 onChange={(e) => setCoCreateIdea(e.target.value)}
                                 placeholder="Ví dụ: Nhân vật A gặp lại B sau 5 năm, xung đột nổ ra..."
                                 rows={4}
+                                disabled={coCreateLoading}
                                 style={{
                                     width: '100%',
                                     padding: '0.75rem',
@@ -589,6 +590,8 @@ export function ChapterEditor({
                                     fontSize: '0.875rem',
                                     outline: 'none',
                                     resize: 'vertical',
+                                    opacity: coCreateLoading ? 0.7 : 1,
+                                    cursor: coCreateLoading ? 'not-allowed' : 'text',
                                 }}
                             />
                             {coCreateError ? (
@@ -606,6 +609,7 @@ export function ChapterEditor({
                                         setShowCoCreateIdeaPopup(false);
                                     }
                                 }}
+                                disabled={coCreateLoading}
                                 style={{
                                     padding: '0.5rem 1rem',
                                     fontSize: '0.875rem',

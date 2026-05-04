@@ -6,7 +6,6 @@ namespace Services.StoryReporting;
 public static class UserReportDescriptionRules
 {
     public const int MinWords = 50;
-    public const int MaxLength = 200;
 
     public static int CountWords(string trimmedText)
     {
@@ -15,7 +14,7 @@ public static class UserReportDescriptionRules
     }
 
     /// <summary>
-    /// Ném <see cref="ArgumentException"/> nếu thiếu mô tả, dưới <see cref="MinWords"/> từ, hoặc vượt <see cref="MaxLength"/> ký tự (sau trim).
+    /// Ném <see cref="ArgumentException"/> nếu thiếu mô tả hoặc dưới <see cref="MinWords"/> từ (sau trim).
     /// </summary>
     public static void ValidateDescription(string? description)
     {
@@ -26,8 +25,5 @@ public static class UserReportDescriptionRules
         var wc = CountWords(trimmed);
         if (wc < MinWords)
             throw new ArgumentException($"Mô tả báo cáo cần ít nhất {MinWords} từ (hiện tại: {wc} từ).");
-
-        if (trimmed.Length > MaxLength)
-            throw new ArgumentException($"Mô tả báo cáo tối đa {MaxLength} ký tự.");
     }
 }

@@ -83,7 +83,7 @@ Quy tắc bắt buộc:
             }
 
             var useHistoryMin = _configuration.GetValue("AI:UseHistoryBasedMinRequiredTokens", true);
-            var historyBuffer = _configuration.GetValue("AI:MinRequiredTokensHistoryBuffer", 3000);
+            var historyBuffer = _configuration.GetValue("AI:MinRequiredTokensHistoryBuffer", 1000);
             var suggestFallbackMin = _configuration.GetValue("AI:SuggestMinRequiredTokens", 3800);
             var historyMaxSuggest = useHistoryMin
                 ? _aiUsageLogRepository.GetMaxTotalTokensForStoryAndActionType(request.StoryId, ActionType)
