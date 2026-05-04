@@ -165,7 +165,7 @@ namespace AIStory.Tests
 
             // Act
             var ex = await Record.ExceptionAsync(() => sut.CreateStoryReportAsync(Guid.NewGuid(), reporterId, req));
-            LogTestCase("UTCID03", "User không tồn tại phải.", new { reporterId, req }, null, ex);
+            LogTestCase("UTCID03", "User không tồn tại.", new { reporterId, req }, null, ex);
 
             // Assert
             Assert.NotNull(ex);
