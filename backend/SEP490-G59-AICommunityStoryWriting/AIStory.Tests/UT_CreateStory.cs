@@ -16,34 +16,63 @@ namespace AIStory.Tests
 {
     public class UT_CreateStory
     {
+        //Dùng để log quá trình xử lý của service ra test output trong unit test.
         public class TestLogger<T> : ILogger<T>
         {
+            // Biến dùng để ghi log ra output của test (do xUnit cung cấp)
             private readonly ITestOutputHelper _output;
+
+            // Constructor: nhận ITestOutputHelper từ bên ngoài (dependency injection)
+            // → để logger có thể dùng _output ghi log
             public TestLogger(ITestOutputHelper output) => _output = output;
+
+            // Method của ILogger: dùng để tạo scope (nhóm log)
+            // Ở đây không dùng → trả về null để bỏ qua
             public IDisposable BeginScope<TState>(TState state) => null!;
+
+            // Kiểm tra level log có được bật không (Info, Error, Warning…)
+            // Luôn trả true → log level nào cũng cho phép in
             public bool IsEnabled(LogLevel logLevel) => true;
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+
+            // Method quan trọng nhất: xử lý việc ghi log
+            public void Log<TState>(
+                LogLevel logLevel,                 // mức độ log (Info, Error…)
+                EventId eventId,                  // id của event log (ít dùng trong test)
+                TState state,                     // nội dung log (raw)
+                Exception? exception,            // exception nếu có
+                Func<TState, Exception?, string> formatter // hàm convert log → string
+            )
+                // Convert nội dung log thành string rồi in ra test output
                 => _output.WriteLine(formatter(state, exception));
         }
 
+        // Biến giữ nơi để in log trong class test
         private readonly ITestOutputHelper _output;
 
+        // Constructor của class test:
+        // xUnit sẽ tự inject ITestOutputHelper vào đây khi tạo instance test
         public UT_CreateStory(ITestOutputHelper output) => _output = output;
 
+        //serialize object thành JSON khi log trong test
         private static readonly JsonSerializerOptions _jsonOptions = new()
         {
+            //format xuống dòng
             WriteIndented = true,
+            //Field nào null
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+            //bỏ qua vòng lặp
             ReferenceHandler = ReferenceHandler.IgnoreCycles,
+            //escape ký tự đặc biệt
             Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
 
+        //log chi tiết 1 test case ra màn hình test
         private void LogTestCase(
-            string utcId,
-            string spec,
-            object? input,
-            object? output,
-            Exception? ex = null)
+            string utcId,     // ID của test case (ví dụ: UTCID01)
+            string spec,      // Mô tả test case (đang test cái gì)
+            object? input,    // Dữ liệu đầu vào
+            object? output,   // Kết quả trả về (nếu thành công)
+            Exception? ex = null) // Exception nếu có lỗi (optional)
         {
             _output.WriteLine("");
             _output.WriteLine($"========== {utcId} ==========");
@@ -63,50 +92,41 @@ namespace AIStory.Tests
             }
         }
 
-        /// <summary>In-memory <c>List&lt;stories&gt;</c> do mock <c>IStoryRepository.Add</c> ghi vào — xem sau khi gọi <c>CreateSut</c> + <c>StoryService.Create</c> (cần <c>--logger \"console;verbosity=detailed\"</c> trên CLI).</summary>
-        private void LogStoryStore(string label, IReadOnlyList<stories> store)
-        {
-            _output.WriteLine("");
-            _output.WriteLine($"======== {label} — storyStore ({store.Count} phần tử) ========");
-            if (store.Count == 0)
-            {
-                _output.WriteLine("  (rỗng)");
-                return;
-            }
-
-            for (var i = 0; i < store.Count; i++)
-            {
-                var s = store[i];
-                var titlePreview = s.title == null ? "" : s.title.Length <= 24 ? s.title : s.title[..24] + "…";
-                _output.WriteLine(
-                    $"  [{i}] id={s.id}, slug={s.slug}, status={s.status}, progress={s.story_progress_status}, author_id={s.author_id}, title=\"{titlePreview}\" (len={s.title?.Length ?? 0}), summaryLen={s.summary?.Length ?? 0}, cover={s.cover_image}");
-            }
-        }
-
         private StoryService CreateSut(
+            //List giả lập database (in-memory)
             List<stories> storyStore,
             out Mock<IStoryRepository> storyRepoMock,
             out Mock<IChapterRepository> chapterRepoMock,
             out Mock<IUserLookup> userLookupMock,
             out Mock<ICategoryLookup> categoryLookupMock)
         {
+            //Khởi tạo mock (dùng Moq)
             storyRepoMock = new Mock<IStoryRepository>(MockBehavior.Strict);
             chapterRepoMock = new Mock<IChapterRepository>(MockBehavior.Strict);
             userLookupMock = new Mock<IUserLookup>(MockBehavior.Strict);
             categoryLookupMock = new Mock<ICategoryLookup>(MockBehavior.Strict);
 
+            //Setup mock behavior
+            //Lấy slug trong storyStore, không query trong đb
             storyRepoMock.Setup(x => x.GetBySlug(It.IsAny<string>()))
                 .Returns((string slug) => storyStore.FirstOrDefault(s => s.slug == slug));
-            // In-memory data store
+            //Add vào trong storyStore, không add đb 
             storyRepoMock.Setup(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()))
                 .Callback((stories s, IEnumerable<Guid> _) => storyStore.Add(s));
 
+            //Setup user logic
+            //User luôn tòn tại
             userLookupMock.Setup(x => x.Exists(It.IsAny<Guid>())).Returns(true);
+            //User luôn là auhor
             userLookupMock.Setup(x => x.IsAuthor(It.IsAny<Guid>())).Returns(true);
+            //Không bị ban (cho phép việt chuyện)
             userLookupMock.Setup(x => x.IsAuthorWritingSuspended(It.IsAny<Guid>())).Returns(false);
 
+            //In log ra test output
             var logger = new TestLogger<StoryService>(_output);
+            //Tạo cache thật (in-memory)
             var cache = new MemoryCache(new MemoryCacheOptions());
+            //Inject toàn bộ dependency vào StoryService
             return new StoryService(
                 storyRepoMock.Object,
                 chapterRepoMock.Object,
@@ -120,10 +140,13 @@ namespace AIStory.Tests
         /// UTCID01 – happy path: user/author hợp lệ, không suspend, toàn bộ field hợp lệ → tạo truyện thành công.
         /// Gọi trực tiếp <see cref="StoryService.Create"/> (instance <see cref="StoryService"/> như tầng service thật).
         /// </summary>
+        
+        // [Fact] đánh dấu đây là 1 test case
         [Fact]
         public void UTCID01_Create_Success_WhenAllInputsValid()
         {
-            // Arrange
+            //Arrange (chuẩn bị dữ liệu)
+            //Tạo dữ liệu đầu vào
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
             var category = new categories
@@ -134,13 +157,16 @@ namespace AIStory.Tests
                 is_active = true
             };
 
+            //Tạo môi trường test
+            //giả DB    
             var storyStore = new List<stories>();
+            //tạo service + mock dependencies
             StoryService storyService = CreateSut(storyStore,
                 out var storyRepoMock,
                 out var chapterRepoMock,
                 out var userLookupMock,
                 out var categoryLookupMock);
-
+            //GetById → trả category hợp lệ
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
 
             var title = "Tiên Kiếm Ký: Hành Trình Mở Cõi";
@@ -150,6 +176,7 @@ namespace AIStory.Tests
                           "Dù còn non trẻ, Lục Vân buộc phải học cách lựa chọn giữa thù hận cá nhân và trách nhiệm bảo vệ những người vô tội.";
             var coverImageUrl = "https://example.com/covers/valid-story-cover.jpg";
 
+            //Tạo request
             var request = new CreateStoryRequestDto
             {
                 Title = title,
@@ -159,8 +186,10 @@ namespace AIStory.Tests
                 StoryProgressStatus = "ONGOING"
             };
 
-            // Act
+            // Act (gọi hàm cần test)
+            //Gọi hàm cần test
             var dto = storyService.Create(request, authorId, coverImageUrl);
+            //Ghi log (Không ảnh hưởng logic test → chỉ để debug)
             LogTestCase(
                 utcId: "UTCID01",
                 spec: "Tạo truyện thành công với Author hợp lệ, không bị ban, slug chưa tồn tại.",
@@ -177,23 +206,38 @@ namespace AIStory.Tests
                 output: dto,
                 ex: null);
 
-            // Assert
+            //Assert (kiểm tra kết quả trả về) Kiểm tra dữ liệu trả về - nếu không có sẽ fail
+            //Phải có kết quả
             Assert.NotNull(dto);
+            //Kiểm tra mapping đúng
             Assert.Equal(title, dto.Title);
             Assert.Equal(summary, dto.Summary);
+            //Đúng author
             Assert.Equal(authorId, dto.AuthorId);
+            //Category được gán đúng
             Assert.Contains(categoryId, dto.CategoryIds!);
+            //Kiểm tra business data
             Assert.Equal("ONGOING", dto.StoryProgressStatus);
             Assert.Equal("13+", dto.AgeRating);
+            //URL ảnh đúng
             Assert.Equal(coverImageUrl, dto.CoverImage);
+            //Story mới tạo → mặc định DRAFT
             Assert.Equal("DRAFT", dto.Status);
+            //ID được generate
             Assert.NotEqual(Guid.Empty, dto.Id);
+            //Story đã được “lưu” vào fake DB
             Assert.Single(storyStore);
 
+            //Verify interaction - kiểm tra quá trình xử lý (Service có gọi Add thật không) - nếu không có sẽ fail
+            //Đảm bảo: Có gọi Add Và chỉ gọi 1 lần
             storyRepoMock.Verify(x => x.Add(It.IsAny<stories>(), It.IsAny<IEnumerable<Guid>>()), Times.Once);
+            //Service có check user tồn tại
             userLookupMock.Verify(x => x.Exists(authorId), Times.Once);
+            //Có check user bị ban không
             userLookupMock.Verify(x => x.IsAuthorWritingSuspended(authorId), Times.Once);
+            //Có validate category
             categoryLookupMock.Verify(x => x.GetById(categoryId), Times.Once);
+            //Đảm bảo: Không gọi sai dependency
             chapterRepoMock.VerifyNoOtherCalls();
 
         }
@@ -203,10 +247,11 @@ namespace AIStory.Tests
         /// Product: slug = base từ Title + hậu tố số khi trùng DB → hai story cùng Title vẫn tạo được (UTCID02).
         /// Không assert đúng từng chữ log.
         /// </summary>
+
         [Fact]
         public void UTCID02_Create_Success_WhenTitleDuplicatesExistingStory()
         {
-            // Arrange
+
             var existingAuthorId = Guid.NewGuid();
             var currentAuthorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();

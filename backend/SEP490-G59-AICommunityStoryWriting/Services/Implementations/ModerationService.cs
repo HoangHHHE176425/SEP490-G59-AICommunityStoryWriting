@@ -45,6 +45,8 @@ namespace Services.Implementations
         private readonly Action<Guid> _approveCompleteAssignment;
         private readonly Action<Guid> _approveMarkPendingVersionsAsPublished;
         private readonly bool _enableApproveChapterPostSideEffects;
+        /// <summary>Null = dùng ReviewAssignmentDAO (production). Non-null: unit test trả về true khi cần chặn duyệt chương vì claim truyện không thuộc moderator hiện tại.</summary>
+        private readonly Func<Guid, Guid, bool>? _approveStoryClaimBlocksChapterForModerator;
 
         public ModerationService(
             IStoryRepository storyRepository,
@@ -62,7 +64,8 @@ namespace Services.Implementations
             Func<Guid, stories?>? approveGetStoryById = null,
             Action<Guid>? approveCompleteAssignment = null,
             Action<Guid>? approveMarkPendingVersionsAsPublished = null,
-            bool enableApproveChapterPostSideEffects = true)
+            bool enableApproveChapterPostSideEffects = true,
+            Func<Guid, Guid, bool>? approveStoryClaimBlocksChapterForModerator = null)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
@@ -84,6 +87,7 @@ namespace Services.Implementations
             _approveMarkPendingVersionsAsPublished = approveMarkPendingVersionsAsPublished ?? (targetId =>
                 DataAccessObjects.DAOs.ChapterVersionDAO.MarkPendingVersionsAsPublished(targetId));
             _enableApproveChapterPostSideEffects = enableApproveChapterPostSideEffects;
+            _approveStoryClaimBlocksChapterForModerator = approveStoryClaimBlocksChapterForModerator;
         }
 
         public PagedResultDto<StoryListItemDto> GetPendingStories(int page = 1, int pageSize = 20, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null, string? timeStatusFilter = null)
@@ -770,11 +774,18 @@ namespace Services.Implementations
         }
 
         /// <summary>Bắt buộc đã "Nhận duyệt" (claim) — không cho duyệt/từ chối khi chưa lock hoặc lock cho người khác.</summary>
-        internal static void EnsureModeratorHasClaimedForReview(string targetType, Guid targetId, Guid moderatorId)
+        internal static void EnsureModeratorHasClaimedForReview(
+            string targetType,
+            Guid targetId,
+            Guid moderatorId,
+            Func<string, Guid, bool>? isLocked = null,
+            Func<string, Guid, Guid, bool>? isAssignedTo = null)
         {
-            if (!ReviewAssignmentDAO.IsLocked(targetType, targetId))
+            var lockedFn = isLocked ?? ((t, id) => ReviewAssignmentDAO.IsLocked(t, id));
+            var assignedFn = isAssignedTo ?? ((t, id, m) => ReviewAssignmentDAO.IsAssignedTo(t, id, m));
+            if (!lockedFn(targetType, targetId))
                 throw new InvalidOperationException("Bạn phải nhận duyệt mục này trước khi duyệt hoặc từ chối.");
-            if (!ReviewAssignmentDAO.IsAssignedTo(targetType, targetId, moderatorId))
+            if (!assignedFn(targetType, targetId, moderatorId))
                 throw new InvalidOperationException("Chỉ moderator đã nhận duyệt mới có thể duyệt hoặc từ chối mục này.");
         }
 
@@ -899,7 +910,6 @@ namespace Services.Implementations
 
         public bool ApproveChapter(Guid chapterId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
         {
-            Console.WriteLine($"[CONSOLE] ModerationService.ApproveChapter ENTER ChapterId={chapterId}");
             var chapter = _chapterRepository.GetById(chapterId);
             if (chapter == null)
             {
@@ -907,10 +917,8 @@ namespace Services.Implementations
                     "Không tìm thấy chương để duyệt. ChapterId={ChapterId}, ModeratorId={ModeratorId}",
                     chapterId,
                     moderatorId);
-                Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: chapter not found ChapterId={chapterId}");
                 return false;
             }
-            Console.WriteLine($"[CONSOLE] ApproveChapter chapter found Status={chapter.status} StoryId={chapter.story_id}");
             var hasPendingVersion = _versionRepository.GetByChapterId(chapterId)
                 .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
             // Cho phép duyệt khi: chapter gốc PENDING_REVIEW, hoặc chapter có ít nhất một version PENDING_REVIEW (kể cả chapter đang DRAFT).
@@ -923,9 +931,18 @@ namespace Services.Implementations
                     chapterId,
                     chapter.status,
                     hasPendingVersion);
-                Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: not pending (current={chapter.status}, hasPendingVersion={hasPendingVersion})");
                 return false;
             }
+
+            if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
+            {
+                _logger.LogWarning(
+                    "Cấu hình không hợp lệ (allowedCategoryIds rỗng). ChapterId={ChapterId}, ModeratorId={ModeratorId}",
+                    chapterId,
+                    moderatorId);
+                throw new InvalidOperationException("Cấu hình không hợp lệ");
+            }
+
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
             {
                 var story = _approveGetStoryById(chapter.story_id.Value);
@@ -936,20 +953,28 @@ namespace Services.Implementations
                         chapterId,
                         chapter.story_id,
                         moderatorId);
-                    Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: story not found or category not allowed");
                     return false;
                 }
             }
             try
             {
-                if (chapter.story_id.HasValue
-                    && ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, chapter.story_id.Value)
-                    && !ReviewAssignmentDAO.IsAssignedTo(
-                        ReviewAssignmentDAO.TargetTypeStory,
-                        chapter.story_id.Value,
-                        moderatorId))
+                if (chapter.story_id.HasValue)
                 {
-                    throw new InvalidOperationException(MsgStoryClaimedByAnotherModeratorCannotApproveChapter);
+                    var sid = chapter.story_id.Value;
+                    bool blocks;
+                    if (_approveStoryClaimBlocksChapterForModerator != null)
+                        blocks = _approveStoryClaimBlocksChapterForModerator(sid, moderatorId);
+                    else
+                    {
+                        blocks = ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, sid)
+                            && !ReviewAssignmentDAO.IsAssignedTo(
+                                ReviewAssignmentDAO.TargetTypeStory,
+                                sid,
+                                moderatorId);
+                    }
+
+                    if (blocks)
+                        throw new InvalidOperationException(MsgStoryClaimedByAnotherModeratorCannotApproveChapter);
                 }
 
                 _approveEnsureClaimed(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
@@ -963,16 +988,6 @@ namespace Services.Implementations
                     chapterId,
                     moderatorId);
                 throw;
-            }
-
-            if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
-            {
-                _logger.LogWarning(
-                    "Cấu hình không hợp lệ (allowedCategoryIds rỗng). ChapterId={ChapterId}, ModeratorId={ModeratorId}",
-                    chapterId,
-                    moderatorId);
-                Console.WriteLine($"[CONSOLE] ApproveChapter THROW: allowedCategoryIds empty");
-                throw new InvalidOperationException("Cấu hình không hợp lệ");
             }
 
             // Duyệt theo thứ tự CHỈ khi publish lần đầu cho chapter.
@@ -1031,7 +1046,6 @@ namespace Services.Implementations
             }
 
             // Cập nhật last_published_at của story nếu cần và gửi thông báo cho user follow story
-            Console.WriteLine($"[CONSOLE] ApproveChapter ChapterId={chapterId} StoryId={chapter.story_id} HasStoryId={chapter.story_id.HasValue}");
             _logger.LogWarning("[NOTIFY] ApproveChapter ChapterId={ChapterId} StoryId={StoryId} HasStoryId={HasValue}",
                 chapterId, chapter.story_id, chapter.story_id.HasValue);
             if (chapter.story_id.HasValue)
@@ -1042,7 +1056,6 @@ namespace Services.Implementations
                     story.last_published_at = DateTime.Now;
                     StoryDAO.Update(story);
                 }
-                Console.WriteLine($"[CONSOLE] ApproveChapter calling NotifyStoryFollowersNewChapter StoryId={chapter.story_id.Value} ChapterId={chapterId} StoryTitle={story?.title ?? "(null)"}");
                 _logger.LogWarning("[NOTIFY] ApproveChapter calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id.Value, chapterId);
                 var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapterId, chapter.title, story?.title, _logger);
                 _ = PushStoryFollowNotificationsAsync(createdNotifications);
@@ -1068,7 +1081,6 @@ namespace Services.Implementations
             }
             else
             {
-                Console.WriteLine($"[CONSOLE] ApproveChapter SKIP notify: chapter has no story_id ChapterId={chapterId}");
                 _logger.LogWarning("[NOTIFY] ApproveChapter SKIP notify: chapter has no story_id ChapterId={ChapterId}", chapterId);
             }
 
