@@ -1,6 +1,4 @@
 using BusinessObjects.Entities;
-using BusinessObjects;
-using DataAccessObjects.DAOs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -64,7 +62,8 @@ namespace AIStory.Tests
             out Mock<IStoryRepository> storyRepoMock,
             Action<string, Guid, Guid>? approveEnsureClaimed = null,
             Action<string, Guid, Guid>? approveEnsureNoPendingEscalation = null,
-            Func<Guid, stories?>? approveGetStoryById = null)
+            Func<Guid, stories?>? approveGetStoryById = null,
+            Func<Guid, Guid, bool>? approveStoryClaimBlocksChapterForModerator = null)
         {
             storyRepoMock = new Mock<IStoryRepository>(MockBehavior.Strict);
             chapterRepoMock = new Mock<IChapterRepository>(MockBehavior.Strict);
@@ -106,7 +105,8 @@ namespace AIStory.Tests
                 approveGetStoryById: approveGetStoryById ?? (storyId => new stories { id = storyId, status = "PUBLISHED", category = new List<categories> { new() { id = Guid.NewGuid(), name = "C1", slug = "c1", is_active = true } } }),
                 approveCompleteAssignment: _ => { },
                 approveMarkPendingVersionsAsPublished: _ => { },
-                enableApproveChapterPostSideEffects: false);
+                enableApproveChapterPostSideEffects: false,
+                approveStoryClaimBlocksChapterForModerator: approveStoryClaimBlocksChapterForModerator ?? ((_, __) => false));
         }
 
         [Fact]
@@ -163,7 +163,8 @@ namespace AIStory.Tests
                 out var chapterRepoMock,
                 out _,
                 out _,
-                approveEnsureClaimed: ModerationService.EnsureModeratorHasClaimedForReview);
+                approveEnsureClaimed: (tt, tid, mid) =>
+                    ModerationService.EnsureModeratorHasClaimedForReview(tt, tid, mid, isLocked: (_, __) => false));
 
             // Act
             var ex = Record.Exception(() => sut.ApproveChapter(chapterId, moderatorId, null));
@@ -188,30 +189,25 @@ namespace AIStory.Tests
             // Arrange
             var chapterId = Guid.NewGuid();
             var moderatorId = Guid.NewGuid();
-            Guid claimedModeratorId;
-            using (var db = new StoryPlatformDbContext())
-            {
-                claimedModeratorId = db.users.Select(u => u.id).FirstOrDefault();
-            }
-            Assert.NotEqual(Guid.Empty, claimedModeratorId);
+            var claimedModeratorId = Guid.NewGuid();
+            Assert.NotEqual(moderatorId, claimedModeratorId);
             var chapterStore = new List<chapters>
             {
                 new() { id = chapterId, story_id = Guid.NewGuid(), order_index = 0, status = "PENDING_REVIEW" }
             };
-            // Tạo trạng thái "đã claim bởi moderator khác" để đi đúng nhánh "không có quyền duyệt".
-            var claimed = ReviewAssignmentDAO.TryClaim(
-                ReviewAssignmentDAO.TargetTypeChapter,
-                chapterId,
-                claimedModeratorId,
-                reviewDeadlineUtc: DateTime.UtcNow.AddHours(4));
-            Assert.True(claimed);
-
+            // Mô phỏng chapter đã được moderator khác claim (không gọi SQL).
             var sut = CreateSut(
                 chapterStore,
                 out var chapterRepoMock,
                 out _,
                 out _,
-                approveEnsureClaimed: ModerationService.EnsureModeratorHasClaimedForReview);
+                approveEnsureClaimed: (tt, tid, mid) =>
+                    ModerationService.EnsureModeratorHasClaimedForReview(
+                        tt,
+                        tid,
+                        mid,
+                        isLocked: (_, id) => id == chapterId,
+                        isAssignedTo: (_, id, m) => m == claimedModeratorId));
 
             // Act
             var ex = Record.Exception(() => sut.ApproveChapter(chapterId, moderatorId, null));
@@ -230,7 +226,6 @@ namespace AIStory.Tests
             chapterRepoMock.Verify(x => x.GetById(chapterId), Times.Once);
             chapterRepoMock.Verify(x => x.Update(It.IsAny<chapters>()), Times.Never);
             chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
-            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
         }
 
         [Fact]
@@ -399,12 +394,7 @@ namespace AIStory.Tests
             var storyId = Guid.NewGuid();
             var chapterId = Guid.NewGuid();
             var moderatorId = Guid.NewGuid();
-            Guid claimedModeratorId;
-            using (var db = new StoryPlatformDbContext())
-            {
-                claimedModeratorId = db.users.Select(u => u.id).FirstOrDefault();
-            }
-            Assert.NotEqual(Guid.Empty, claimedModeratorId);
+            var claimedModeratorId = Guid.NewGuid();
             Assert.NotEqual(claimedModeratorId, moderatorId);
 
             var chapterStore = new List<chapters>
@@ -420,19 +410,15 @@ namespace AIStory.Tests
                 }
             };
 
-            var claimed = ReviewAssignmentDAO.TryClaim(
-                ReviewAssignmentDAO.TargetTypeStory,
-                storyId,
-                claimedModeratorId,
-                reviewDeadlineUtc: DateTime.UtcNow.AddHours(4));
-            Assert.True(claimed);
-
             var sut = CreateSut(
                 chapterStore,
                 out var chapterRepoMock,
                 out _,
                 out _,
-                approveEnsureClaimed: ModerationService.EnsureModeratorHasClaimedForReview);
+                approveEnsureClaimed: (tt, tid, mid) =>
+                    ModerationService.EnsureModeratorHasClaimedForReview(tt, tid, mid),
+                approveStoryClaimBlocksChapterForModerator: (sid, mid) =>
+                    sid == storyId && mid != claimedModeratorId);
 
             // Act — moderator khác đã nhận duyệt truyện → không được duyệt chương
             var ex = Record.Exception(() => sut.ApproveChapter(chapterId, moderatorId, null));
@@ -449,7 +435,6 @@ namespace AIStory.Tests
             chapterRepoMock.Verify(x => x.GetById(chapterId), Times.Once);
             chapterRepoMock.Verify(x => x.Update(It.IsAny<chapters>()), Times.Never);
             chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
-            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, storyId);
         }
 
 

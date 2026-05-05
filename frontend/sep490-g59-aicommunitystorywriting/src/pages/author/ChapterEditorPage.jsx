@@ -10,21 +10,14 @@ import { refresh as refreshAuth } from '../../api/auth/authApi';
 import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
 import { stripHtmlToText } from '../../utils/richText';
 import { countChapterWords as countWords } from '../../utils/chapterWordCount';
+import {
+    MAX_CO_CREATE_PROMPT_CHARS,
+    clampTextToCoCreatePromptLimit,
+    countCoCreatePromptDisplayLength,
+} from '../../utils/coCreatePromptCharCount';
 
 const MIN_PAID_COIN_PRICE = 10;
 const MAX_PAID_COIN_PRICE = 100;
-const MAX_CO_CREATE_PROMPT_WORDS = 1500;
-
-const clampTextToWordLimit = (text, maxWords) => {
-    if (!text) return '';
-    const words = text.match(/\S+/g);
-    if (!words || words.length <= maxWords) return text;
-
-    const matches = [...text.matchAll(/\S+/g)];
-    const lastAllowedWord = matches[maxWords - 1];
-    if (!lastAllowedWord) return text;
-    return text.slice(0, lastAllowedWord.index + lastAllowedWord[0].length);
-};
 
 /** Lấy chuỗi JSON dàn ý thực từ outline (bỏ hướng dẫn + ví dụ mẫu). Ưu tiên khối có "scenes" ở cuối chuỗi. */
 function extractOutlineJson(raw) {
@@ -705,8 +698,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             return;
         }
         const idea = useCoCreatePrompt ? (coCreateIdea || '').trim() : '';
-        if (useCoCreatePrompt && countWords(idea) > MAX_CO_CREATE_PROMPT_WORDS) {
-            const errorText = `Nội dung định hướng chỉ được tối đa ${MAX_CO_CREATE_PROMPT_WORDS} từ.`;
+        if (useCoCreatePrompt && countCoCreatePromptDisplayLength(idea) > MAX_CO_CREATE_PROMPT_CHARS) {
+            const errorText = `Nội dung định hướng chỉ được tối đa ${MAX_CO_CREATE_PROMPT_CHARS} ký tự.`;
             setCoCreateError(errorText);
             showToast(errorText, 'error');
             return;
@@ -1741,26 +1734,13 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                 <textarea
                                     value={coCreateIdea}
                                     onChange={(e) => {
-                                        const rawNextValue = e.target.value;
-                                        const currentWordCount = countWords(coCreateIdea);
-                                        const nextWordCount = countWords(rawNextValue);
-
-                                        // Khi đã chạm giới hạn 1500 từ, không cho tăng thêm nội dung.
-                                        // Vẫn cho phép người dùng xóa hoặc chỉnh sửa không làm tăng độ dài.
-                                        if (
-                                            currentWordCount >= MAX_CO_CREATE_PROMPT_WORDS &&
-                                            nextWordCount >= MAX_CO_CREATE_PROMPT_WORDS &&
-                                            rawNextValue.length > coCreateIdea.length
-                                        ) {
-                                            return;
-                                        }
-
-                                        const nextValue = clampTextToWordLimit(rawNextValue, MAX_CO_CREATE_PROMPT_WORDS);
+                                        const nextValue = clampTextToCoCreatePromptLimit(e.target.value, MAX_CO_CREATE_PROMPT_CHARS);
                                         setCoCreateIdea(nextValue);
                                         setCoCreateError(null);
                                     }}
                                     placeholder="Ví dụ: Nhân vật A gặp lại B sau 5 năm, xung đột nổ ra..."
                                     rows={4}
+                                    disabled={coCreateLoading}
                                     style={{
                                         width: '100%',
                                         padding: '0.75rem',
@@ -1769,6 +1749,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         fontSize: '0.875rem',
                                         outline: 'none',
                                         resize: 'vertical',
+                                        opacity: coCreateLoading ? 0.7 : 1,
+                                        cursor: coCreateLoading ? 'not-allowed' : 'text',
                                     }}
                                 />
                             ) : (
@@ -1778,7 +1760,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             )}
                             {useCoCreatePrompt ? (
                                 <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#6b7280', textAlign: 'right' }}>
-                                    {countWords(coCreateIdea).toLocaleString()}/{MAX_CO_CREATE_PROMPT_WORDS.toLocaleString()} từ
+                                    {countCoCreatePromptDisplayLength(coCreateIdea || '').toLocaleString()}/{MAX_CO_CREATE_PROMPT_CHARS.toLocaleString()} ký tự
                                 </div>
                             ) : null}
                             <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', fontSize: '0.6875rem', color: '#9a3412' }}>
@@ -1799,6 +1781,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         setShowCoCreateIdeaPopup(false);
                                     }
                                 }}
+                                disabled={coCreateLoading}
                                 style={{
                                     padding: '0.5rem 1rem',
                                     fontSize: '0.875rem',

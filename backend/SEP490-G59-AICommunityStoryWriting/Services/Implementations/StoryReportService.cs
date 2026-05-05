@@ -1222,10 +1222,6 @@ public class StoryReportService : IStoryReportService
         if (dto.AdminNote != null && dto.AdminNote.Length > 2000)
             throw new ArgumentException("Ký tự quá dài: mô tả tối đa 2000 ký tự.");
 
-        var descriptionTrimmed = (dto.Description ?? "").Trim();
-        if (descriptionTrimmed.Length > UserReportDescriptionRules.MaxLength)
-            throw new ArgumentException($"Mô tả tối đa {UserReportDescriptionRules.MaxLength} ký tự.");
-
         var decision = (dto.Decision ?? "").Trim().ToUpperInvariant();
         if (decision is not ("APPROVE" or "REJECT"))
             throw new ArgumentException("Decision phải là APPROVE hoặc REJECT.");

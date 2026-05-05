@@ -52,6 +52,20 @@ async function enrichPublicationsWithAuthorProfile(list) {
     });
 }
 
+/** Mốc gửi duyệt: API trả pendingSince (BE từ submitted_for_review_at); fallback created_at/updated_at. */
+function pickSubmittedAtFromApi(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    return (
+        raw.pendingSince ??
+        raw.PendingSince ??
+        raw.createdAt ??
+        raw.CreatedAt ??
+        raw.updatedAt ??
+        raw.UpdatedAt ??
+        null
+    );
+}
+
 /** Map API story item sang format publication cho PublicationList / PublicationDetailModal */
 function mapStoryToPublication(item) {
     const statusApi = (item.status ?? item.Status ?? '').toUpperCase();
@@ -76,7 +90,7 @@ function mapStoryToPublication(item) {
         authorId: item.authorId ?? item.AuthorId ?? null,
         type: 'new_story',
         status,
-        submittedAt: item.createdAt ?? item.CreatedAt ?? item.updatedAt ?? item.UpdatedAt ?? null,
+        submittedAt: pickSubmittedAtFromApi(item),
         reviewedAt: null,
         reviewedBy: null,
         rejectionReason: item.rejectionReason ?? item.RejectionReason ?? null,
@@ -299,7 +313,7 @@ function mapPendingStoryToItem(s) {
         author: extractAuthorName(s),
         authorId: extractAuthorId(s),
         status,
-        submittedAt: s.createdAt ?? s.CreatedAt ?? s.updatedAt ?? s.UpdatedAt ?? null,
+        submittedAt: pickSubmittedAtFromApi(s),
         totalChapters: s.totalChapters ?? s.TotalChapters ?? 0,
         categories: categoryNamesArr,
         description: s.summary ?? s.Summary ?? '',
@@ -335,7 +349,7 @@ function mapReviewedChapterToItem(c) {
         chapterTitle: c.title ?? c.Title ?? '',
         orderIndex: c.orderIndex ?? c.OrderIndex ?? 0,
         status: statusMap[statusApi] ?? 'rejected',
-        submittedAt: c.createdAt ?? c.CreatedAt ?? null,
+        submittedAt: pickSubmittedAtFromApi(c),
         wordCount: c.wordCount ?? c.WordCount ?? 0,
         rejectionReason: c.rejectionReason ?? c.RejectionReason ?? null,
         rejectedAt: c.rejectedAt ?? c.RejectedAt ?? null,
@@ -389,7 +403,7 @@ function mapPendingChapterToItem(c) {
         author: null,
         authorId: null,
         status: 'pending',
-        submittedAt: c.createdAt ?? c.CreatedAt ?? null,
+        submittedAt: pickSubmittedAtFromApi(c),
         totalChapters: null,
         categories: [],
         wordCount: c.wordCount ?? c.WordCount ?? 0,

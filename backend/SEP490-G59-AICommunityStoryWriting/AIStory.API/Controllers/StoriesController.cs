@@ -419,6 +419,8 @@ namespace AIStory.API.Controllers
                     return NotFound(new { message = "Story not found." });
                 if (!string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
                     return BadRequest(new { message = "Chỉ có thể theo dõi truyện đã xuất bản (PUBLISHED)." });
+                if (story.author_id.HasValue && story.author_id.Value == userId.Value)
+                    return BadRequest(new { message = "Không thể theo dõi truyện của chính bạn." });
                 UserLibraryDAO.Follow(userId.Value, id);
                 return Ok(new { following = true, message = "Đã theo dõi truyện." });
             }

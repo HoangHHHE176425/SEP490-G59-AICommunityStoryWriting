@@ -181,10 +181,24 @@ namespace Services.Implementations
                 : await _authorPolicyAcceptanceRepo.GetAcceptanceAsync(userId, activePolicy.id);
             var hasAcceptedActivePolicy = activePolicy != null && IsAcceptanceValidForPolicy(acceptance, activePolicy);
 
+            var activeAiPolicy = await _policyRepo.GetActivePolicyByTypeAsync("AI");
+            var aiAcceptance = activeAiPolicy == null
+                ? null
+                : await _authorPolicyAcceptanceRepo.GetAcceptanceAsync(userId, activeAiPolicy.id);
+            var hasAcceptedActiveAiPolicy = activeAiPolicy != null && IsAcceptanceValidForPolicy(aiAcceptance, activeAiPolicy);
+
             var isAuthor = role == "AUTHOR";
             var missingRequirements = isAuthor
                 ? new List<string>()
-                : GetAuthorMissingRequirements(user, role, activePolicy != null);
+                : GetAuthorMissingRequirements(user, role, activePolicy != null, activeAiPolicy != null);
+
+            if (!isAuthor && role == "USER")
+            {
+                if (activePolicy != null && !hasAcceptedActivePolicy)
+                    missingRequirements.Add("Chưa chấp nhận điều khoản tác giả đang hiệu lực.");
+                if (activeAiPolicy != null && !hasAcceptedActiveAiPolicy)
+                    missingRequirements.Add("Chưa chấp nhận điều khoản AI đang hiệu lực.");
+            }
 
             return new AuthorOnboardingStatusResponse
             {
@@ -195,6 +209,11 @@ namespace Services.Implementations
                 ActiveAuthorPolicyVersion = activePolicy?.version,
                 HasAcceptedActivePolicy = hasAcceptedActivePolicy,
                 AcceptedAt = hasAcceptedActivePolicy ? acceptance?.accepted_at : null,
+                HasActiveAiPolicy = activeAiPolicy != null,
+                ActiveAiPolicyId = activeAiPolicy?.id,
+                ActiveAiPolicyVersion = activeAiPolicy?.version,
+                HasAcceptedActiveAiPolicy = hasAcceptedActiveAiPolicy,
+                AcceptedAiAt = hasAcceptedActiveAiPolicy ? aiAcceptance?.accepted_at : null,
                 CanBecomeAuthor = !isAuthor && missingRequirements.Count == 0,
                 MissingRequirements = missingRequirements
             };
@@ -217,48 +236,33 @@ namespace Services.Implementations
                 throw new Exception("Hiện chưa có điều khoản tác giả đang hiệu lực.");
             }
 
-            var acceptance = await _authorPolicyAcceptanceRepo.GetAcceptanceAsync(userId, activePolicy.id);
+            var activeAiPolicy = await _policyRepo.GetActivePolicyByTypeAsync("AI");
+            if (activeAiPolicy == null)
+            {
+                throw new Exception("Hiện chưa có điều khoản AI đang hiệu lực.");
+            }
+
+            var authorAcceptance = await _authorPolicyAcceptanceRepo.GetAcceptanceAsync(userId, activePolicy.id);
+            var aiAcceptance = await _authorPolicyAcceptanceRepo.GetAcceptanceAsync(userId, activeAiPolicy.id);
+            var hasAcceptedAuthor = IsAcceptanceValidForPolicy(authorAcceptance, activePolicy);
+            var hasAcceptedAi = IsAcceptanceValidForPolicy(aiAcceptance, activeAiPolicy);
+
             var missingRequirements = role == "AUTHOR"
                 ? new List<string>()
-                : GetAuthorMissingRequirements(user, role, hasActiveAuthorPolicy: true);
+                : GetAuthorMissingRequirements(user, role, hasActiveAuthorPolicy: true, hasActiveAiPolicy: true);
 
             if (missingRequirements.Count > 0)
             {
                 throw new Exception("Chưa đủ điều kiện trở thành tác giả: " + string.Join("; ", missingRequirements));
             }
 
-            var acceptedNow = false;
-            var acceptedAt = acceptance?.accepted_at ?? DateTime.UtcNow;
-            var hasAcceptedCurrent = IsAcceptanceValidForPolicy(acceptance, activePolicy);
-            if (!hasAcceptedCurrent)
+            if (!hasAcceptedAuthor || !hasAcceptedAi)
             {
-                acceptedNow = true;
-                acceptedAt = DateTime.UtcNow;
-
-                if (acceptance != null)
-                {
-                    acceptance.accepted_at = acceptedAt;
-                    acceptance.ip_address = ipAddress;
-                    acceptance.user_agent = userAgent;
-                    acceptance.accepted_for = "AUTHOR";
-                    await _authorPolicyAcceptanceRepo.UpdateAcceptanceAsync(acceptance);
-                }
-                else
-                {
-                    var row = new author_policy_acceptances
-                    {
-                        id = Guid.NewGuid(),
-                        user_id = userId,
-                        policy_id = activePolicy.id,
-                        accepted_at = acceptedAt,
-                        ip_address = ipAddress,
-                        user_agent = userAgent,
-                        accepted_for = "AUTHOR"
-                    };
-
-                    await _authorPolicyAcceptanceRepo.AddAcceptanceAsync(row);
-                }
+                throw new Exception(
+                    "Bạn cần chấp nhận đủ điều khoản tác giả và điều khoản AI đang hiệu lực (qua nút chấp nhận trên trang policy) trước khi đăng ký tác giả.");
             }
+
+            var acceptedAt = authorAcceptance?.accepted_at ?? DateTime.UtcNow;
 
             if (role != "AUTHOR")
             {
@@ -281,7 +285,7 @@ namespace Services.Implementations
                 AccessToken = _jwtHelper.GenerateToken(user),
                 Role = NormalizeRole(user.role),
                 PolicyId = activePolicy.id,
-                AcceptedPolicyNow = acceptedNow,
+                AcceptedPolicyNow = false,
                 AcceptedAt = acceptedAt
             };
         }
@@ -296,7 +300,8 @@ namespace Services.Implementations
         private static List<string> GetAuthorMissingRequirements(
             users user,
             string normalizedRole,
-            bool hasActiveAuthorPolicy)
+            bool hasActiveAuthorPolicy,
+            bool hasActiveAiPolicy)
         {
             var missing = new List<string>();
 
@@ -320,6 +325,9 @@ namespace Services.Implementations
 
             if (!hasActiveAuthorPolicy)
                 missing.Add("Chưa có điều khoản tác giả đang hiệu lực.");
+
+            if (!hasActiveAiPolicy)
+                missing.Add("Chưa có điều khoản AI đang hiệu lực.");
 
             return missing;
         }

@@ -9,7 +9,11 @@ import {
     markAllNotificationsAsRead,
     markNotificationAsRead,
 } from '../../api/notification/notificationApi';
-import { normalizeNotificationTo } from '../../utils/notificationLink';
+import {
+    resolveNotificationTarget,
+    shouldNavigateNotificationOnRowClick,
+    shouldShowOpenRelatedPageButton,
+} from '../../utils/notificationLink';
 
 const VIOLATION_NOTIFICATION_TYPES = new Set([
     'STORY_REPORTED_TO_AUTHOR',
@@ -176,7 +180,7 @@ export default function NotificationListPage() {
     const handleOpenNotification = async (n) => {
         const id = n?.id;
         const isRead = n?.isRead ?? false;
-        const target = normalizeNotificationTo(n?.linkUrl);
+        const target = resolveNotificationTarget(n);
         if (id && !isRead) {
             try {
                 await markNotificationAsRead(id);
@@ -186,6 +190,10 @@ export default function NotificationListPage() {
             } catch {
                 // best-effort
             }
+        }
+        if (shouldNavigateNotificationOnRowClick(n)) {
+            navigate(target);
+            return;
         }
         setSelectedNotification({
             ...n,
@@ -363,13 +371,15 @@ export default function NotificationListPage() {
                             >
                                 Đóng
                             </button>
-                            <button
-                                type="button"
-                                onClick={handleNavigateFromPopup}
-                                className="rounded-full bg-primary px-4 py-1.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
-                            >
-                                Mở trang liên quan
-                            </button>
+                            {shouldShowOpenRelatedPageButton(selectedNotification) ? (
+                                <button
+                                    type="button"
+                                    onClick={handleNavigateFromPopup}
+                                    className="rounded-full bg-primary px-4 py-1.5 text-sm font-semibold text-white hover:bg-primary/90 transition-colors"
+                                >
+                                    Mở trang liên quan
+                                </button>
+                            ) : null}
                         </div>
                     </div>
                 </div>

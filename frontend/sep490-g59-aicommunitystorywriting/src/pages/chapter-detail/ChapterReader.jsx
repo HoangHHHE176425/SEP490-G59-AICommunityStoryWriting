@@ -39,6 +39,29 @@ export function ChapterReader({ onBack }) {
     const urlStoryId = searchParams.get('storyId');
     const urlChapterId = searchParams.get('chapterId');
 
+    useEffect(() => {
+        if (!urlChapterId || urlStoryId) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const ch = await getChapterById(urlChapterId);
+                if (cancelled) return;
+                const sid = ch?.storyId ?? ch?.StoryId;
+                if (sid) {
+                    navigate(
+                        `/chapter?storyId=${encodeURIComponent(sid)}&chapterId=${encodeURIComponent(urlChapterId)}`,
+                        { replace: true }
+                    );
+                }
+            } catch {
+                // ignore
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [urlChapterId, urlStoryId, navigate]);
+
     // Chưa đăng nhập thì không gọi các API có `[Authorize]` (tránh 401 + trang lỗi).
     useEffect(() => {
         if (!urlStoryId || !urlChapterId) return;
