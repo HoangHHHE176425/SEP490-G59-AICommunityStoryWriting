@@ -1,6 +1,6 @@
 import { FileText, CheckCircle, XCircle, Eye, Pencil, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react';
 
-const TYPE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', AI: 'AI', DEFAULT: 'Mặc định (cũ)' };
+const TYPE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', AI: 'AI' };
 
 function formatDate(value) {
     if (!value) return '—';
