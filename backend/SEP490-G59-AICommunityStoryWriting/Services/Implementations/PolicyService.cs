@@ -54,8 +54,8 @@ namespace Services.Implementations
             if (policy == null) throw new Exception("Policy not found.");
             if (policy.is_active != true) throw new Exception("Policy is not active.");
             var policyType = (policy.type ?? "").Trim().ToUpperInvariant();
-            if (policyType != "AUTHOR" && policyType != "AI")
-                throw new Exception("Chỉ có thể chấp nhận policy loại AUTHOR hoặc AI trong luồng đăng ký tác giả.");
+            if (policyType != "AUTHOR")
+                throw new Exception("Chỉ có thể chấp nhận policy loại AUTHOR trong luồng đăng ký tác giả.");
 
             var existing = await _acceptRepo.GetAcceptanceAsync(userId, policyId);
             var hasAcceptedCurrent = IsAcceptanceValidForPolicy(existing, policy);

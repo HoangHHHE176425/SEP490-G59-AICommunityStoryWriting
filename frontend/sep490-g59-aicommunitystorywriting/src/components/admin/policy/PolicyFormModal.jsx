@@ -1,18 +1,13 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 
-const TYPE_OPTIONS_BASE = [
+const TYPE_OPTIONS = [
     { value: 'USER', label: 'Người dùng' },
     { value: 'AUTHOR', label: 'Tác giả' },
     { value: 'AI', label: 'AI' },
 ];
 
 export function PolicyFormModal({ policy, onClose, onSave, saving }) {
-    const typeOptions = useMemo(() => {
-        if (policy?.type === 'DEFAULT')
-            return [...TYPE_OPTIONS_BASE, { value: 'DEFAULT', label: 'Mặc định (cũ — chọn loại khác để lưu)' }];
-        return TYPE_OPTIONS_BASE;
-    }, [policy]);
     const [type, setType] = useState('USER');
     const [version, setVersion] = useState('');
     const [content, setContent] = useState('');
@@ -22,7 +17,7 @@ export function PolicyFormModal({ policy, onClose, onSave, saving }) {
     useEffect(() => {
         if (policy) {
             queueMicrotask(() => {
-                setType(policy.type || 'USER');
+                setType(policy.type === 'DEFAULT' ? 'USER' : (policy.type || 'USER'));
                 setVersion(policy.version || '');
                 setContent(policy.content || '');
                 setIsActive(!!policy.isActive);
@@ -68,7 +63,7 @@ export function PolicyFormModal({ policy, onClose, onSave, saving }) {
                                 className="w-full px-4 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                                 required
                             >
-                                {typeOptions.map((opt) => (
+                                {TYPE_OPTIONS.map((opt) => (
                                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                                 ))}
                             </select>
