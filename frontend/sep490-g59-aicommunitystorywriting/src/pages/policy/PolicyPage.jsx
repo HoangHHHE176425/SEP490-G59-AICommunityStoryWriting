@@ -19,28 +19,29 @@ export default function PolicyPage() {
 
     const type = useMemo(() => {
         const t = (searchParams.get('type') ?? 'USER').trim().toUpperCase();
-        if (t === 'DEFAULT') return 'USER';
-        return t || 'USER';
+        if (!t || t === 'DEFAULT') return 'USER';
+        return t;
     }, [searchParams]);
-
-    useEffect(() => {
-        const raw = (searchParams.get('type') ?? '').trim().toUpperCase();
-        if (raw !== 'DEFAULT') return;
-        const next = new URLSearchParams(searchParams);
-        next.set('type', 'USER');
-        setSearchParams(next, { replace: true });
-    }, [searchParams, setSearchParams]);
 
     const [policy, setPolicy] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [onboarding, setOnboarding] = useState(null);
     const [authorPolicyStatus, setAuthorPolicyStatus] = useState(null);
-    const [aiPolicyStatus, setAiPolicyStatus] = useState(null);
     const [authorFlowLoading, setAuthorFlowLoading] = useState(false);
     const [submitError, setSubmitError] = useState('');
     const [submitSuccess, setSubmitSuccess] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const [hasAcknowledgedAuthorPolicyRead, setHasAcknowledgedAuthorPolicyRead] = useState(false);
+
+    useEffect(() => {
+        const raw = (searchParams.get('type') ?? '').trim().toUpperCase();
+        if (raw === 'DEFAULT') {
+            const next = new URLSearchParams(searchParams);
+            next.set('type', 'USER');
+            setSearchParams(next, { replace: true });
+        }
+    }, [searchParams, setSearchParams]);
 
     useEffect(() => {
         let alive = true;
@@ -78,7 +79,6 @@ export default function PolicyPage() {
         if ((!fromBecomeAuthor && !fromResign) || !isAuthenticated) {
             setOnboarding(null);
             setAuthorPolicyStatus(null);
-            setAiPolicyStatus(null);
             return;
         }
 
@@ -91,24 +91,14 @@ export default function PolicyPage() {
             ? Promise.all([
                 getAuthorOnboardingStatus(),
                 getMyAuthorPolicyStatus('AUTHOR'),
-                getMyAuthorPolicyStatus('AI'),
-            ]).then(([onboardingData, authorStatus, aiStatus]) => ({
-                onboardingData,
-                authorStatus,
-                aiStatus,
-            }))
-            : getMyAuthorPolicyStatus('AUTHOR').then((authorStatus) => ({
-                onboardingData: null,
-                authorStatus,
-                aiStatus: null,
-            }));
+            ]).then(([onboardingData, authorStatus]) => ({ onboardingData, authorStatus }))
+            : getMyAuthorPolicyStatus('AUTHOR').then((authorStatus) => ({ onboardingData: null, authorStatus }));
 
         loadStatus
-            .then(({ onboardingData, authorStatus, aiStatus }) => {
+            .then(({ onboardingData, authorStatus }) => {
                 if (!alive) return;
                 setOnboarding(onboardingData);
                 setAuthorPolicyStatus(authorStatus);
-                setAiPolicyStatus(aiStatus);
             })
             .catch((err) => {
                 if (!alive) return;
@@ -128,85 +118,55 @@ export default function PolicyPage() {
         };
     }, [fromBecomeAuthor, fromResign, isAuthenticated]);
 
-    const missingRequirements = onboarding?.missingRequirements ?? [];
+    const missingRequirements = useMemo(() => {
+        const raw = onboarding?.missingRequirements ?? [];
+        return raw.filter(
+            (item) =>
+                typeof item === 'string' &&
+                !/\bAI\b|điều khoản\s+AI|policy\s+AI/i.test(item)
+        );
+    }, [onboarding?.missingRequirements]);
+
+    const nonPolicyMissingRequirements = useMemo(
+        () =>
+            missingRequirements.filter(
+                (item) => typeof item === 'string' && !/điều khoản tác giả/i.test(item)
+            ),
+        [missingRequirements]
+    );
+
+    const upgradeStatusLabel = useMemo(() => {
+        if (onboarding?.isAuthor) return 'Bạn đã là tác giả';
+        if (onboarding?.canBecomeAuthor) return 'Đủ điều kiện đăng ký';
+        if (
+            missingRequirements.length > 0 &&
+            nonPolicyMissingRequirements.length === 0
+        ) {
+            return 'Đủ điều kiện hồ sơ — ký policy khi đăng ký';
+        }
+        return 'Chưa đủ điều kiện';
+    }, [onboarding?.isAuthor, onboarding?.canBecomeAuthor, missingRequirements, nonPolicyMissingRequirements]);
+
+    const policyIdForAuthorAccept = useMemo(() => {
+        const fromOnboarding = onboarding?.activeAuthorPolicyId;
+        if (fromOnboarding) return fromOnboarding;
+        const policyType = (policy?.type ?? type ?? '').toString().trim().toUpperCase();
+        if (policyType === 'AUTHOR' && policy?.id) return policy.id;
+        return null;
+    }, [onboarding?.activeAuthorPolicyId, policy?.id, policy?.type, type]);
+
     const canSubmitBecomeAuthor =
         !!isAuthenticated &&
-        !!policy &&
+        (!!policy || !!onboarding?.activeAuthorPolicyId) &&
         !loading &&
         !authorFlowLoading &&
-        (onboarding?.isAuthor || onboarding?.canBecomeAuthor);
+        (onboarding?.isAuthor ||
+            (hasAcknowledgedAuthorPolicyRead && nonPolicyMissingRequirements.length === 0));
 
     const handleSwitchType = (value) => {
         const nextParams = new URLSearchParams(searchParams);
         nextParams.set('type', value);
         setSearchParams(nextParams);
-    };
-
-    const refreshAuthorFlowStatus = async () => {
-        const [onboardingData, authorStatus, aiStatus] = await Promise.all([
-            getAuthorOnboardingStatus(),
-            getMyAuthorPolicyStatus('AUTHOR'),
-            getMyAuthorPolicyStatus('AI'),
-        ]);
-        setOnboarding(onboardingData);
-        setAuthorPolicyStatus(authorStatus);
-        setAiPolicyStatus(aiStatus);
-    };
-
-    const handleAcceptAuthorPolicyClick = async () => {
-        if (!isAuthenticated) {
-            navigate('/login');
-            return;
-        }
-        const policyId = onboarding?.activeAuthorPolicyId ?? authorPolicyStatus?.policy?.id;
-        if (!policyId) {
-            setSubmitError('Không tìm thấy policy tác giả đang hiệu lực để chấp nhận.');
-            return;
-        }
-        setSubmitting(true);
-        setSubmitError('');
-        setSubmitSuccess('');
-        const acceptRes = await acceptAuthorPolicy(policyId);
-        if (!acceptRes?.success) {
-            setSubmitError(acceptRes?.message || 'Không thể chấp nhận policy tác giả.');
-            setSubmitting(false);
-            return;
-        }
-        try {
-            await refreshAuthorFlowStatus();
-            setSubmitSuccess('Đã ghi nhận chấp nhận policy tác giả.');
-        } catch {
-            setSubmitError('Đã chấp nhận nhưng không tải lại trạng thái; vui lòng tải lại trang.');
-        }
-        setSubmitting(false);
-    };
-
-    const handleAcceptAiPolicyClick = async () => {
-        if (!isAuthenticated) {
-            navigate('/login');
-            return;
-        }
-        const policyId = onboarding?.activeAiPolicyId ?? aiPolicyStatus?.policy?.id;
-        if (!policyId) {
-            setSubmitError('Không tìm thấy policy AI đang hiệu lực để chấp nhận.');
-            return;
-        }
-        setSubmitting(true);
-        setSubmitError('');
-        setSubmitSuccess('');
-        const acceptRes = await acceptAuthorPolicy(policyId);
-        if (!acceptRes?.success) {
-            setSubmitError(acceptRes?.message || 'Không thể chấp nhận policy AI.');
-            setSubmitting(false);
-            return;
-        }
-        try {
-            await refreshAuthorFlowStatus();
-            setSubmitSuccess('Đã ghi nhận chấp nhận policy AI.');
-        } catch {
-            setSubmitError('Đã chấp nhận nhưng không tải lại trạng thái; vui lòng tải lại trang.');
-        }
-        setSubmitting(false);
     };
 
     const handleBecomeAuthor = async () => {
@@ -224,7 +184,7 @@ export default function PolicyPage() {
         setSubmitError('');
         setSubmitSuccess('');
 
-        const result = await becomeAuthor();
+        const result = await becomeAuthor(policyIdForAuthorAccept);
         if (!result?.success) {
             setSubmitError(result?.message || 'Không thể đăng ký làm tác giả.');
             setSubmitting(false);
@@ -234,7 +194,12 @@ export default function PolicyPage() {
         setSubmitSuccess('Đăng ký tác giả thành công. Hệ thống đã cập nhật quyền và token mới cho bạn.');
 
         try {
-            await refreshAuthorFlowStatus();
+            const [onboardingData, authorStatus] = await Promise.all([
+                getAuthorOnboardingStatus(),
+                getMyAuthorPolicyStatus('AUTHOR'),
+            ]);
+            setOnboarding(onboardingData);
+            setAuthorPolicyStatus(authorStatus);
         } catch {
             // Ignore refresh errors here because the role upgrade already succeeded.
         }
@@ -280,6 +245,10 @@ export default function PolicyPage() {
         setSubmitSuccess('Bạn đã ký lại policy tác giả thành công.');
         setSubmitting(false);
         setTimeout(() => navigate(nextPath), 700);
+    };
+
+    const handleAcknowledgeAuthorPolicyReadOnly = () => {
+        setHasAcknowledgedAuthorPolicyRead(true);
     };
 
     return (
@@ -398,7 +367,7 @@ export default function PolicyPage() {
                                             Trạng thái đăng ký tác giả
                                         </h3>
                                         <p className="text-sm text-slate-600 dark:text-slate-300">
-                                            Bạn phải đọc và chấp nhận cả policy Tác giả và policy AI đang hiệu lực, sau đó nhấn đăng ký tác giả.
+                                            Hoàn tất các điều kiện dưới đây rồi nhấn đồng ý để nâng tài khoản từ người dùng lên tác giả.
                                         </p>
                                     </div>
                                 </div>
@@ -432,50 +401,17 @@ export default function PolicyPage() {
                                                 </p>
                                             </div>
 
-                                            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 md:col-span-2">
-                                                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-                                                    Chấp nhận policy (bắt buộc)
+                                            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4">
+                                                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                                                    Đã chấp nhận policy
                                                 </p>
-                                                <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 text-sm">
-                                                    <div className="flex-1 min-w-[10rem] rounded-lg border border-slate-100 dark:border-slate-700 p-3">
-                                                        <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold mb-1">Tác giả</p>
-                                                        <p className="font-semibold text-slate-900 dark:text-white">
-                                                            {onboarding?.hasAcceptedActivePolicy ? 'Đã chấp nhận' : 'Chưa chấp nhận'}
-                                                        </p>
-                                                    </div>
-                                                    <div className="flex-1 min-w-[10rem] rounded-lg border border-slate-100 dark:border-slate-700 p-3">
-                                                        <p className="text-slate-500 dark:text-slate-400 text-xs font-semibold mb-1">AI</p>
-                                                        <p className="font-semibold text-slate-900 dark:text-white">
-                                                            {onboarding?.hasAcceptedActiveAiPolicy ? 'Đã chấp nhận' : 'Chưa chấp nhận'}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                <div className="mt-3 flex flex-col sm:flex-row gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleAcceptAuthorPolicyClick}
-                                                        disabled={
-                                                            submitting ||
-                                                            onboarding?.hasAcceptedActivePolicy ||
-                                                            !onboarding?.activeAuthorPolicyId
-                                                        }
-                                                        className="flex-1 px-4 py-2 rounded-lg border-2 border-emerald-500 text-emerald-700 dark:text-emerald-300 font-semibold text-sm hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        Chấp nhận policy tác giả
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={handleAcceptAiPolicyClick}
-                                                        disabled={
-                                                            submitting ||
-                                                            onboarding?.hasAcceptedActiveAiPolicy ||
-                                                            !onboarding?.activeAiPolicyId
-                                                        }
-                                                        className="flex-1 px-4 py-2 rounded-lg border-2 border-emerald-500 text-emerald-700 dark:text-emerald-300 font-semibold text-sm hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
-                                                    >
-                                                        Chấp nhận policy AI
-                                                    </button>
-                                                </div>
+                                                <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                                    {authorPolicyStatus?.hasAccepted || onboarding?.hasAcceptedActivePolicy
+                                                        ? 'Đã chấp nhận'
+                                                        : hasAcknowledgedAuthorPolicyRead
+                                                          ? 'Đã chấp thuận'
+                                                          : 'Chưa chấp nhận'}
+                                                </p>
                                             </div>
 
                                             <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4">
@@ -483,9 +419,29 @@ export default function PolicyPage() {
                                                     Trạng thái nâng cấp
                                                 </p>
                                                 <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                                    {onboarding?.isAuthor ? 'Bạn đã là tác giả' : onboarding?.canBecomeAuthor ? 'Đủ điều kiện đăng ký' : 'Chưa đủ điều kiện'}
+                                                    {upgradeStatusLabel}
                                                 </p>
                                             </div>
+                                        </div>
+
+                                        <div className="flex justify-end pt-1">
+                                            {hasAcknowledgedAuthorPolicyRead ? (
+                                                <div
+                                                    className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300"
+                                                    aria-live="polite"
+                                                >
+                                                    <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden />
+                                                    <span>Đã xác nhận</span>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    type="button"
+                                                    onClick={handleAcknowledgeAuthorPolicyReadOnly}
+                                                    className="max-w-full text-left text-xs sm:text-sm px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-emerald-400 hover:bg-emerald-50/60 dark:hover:bg-emerald-950/20 transition-colors"
+                                                >
+                                                    Tôi đã đọc Policy tác giả và Policy AI
+                                                </button>
+                                            )}
                                         </div>
 
                                         {missingRequirements.length > 0 && (
@@ -561,7 +517,7 @@ export default function PolicyPage() {
                             </div>
                         )}
 
-                        {fromBecomeAuthor && (
+                        {fromBecomeAuthor && (onboarding?.isAuthor || hasAcknowledgedAuthorPolicyRead) && (
                             <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-700">
                                 <div className="flex flex-col sm:flex-row gap-3">
                                     <button

@@ -70,8 +70,6 @@ namespace Services.Implementations
         public async Task<AdminPolicyDetailDto> CreateAsync(AdminCreatePolicyRequest request)
         {
             var type = request.Type.Trim().ToUpperInvariant();
-            if (string.Equals(type, "DEFAULT", StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("Loại policy DEFAULT không còn được hỗ trợ. Chỉ dùng USER, AUTHOR hoặc AI.");
             var version = request.Version.Trim();
 
             var policy = new system_policies
@@ -108,8 +106,6 @@ namespace Services.Implementations
             var prevContent = policy.content ?? string.Empty;
             var prevRequireResign = policy.require_resign ?? false;
             var type = request.Type.Trim().ToUpperInvariant();
-            if (string.Equals(type, "DEFAULT", StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("Loại policy DEFAULT không còn được hỗ trợ. Chọn USER, AUTHOR hoặc AI.");
             policy.type = type;
             policy.version = request.Version.Trim();
             policy.content = request.Content;
@@ -176,9 +172,6 @@ namespace Services.Implementations
         {
             var policy = await _policyRepo.GetPolicyByIdAsync(id);
             if (policy == null) return false;
-
-            if (string.Equals(policy.type, "DEFAULT", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Loại DEFAULT đã bỏ; không thể kích hoạt policy này. Đổi loại hoặc xóa bản ghi.");
 
             policy.is_active = true;
             // Không reset activated_at khi bật lại cùng policy đã từng active,
